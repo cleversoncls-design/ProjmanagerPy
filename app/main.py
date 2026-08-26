@@ -8,14 +8,30 @@ import os
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, select
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import Base, Project, Task, Timesheet, User, UserRole, UserStatus, Resource
 from .services import project_financials
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./controle_projetos.db")
+RAW_DATABASE_URL = os.getenv("DATABASE_URL")
+if RAW_DATABASE_URL:
+    DATABASE_URL = RAW_DATABASE_URL
+elif os.getenv("POSTGRES_PASSWORD"):
+    # URL.create escapa a senha corretamente; '@', ':', '/', '#', etc. não quebram o hostname.
+    DATABASE_URL = URL.create(
+        "postgresql+psycopg",
+        username=os.getenv("POSTGRES_USER", "projmanager"),
+        password=os.environ["POSTGRES_PASSWORD"],
+        host=os.getenv("POSTGRES_HOST", "db"),
+        port=int(os.getenv("POSTGRES_PORT", "5432")),
+        database=os.getenv("POSTGRES_DB", "projmanager"),
+    )
+else:
+    DATABASE_URL = "sqlite:///./controle_projetos.db"
+
 engine_kwargs = {"pool_pre_ping": True}
-if DATABASE_URL.startswith("sqlite"):
+if str(DATABASE_URL).startswith("sqlite"):
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)

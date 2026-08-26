@@ -27,7 +27,16 @@ docker compose up -d --build
 docker compose ps
 ```
 
-A API ficará disponível em `http://localhost:8000` e a documentação interativa em `http://localhost:8000/docs`. A aplicação espera o PostgreSQL passar no healthcheck antes de iniciar. Os dados são persistidos no volume Docker `postgres_data`, portanto a remoção dos containers não remove o banco.
+A API ficará disponível em `http://localhost:3035` e a documentação interativa em `http://localhost:3035/docs`. A aplicação espera o PostgreSQL passar no healthcheck antes de iniciar. Os dados são persistidos no volume Docker `postgres_data`, portanto a remoção dos containers não remove o banco. O padrão configurado para acesso externo é a porta **3035**; a porta interna do container continua sendo `8000`. A aplicação recebe as credenciais do PostgreSQL em variáveis separadas e monta a URL com SQLAlchemy, permitindo senhas com caracteres como `@`, `:`, `/` e `#`.
+
+Para aplicar a configuração automaticamente, tornar o processo repetível e recriar os serviços, execute:
+
+```bash
+chmod +x scripts/configurar_porta_3035.sh
+./scripts/configurar_porta_3035.sh
+```
+
+O script cria `.env` quando necessário, valida a senha do PostgreSQL, fixa `API_PORT=3035`, valida o Compose e executa o build. Na primeira execução, ele interrompe antes do `docker compose up` para que você possa trocar a senha padrão.
 
 Para acompanhar os logs ou parar a instalação:
 
