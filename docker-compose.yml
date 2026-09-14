@@ -14,7 +14,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-
   api:
     build: .
     container_name: projmanager-api
@@ -25,11 +24,21 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-projmanager}
       POSTGRES_USER: ${POSTGRES_USER:-projmanager}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:-change-this-secret-before-production}
+      JWT_TTL_MINUTES: ${JWT_TTL_MINUTES:-480}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://192.168.22.20:3036,http://localhost:3036}
     ports:
       - "${API_PORT:-3035}:8000"
     depends_on:
       db:
         condition: service_healthy
-
+  web:
+    build: ./frontend
+    container_name: projmanager-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3036}:80"
+    depends_on:
+      - api
 volumes:
   postgres_data:

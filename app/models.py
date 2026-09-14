@@ -46,6 +46,11 @@ class ProjectStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class ProjectCurrency(StrEnum):
+    USD = "USD"
+    PYG = "PYG"
+
+
 class DependencyType(StrEnum):
     FS = "FS"
     FF = "FF"
@@ -58,6 +63,19 @@ class TaskStatus(StrEnum):
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     DELAYED = "DELAYED"
+
+
+class TaskPriority(StrEnum):
+    LOW = "LOW"
+    MED = "MED"
+    HIGH = "HIGH"
+
+
+class TaskType(StrEnum):
+    IMPLEMENTATION = "IMPLEMENTATION"
+    DEVELOPMENT = "DEVELOPMENT"
+    USER_VALIDATION = "USER_VALIDATION"
+    MEETING = "MEETING"
 
 
 class TimesheetStatus(StrEnum):
@@ -139,6 +157,7 @@ class Project(Base):
     code: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[ProjectStatus] = mapped_column(nullable=False, default=ProjectStatus.PLANNING)
+    currency: Mapped[ProjectCurrency] = mapped_column(nullable=False, default=ProjectCurrency.USD)
     sold_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
@@ -156,6 +175,7 @@ class Baseline(Base):
     version_name: Mapped[str] = mapped_column(String(100), nullable=False)
     snapshot_data: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    tasks: Mapped[list[Task]] = relationship(back_populates="baseline")
 
 
 class Task(Base):
@@ -164,8 +184,12 @@ class Task(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     parent_task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
     wbs_code: Mapped[str] = mapped_column(String(50), nullable=False)
     estimated_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
+    duration_days: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    priority: Mapped[TaskPriority] = mapped_column(nullable=False, default=TaskPriority.MED)
+    task_type: Mapped[TaskType] = mapped_column(nullable=False, default=TaskType.IMPLEMENTATION)
     actual_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     planned_start_date: Mapped[date | None] = mapped_column(Date)
     planned_end_date: Mapped[date | None] = mapped_column(Date)
@@ -176,10 +200,13 @@ class Task(Base):
     is_critical_path: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_milestone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     progress_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+    observation: Mapped[str | None] = mapped_column(Text)
+    baseline_id: Mapped[str | None] = mapped_column(ForeignKey("baselines.id", ondelete="SET NULL"), index=True)
     status: Mapped[TaskStatus] = mapped_column(nullable=False, default=TaskStatus.NOT_STARTED)
     project: Mapped[Project] = relationship(back_populates="tasks")
     parent: Mapped[Task | None] = relationship(remote_side=[id], back_populates="children")
     children: Mapped[list[Task]] = relationship(back_populates="parent")
+    baseline: Mapped[Baseline | None] = relationship(back_populates="tasks")
     assignments: Mapped[list[TaskAssignment]] = relationship(back_populates="task", cascade="all, delete-orphan")
     timesheets: Mapped[list[Timesheet]] = relationship(back_populates="task", cascade="all, delete-orphan")
 
@@ -188,11 +215,14 @@ class Resource(Base):
     __tablename__ = "resources"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    calendar_id: Mapped[str | None] = mapped_column(ForeignKey("calendars.id", ondelete="SET NULL"), index=True)
     role_title: Mapped[str] = mapped_column(String(120), nullable=False)
     internal_cost_per_hour: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     billing_rate_per_hour: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     daily_capacity_hours: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=8)
     user: Mapped[User] = relationship(back_populates="resource")
+    calendar: Mapped[Calendar | None] = relationship(back_populates="resources")
+    assignments: Mapped[list[TaskAssignment]] = relationship(back_populates="resource", cascade="all, delete-orphan")
 
 
 class TaskAssignment(Base):
@@ -203,6 +233,7 @@ class TaskAssignment(Base):
     allocated_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     __table_args__ = (UniqueConstraint("task_id", "resource_id", name="uq_task_resource"),)
     task: Mapped[Task] = relationship(back_populates="assignments")
+    resource: Mapped[Resource] = relationship(back_populates="assignments")
 
 
 class Timesheet(Base):
@@ -234,6 +265,7 @@ class Calendar(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     working_days: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=lambda: [0, 1, 2, 3, 4])
     holidays: Mapped[list[Holiday]] = relationship(back_populates="calendar", cascade="all, delete-orphan")
+    resources: Mapped[list[Resource]] = relationship(back_populates="calendar")
 
 
 class Holiday(Base):

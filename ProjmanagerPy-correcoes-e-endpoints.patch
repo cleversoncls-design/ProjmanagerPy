@@ -1,0 +1,2173 @@
+From e265e2bd6faa77cbc70b461b49458a6ae33be996 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 14 Sep 2026 22:04:25 +0000
+Subject: [PATCH] Fix authorization bug and add full CRUD API for all domain
+ entities
+
+Fixes:
+- require_project_access: the write-restriction check for CLIENT_PM/
+  CLIENT_USER never triggered (it tested a role condition that was
+  already guaranteed false). Now CLIENT_USER is read-only and CLIENT_PM
+  can write within its own client scope.
+- project_financials: timesheet status filter compared against a string
+  literal instead of the TimesheetStatus enum.
+- Task.wbs_code now unique per project (uq_task_project_wbs).
+- Task.actual_hours is recalculated from approved timesheets whenever a
+  timesheet is approved/rejected (was previously always zero).
+- Added the scripts/configurar_porta_3035.sh referenced by the README
+  but missing from the repository.
+
+New endpoints (previously missing per-entity CRUD):
+- Clients, Users (bootstrap admin + demonstrative login), Projects,
+  Project intakes, Tasks/EAP (+ reschedule endpoint), task dependencies,
+  task assignments, Resources, Timesheets (list/approve/reject),
+  Project expenses, Calendars/Holidays, Risks, Change requests,
+  Baselines.
+
+Restructured app/main.py into app/db.py, app/deps.py, app/schemas.py,
+app/security.py and one router per resource under app/routers/.
+
+Added tests: authorization regression tests, service-layer regression
+tests for the two fixed bugs, and API-level integration tests covering
+the bootstrap/login/project/task/timesheet-approval flow and the
+CLIENT_USER write-block behavior.
+
+Note: this environment could not reach PyPI to install dependencies and
+run pytest (network egress restricted); all files pass python3 -m
+py_compile and were reviewed manually. Run `pip install -r
+requirements.txt && PYTHONPATH=. pytest -q` to execute the suite.
+---
+ README.md                        |  37 +++++-
+ app/db.py                        |  43 +++++++
+ app/deps.py                      |  58 +++++++++
+ app/main.py                      | 137 ++++++--------------
+ app/models.py                    |   3 +
+ app/routers/__init__.py          |   0
+ app/routers/baselines.py         |  70 ++++++++++
+ app/routers/calendars.py         |  57 +++++++++
+ app/routers/changes.py           |  70 ++++++++++
+ app/routers/clients.py           |  69 ++++++++++
+ app/routers/expenses.py          |  49 +++++++
+ app/routers/intakes.py           |  57 +++++++++
+ app/routers/projects.py          |  80 ++++++++++++
+ app/routers/resources.py         |  54 ++++++++
+ app/routers/risks.py             |  64 ++++++++++
+ app/routers/task_assignments.py  |  58 +++++++++
+ app/routers/task_dependencies.py |  82 ++++++++++++
+ app/routers/tasks.py             | 100 +++++++++++++++
+ app/routers/timesheets.py        |  93 ++++++++++++++
+ app/routers/users.py             |  96 ++++++++++++++
+ app/schemas.py                   | 213 +++++++++++++++++++++++++++++++
+ app/security.py                  |  30 +++++
+ app/services.py                  |  26 +++-
+ requirements.txt                 |   1 +
+ scripts/configurar_porta_3035.sh |  50 ++++++++
+ tests/conftest.py                |  31 +++++
+ tests/test_api.py                | 113 ++++++++++++++++
+ tests/test_authorization.py      |  58 +++++++++
+ tests/test_services.py           |  43 ++++++-
+ 29 files changed, 1733 insertions(+), 109 deletions(-)
+ create mode 100644 app/db.py
+ create mode 100644 app/deps.py
+ create mode 100644 app/routers/__init__.py
+ create mode 100644 app/routers/baselines.py
+ create mode 100644 app/routers/calendars.py
+ create mode 100644 app/routers/changes.py
+ create mode 100644 app/routers/clients.py
+ create mode 100644 app/routers/expenses.py
+ create mode 100644 app/routers/intakes.py
+ create mode 100644 app/routers/projects.py
+ create mode 100644 app/routers/resources.py
+ create mode 100644 app/routers/risks.py
+ create mode 100644 app/routers/task_assignments.py
+ create mode 100644 app/routers/task_dependencies.py
+ create mode 100644 app/routers/tasks.py
+ create mode 100644 app/routers/timesheets.py
+ create mode 100644 app/routers/users.py
+ create mode 100644 app/schemas.py
+ create mode 100644 app/security.py
+ create mode 100755 scripts/configurar_porta_3035.sh
+ create mode 100644 tests/conftest.py
+ create mode 100644 tests/test_api.py
+ create mode 100644 tests/test_authorization.py
+
+diff --git a/README.md b/README.md
+index b3e542e..39dec27 100644
+--- a/README.md
++++ b/README.md
+@@ -7,11 +7,38 @@ Base em **Python 3.12, FastAPI, SQLAlchemy 2 e PostgreSQL 16**, preparada para e
+ | Componente | Responsabilidade |
+ |---|---|
+ | `app/models.py` | ORM completo, enums, chaves estrangeiras, índices e restrições de unicidade. |
+-| `app/services.py` | Calendário de dias úteis, motor de cascata FS/SS/FF/SF e cálculo financeiro. |
+-| `app/main.py` | API FastAPI, conexão configurável e controle de escopo por perfil/client_id. |
++| `app/services.py` | Calendário de dias úteis, motor de cascata FS/SS/FF/SF, cálculo financeiro e recálculo de horas realizadas. |
++| `app/security.py` | Hash e verificação de senha (PBKDF2-HMAC-SHA256, biblioteca padrão). |
++| `app/db.py` | Conexão configurável (Postgres via variáveis de ambiente ou SQLite local) e `get_db`. |
++| `app/deps.py` | Autenticação por header, checagem de papel e controle de escopo por cliente. |
++| `app/schemas.py` | Modelos Pydantic de entrada para todos os recursos da API. |
++| `app/routers/` | Um módulo por recurso (clientes, usuários, projetos, tarefas, timesheets, riscos, mudanças, baselines etc.), incluídos em `app/main.py`. |
+ | `docker-compose.yml` | Serviços `api` e `db`, persistência PostgreSQL, healthcheck e reinício automático. |
+ | `Dockerfile` | Imagem reproduzível da API. |
+-| `tests/` | Testes de calendário, cascata e margem financeira. |
++| `scripts/configurar_porta_3035.sh` | Cria `.env`, valida a senha do PostgreSQL, fixa `API_PORT=3035` e builda os serviços. |
++| `tests/` | Testes de calendário, cascata, margem financeira, autorização e dos principais endpoints. |
++
++## Endpoints disponíveis
++
++| Recurso | Rotas |
++|---|---|
++| Autenticação | `POST /auth/login` |
++| Usuários | `POST /users` · `GET /users/me` · `GET /users` · `PATCH /users/{id}` |
++| Clientes | `POST /clients` · `GET /clients` · `GET /clients/{id}` · `PATCH /clients/{id}` |
++| Projetos | `POST /projects` · `GET /projects` · `GET /projects/{id}` · `PATCH /projects/{id}` |
++| Intake de projetos | `POST /project-intakes` · `GET /project-intakes` · `PATCH /project-intakes/{id}` |
++| Tarefas / EAP | `POST /projects/{id}/tasks` · `GET /projects/{id}/tasks` · `PATCH /tasks/{id}` · `POST /tasks/{id}/reschedule` |
++| Dependências entre tarefas | `POST /task-dependencies` · `GET /tasks/{id}/dependencies` · `DELETE /task-dependencies/{id}` |
++| Alocação de recursos | `POST /tasks/{id}/assignments` · `GET /tasks/{id}/assignments` · `DELETE /task-assignments/{id}` |
++| Recursos (consultores) | `POST /resources` · `GET /resources` · `PATCH /resources/{id}` |
++| Timesheets | `POST /timesheets` · `GET /timesheets` · `PATCH /timesheets/{id}/approve` · `PATCH /timesheets/{id}/reject` |
++| Despesas do projeto | `POST /projects/{id}/expenses` · `GET /projects/{id}/expenses` |
++| Calendários e feriados | `POST /calendars` · `GET /calendars` · `POST /calendars/{id}/holidays` · `GET /calendars/{id}/holidays` |
++| Riscos | `POST /projects/{id}/risks` · `GET /projects/{id}/risks` · `PATCH /risks/{id}` |
++| Mudanças de escopo | `POST /projects/{id}/change-requests` · `GET /projects/{id}/change-requests` · `PATCH /change-requests/{id}/approve` · `PATCH /change-requests/{id}/reject` |
++| Baselines | `POST /projects/{id}/baselines` · `GET /projects/{id}/baselines` · `GET /baselines/{id}` |
++
++A documentação interativa (`/docs`) lista o corpo esperado de cada rota. O primeiro usuário do sistema deve ser criado com papel `ADMIN` via `POST /users` sem header de autenticação (bootstrap); a partir daí, novos usuários só podem ser criados por um `ADMIN` autenticado.
+ 
+ ## Instalação com Docker e PostgreSQL
+ 
+@@ -70,7 +97,9 @@ O motor `reschedule_cascade` percorre dependências em profundidade, detecta cic
+ 
+ A função `project_financials` calcula o custo real como horas apontadas multiplicadas pelo custo interno do recurso, acrescidas das despesas do projeto, excluindo timesheets rejeitados. A margem é calculada como `sold_value - real_cost`.
+ 
+-Perfis `CLIENT_PM` e `CLIENT_USER` só acessam projetos cujo `client_id` seja igual ao seu próprio. Para esses perfis, a resposta omite `sold_value` e todos os dados de rentabilidade. O cabeçalho `X-User-Id` é um adaptador demonstrativo; antes de produção, substitua-o por JWT/OIDC com assinatura, expiração, rotação de chaves e auditoria.
++Perfis `CLIENT_PM` e `CLIENT_USER` só acessam projetos cujo `client_id` seja igual ao seu próprio. Para esses perfis, a resposta omite `sold_value` e todos os dados de rentabilidade. Dentro do escopo do próprio cliente, apenas `CLIENT_PM` pode escrever (criar tarefas, timesheets, riscos, mudanças); `CLIENT_USER` é somente leitura — essa regra estava com um bug em `require_project_access` que fazia a checagem de escrita nunca disparar, já corrigido. O cabeçalho `X-User-Id` é um adaptador demonstrativo; antes de produção, substitua-o por JWT/OIDC com assinatura, expiração, rotação de chaves e auditoria.
++
++`Task.actual_hours` é recalculado automaticamente a partir da soma dos timesheets **aprovados** da tarefa sempre que um lançamento é aprovado ou rejeitado (`PATCH /timesheets/{id}/approve` / `.../reject`); timesheets pendentes ou rejeitados não contam como horas realizadas. `wbs_code` agora é único por projeto (restrição `uq_task_project_wbs`), evitando códigos WBS duplicados dentro da mesma EAP.
+ 
+ ## Desenvolvimento sem Docker
+ 
+diff --git a/app/db.py b/app/db.py
+new file mode 100644
+index 0000000..e215979
+--- /dev/null
++++ b/app/db.py
+@@ -0,0 +1,43 @@
++from __future__ import annotations
++
++import os
++
++from sqlalchemy import create_engine
++from sqlalchemy.engine import URL
++from sqlalchemy.orm import Session, sessionmaker
++
++from .models import Base
++
++RAW_DATABASE_URL = os.getenv("DATABASE_URL")
++if RAW_DATABASE_URL:
++    DATABASE_URL = RAW_DATABASE_URL
++elif os.getenv("POSTGRES_PASSWORD"):
++    # URL.create escapa a senha corretamente; '@', ':', '/', '#', etc. não quebram o hostname.
++    DATABASE_URL = URL.create(
++        "postgresql+psycopg",
++        username=os.getenv("POSTGRES_USER", "projmanager"),
++        password=os.environ["POSTGRES_PASSWORD"],
++        host=os.getenv("POSTGRES_HOST", "db"),
++        port=int(os.getenv("POSTGRES_PORT", "5432")),
++        database=os.getenv("POSTGRES_DB", "projmanager"),
++    )
++else:
++    DATABASE_URL = "sqlite:///./controle_projetos.db"
++
++engine_kwargs = {"pool_pre_ping": True}
++if str(DATABASE_URL).startswith("sqlite"):
++    engine_kwargs["connect_args"] = {"check_same_thread": False}
++engine = create_engine(DATABASE_URL, **engine_kwargs)
++SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
++
++
++def init_db() -> None:
++    Base.metadata.create_all(engine)
++
++
++def get_db():
++    db: Session = SessionLocal()
++    try:
++        yield db
++    finally:
++        db.close()
+diff --git a/app/deps.py b/app/deps.py
+new file mode 100644
+index 0000000..05fb933
+--- /dev/null
++++ b/app/deps.py
+@@ -0,0 +1,58 @@
++from __future__ import annotations
++
++from typing import Annotated, Iterable
++
++from fastapi import Depends, Header, HTTPException, status
++from sqlalchemy.orm import Session
++
++from .db import get_db
++from .models import Project, User, UserRole, UserStatus
++
++EXTERNAL_ROLES = {UserRole.CLIENT_PM, UserRole.CLIENT_USER}
++INTERNAL_ROLES = {UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.CONSULTANT}
++
++
++def get_current_user(x_user_id: Annotated[str | None, Header()] = None, db: Session = Depends(get_db)) -> User:
++    # Em produção, substituir por validação de JWT/OIDC; o exemplo mantém a autorização explícita.
++    if not x_user_id:
++        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credencial ausente")
++    user = db.get(User, x_user_id)
++    if not user or user.status != UserStatus.ACTIVE:
++        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário inválido ou inativo")
++    return user
++
++
++def require_role(*roles: UserRole):
++    """Dependência que só libera o acesso para os papéis informados."""
++
++    allowed = set(roles)
++
++    def _check(user: User = Depends(get_current_user)) -> User:
++        if user.role not in allowed:
++            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Perfil sem permissão para esta ação")
++        return user
++
++    return _check
++
++
++def require_project_access(project: Project, user: User, write: bool = False) -> None:
++    """Controla o acesso de um usuário a um projeto específico.
++
++    - Perfis externos (CLIENT_PM/CLIENT_USER) só acessam projetos do próprio client_id.
++    - Dentro do escopo do cliente, apenas CLIENT_PM pode escrever; CLIENT_USER é
++      somente leitura. (Bug corrigido: a condição anterior nunca bloqueava
++      nada, pois testava "papel não está em {CLIENT_PM, CLIENT_USER}" logo
++      depois de já ter confirmado que o papel ESTÁ nesse conjunto.)
++    """
++    external = user.role in EXTERNAL_ROLES
++    if external and project.client_id != user.client_id:
++        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Projeto fora do escopo do cliente")
++    if write and user.role == UserRole.CLIENT_USER:
++        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Perfil sem permissão de escrita")
++
++
++def visible_client_ids(user: User) -> Iterable[str] | None:
++    """Retorna None quando o usuário pode ver todos os clientes, ou uma lista de 1 id quando é restrito."""
++    if user.role in EXTERNAL_ROLES:
++        return [user.client_id] if user.client_id else []
++    return None
+diff --git a/app/main.py b/app/main.py
+index 98b29c9..3a969cf 100644
+--- a/app/main.py
++++ b/app/main.py
+@@ -1,102 +1,39 @@
+ from __future__ import annotations
+ 
+-from datetime import date
+-from decimal import Decimal
+-from typing import Annotated
+-import os
+-
+-from fastapi import Depends, FastAPI, Header, HTTPException, status
+-from pydantic import BaseModel, Field
+-from sqlalchemy import create_engine, select
+-from sqlalchemy.engine import URL
+-from sqlalchemy.orm import Session, sessionmaker
+-
+-from .models import Base, Project, Task, Timesheet, User, UserRole, UserStatus, Resource
+-from .services import project_financials
+-
+-RAW_DATABASE_URL = os.getenv("DATABASE_URL")
+-if RAW_DATABASE_URL:
+-    DATABASE_URL = RAW_DATABASE_URL
+-elif os.getenv("POSTGRES_PASSWORD"):
+-    # URL.create escapa a senha corretamente; '@', ':', '/', '#', etc. não quebram o hostname.
+-    DATABASE_URL = URL.create(
+-        "postgresql+psycopg",
+-        username=os.getenv("POSTGRES_USER", "projmanager"),
+-        password=os.environ["POSTGRES_PASSWORD"],
+-        host=os.getenv("POSTGRES_HOST", "db"),
+-        port=int(os.getenv("POSTGRES_PORT", "5432")),
+-        database=os.getenv("POSTGRES_DB", "projmanager"),
+-    )
+-else:
+-    DATABASE_URL = "sqlite:///./controle_projetos.db"
+-
+-engine_kwargs = {"pool_pre_ping": True}
+-if str(DATABASE_URL).startswith("sqlite"):
+-    engine_kwargs["connect_args"] = {"check_same_thread": False}
+-engine = create_engine(DATABASE_URL, **engine_kwargs)
+-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+-Base.metadata.create_all(engine)
+-app = FastAPI(title="Controle de Projetos Corporativo", version="0.1.0")
+-
+-
+-def get_db():
+-    db = SessionLocal()
+-    try:
+-        yield db
+-    finally:
+-        db.close()
+-
+-
+-def get_current_user(x_user_id: Annotated[str | None, Header()] = None, db: Session = Depends(get_db)) -> User:
+-    # Em produção, substituir por validação de JWT/OIDC; o exemplo mantém a autorização explícita.
+-    if not x_user_id:
+-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credencial ausente")
+-    user = db.get(User, x_user_id)
+-    if not user or user.status != UserStatus.ACTIVE:
+-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário inválido ou inativo")
+-    return user
+-
+-
+-def require_project_access(project: Project, user: User, write: bool = False) -> None:
+-    external = user.role in {UserRole.CLIENT_PM, UserRole.CLIENT_USER}
+-    if external and project.client_id != user.client_id:
+-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Projeto fora do escopo do cliente")
+-    if write and external and user.role not in {UserRole.CLIENT_PM, UserRole.CLIENT_USER}:
+-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Perfil sem permissão de escrita")
+-
+-
+-class TimesheetCreate(BaseModel):
+-    task_id: str
+-    date: date
+-    hours_spent: Decimal = Field(gt=0, le=24)
+-    description: str | None = None
+-
+-
+-@app.get("/projects/{project_id}")
+-def read_project(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+-    project = db.get(Project, project_id)
+-    if not project:
+-        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+-    require_project_access(project, user)
+-    payload = {"id": project.id, "code": project.code, "name": project.name, "client_id": project.client_id, "status": project.status.value}
+-    if user.role not in {UserRole.CLIENT_PM, UserRole.CLIENT_USER}:
+-        payload["sold_value"] = project.sold_value
+-        payload["financials"] = project_financials(db, project.id)
+-    return payload
+-
+-
+-@app.post("/timesheets", status_code=201)
+-def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+-    task = db.get(Task, data.task_id)
+-    if not task:
+-        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+-    project = db.get(Project, task.project_id)
+-    require_project_access(project, user, write=True)
+-    resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
+-    if not resource:
+-        raise HTTPException(status_code=422, detail="Usuário não possui recurso habilitado")
+-    entry = Timesheet(task_id=task.id, resource_id=resource.id, date=data.date, hours_spent=data.hours_spent, description=data.description)
+-    db.add(entry)
+-    db.commit()
+-    db.refresh(entry)
+-    return {"id": entry.id, "task_id": entry.task_id, "hours_spent": entry.hours_spent, "status": entry.status.value}
++from fastapi import FastAPI
++
++from .db import init_db
++from .routers import (
++    baselines,
++    calendars,
++    changes,
++    clients,
++    expenses,
++    intakes,
++    projects,
++    resources,
++    risks,
++    task_assignments,
++    task_dependencies,
++    tasks,
++    timesheets,
++    users,
++)
++
++init_db()
++app = FastAPI(title="Controle de Projetos Corporativo", version="0.2.0")
++
++app.include_router(clients.router)
++app.include_router(users.router)
++app.include_router(projects.router)
++app.include_router(intakes.router)
++app.include_router(tasks.router)
++app.include_router(task_dependencies.router)
++app.include_router(task_assignments.router)
++app.include_router(resources.router)
++app.include_router(timesheets.router)
++app.include_router(expenses.router)
++app.include_router(calendars.router)
++app.include_router(risks.router)
++app.include_router(changes.router)
++app.include_router(baselines.router)
+diff --git a/app/models.py b/app/models.py
+index c13839e..acaa645 100644
+--- a/app/models.py
++++ b/app/models.py
+@@ -182,6 +182,7 @@ class Task(Base):
+     children: Mapped[list[Task]] = relationship(back_populates="parent")
+     assignments: Mapped[list[TaskAssignment]] = relationship(back_populates="task", cascade="all, delete-orphan")
+     timesheets: Mapped[list[Timesheet]] = relationship(back_populates="task", cascade="all, delete-orphan")
++    __table_args__ = (UniqueConstraint("project_id", "wbs_code", name="uq_task_project_wbs"),)
+ 
+ 
+ class Resource(Base):
+@@ -193,6 +194,7 @@ class Resource(Base):
+     billing_rate_per_hour: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+     daily_capacity_hours: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=8)
+     user: Mapped[User] = relationship(back_populates="resource")
++    assignments: Mapped[list[TaskAssignment]] = relationship(back_populates="resource")
+ 
+ 
+ class TaskAssignment(Base):
+@@ -203,6 +205,7 @@ class TaskAssignment(Base):
+     allocated_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+     __table_args__ = (UniqueConstraint("task_id", "resource_id", name="uq_task_resource"),)
+     task: Mapped[Task] = relationship(back_populates="assignments")
++    resource: Mapped[Resource] = relationship(back_populates="assignments")
+ 
+ 
+ class Timesheet(Base):
+diff --git a/app/routers/__init__.py b/app/routers/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/app/routers/baselines.py b/app/routers/baselines.py
+new file mode 100644
+index 0000000..05fa574
+--- /dev/null
++++ b/app/routers/baselines.py
+@@ -0,0 +1,70 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import INTERNAL_ROLES, get_current_user, require_project_access, require_role
++from ..models import Baseline, Project, Task, User
++from ..schemas import BaselineCreate
++
++router = APIRouter(tags=["baselines"])
++
++
++def _serialize(baseline: Baseline) -> dict:
++    return {
++        "id": baseline.id,
++        "project_id": baseline.project_id,
++        "version_name": baseline.version_name,
++        "snapshot_data": baseline.snapshot_data,
++        "created_at": baseline.created_at,
++    }
++
++
++def _snapshot_tasks(project_id: str, db: Session) -> list[dict]:
++    tasks = db.scalars(select(Task).where(Task.project_id == project_id)).all()
++    return [
++        {
++            "id": t.id,
++            "wbs_code": t.wbs_code,
++            "name": t.name,
++            "planned_start_date": t.planned_start_date.isoformat() if t.planned_start_date else None,
++            "planned_end_date": t.planned_end_date.isoformat() if t.planned_end_date else None,
++            "estimated_hours": str(t.estimated_hours),
++            "status": t.status.value,
++        }
++        for t in tasks
++    ]
++
++
++@router.post("/projects/{project_id}/baselines", status_code=status.HTTP_201_CREATED)
++def create_baseline(project_id: str, data: BaselineCreate, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    project = db.get(Project, project_id)
++    if not project:
++        raise HTTPException(status_code=404, detail="Projeto não encontrado")
++    baseline = Baseline(project_id=project_id, version_name=data.version_name, snapshot_data=_snapshot_tasks(project_id, db))
++    db.add(baseline)
++    db.commit()
++    db.refresh(baseline)
++    return _serialize(baseline)
++
++
++@router.get("/projects/{project_id}/baselines")
++def list_baselines(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    project = db.get(Project, project_id)
++    if not project:
++        raise HTTPException(status_code=404, detail="Projeto não encontrado")
++    require_project_access(project, user)
++    baselines = db.scalars(select(Baseline).where(Baseline.project_id == project_id).order_by(Baseline.created_at.desc())).all()
++    return [_serialize(b) for b in baselines]
++
++
++@router.get("/baselines/{baseline_id}")
++def read_baseline(baseline_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    baseline = db.get(Baseline, baseline_id)
++    if not baseline:
++        raise HTTPException(status_code=404, detail="Baseline não encontrada")
++    project = db.get(Project, baseline.project_id)
++    require_project_access(project, user)
++    return _serialize(baseline)
+diff --git a/app/routers/calendars.py b/app/routers/calendars.py
+new file mode 100644
+index 0000000..048747a
+--- /dev/null
++++ b/app/routers/calendars.py
+@@ -0,0 +1,57 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import INTERNAL_ROLES, get_current_user, require_role
++from ..models import Calendar, Holiday, User
++from ..schemas import CalendarCreate, HolidayCreate
++
++router = APIRouter(tags=["calendars"])
++
++
++def _serialize_calendar(calendar: Calendar) -> dict:
++    return {"id": calendar.id, "name": calendar.name, "working_days": calendar.working_days}
++
++
++def _serialize_holiday(holiday: Holiday) -> dict:
++    return {"id": holiday.id, "calendar_id": holiday.calendar_id, "date": holiday.date, "description": holiday.description}
++
++
++@router.post("/calendars", status_code=status.HTTP_201_CREATED)
++def create_calendar(data: CalendarCreate, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    calendar = Calendar(**data.model_dump())
++    db.add(calendar)
++    db.commit()
++    db.refresh(calendar)
++    return _serialize_calendar(calendar)
++
++
++@router.get("/calendars")
++def list_calendars(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    calendars = db.scalars(select(Calendar)).all()
++    return [_serialize_calendar(c) for c in calendars]
++
++
++@router.post("/calendars/{calendar_id}/holidays", status_code=status.HTTP_201_CREATED)
++def add_holiday(calendar_id: str, data: HolidayCreate, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    calendar = db.get(Calendar, calendar_id)
++    if not calendar:
++        raise HTTPException(status_code=404, detail="Calendário não encontrado")
++    if db.scalar(select(Holiday).where(Holiday.calendar_id == calendar_id, Holiday.date == data.date)):
++        raise HTTPException(status_code=409, detail="Já existe um feriado nessa data para esse calendário")
++    holiday = Holiday(calendar_id=calendar_id, **data.model_dump())
++    db.add(holiday)
++    db.commit()
++    db.refresh(holiday)
++    return _serialize_holiday(holiday)
++
++
++@router.get("/calendars/{calendar_id}/holidays")
++def list_holidays(calendar_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    if not db.get(Calendar, calendar_id):
++        raise HTTPException(status_code=404, detail="Calendário não encontrado")
++    holidays = db.scalars(select(Holiday).where(Holiday.calendar_id == calendar_id).order_by(Holiday.date)).all()
++    return [_serialize_holiday(h) for h in holidays]
+diff --git a/app/routers/changes.py b/app/routers/changes.py
+new file mode 100644
+index 0000000..4321df8
+--- /dev/null
++++ b/app/routers/changes.py
+@@ -0,0 +1,70 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import INTERNAL_ROLES, get_current_user, require_project_access, require_role
++from ..models import ChangeRequest, ChangeStatus, Project, User
++from ..schemas import ChangeRequestCreate
++
++router = APIRouter(tags=["change-requests"])
++
++
++def _serialize(change: ChangeRequest) -> dict:
++    return {
++        "id": change.id,
++        "project_id": change.project_id,
++        "requested_by": change.requested_by,
++        "description": change.description,
++        "cost_impact": change.cost_impact,
++        "schedule_impact_days": change.schedule_impact_days,
++        "status": change.status.value,
++    }
++
++
++def _get_project_or_404(project_id: str, db: Session) -> Project:
++    project = db.get(Project, project_id)
++    if not project:
++        raise HTTPException(status_code=404, detail="Projeto não encontrado")
++    return project
++
++
++@router.post("/projects/{project_id}/change-requests", status_code=status.HTTP_201_CREATED)
++def create_change_request(project_id: str, data: ChangeRequestCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    project = _get_project_or_404(project_id, db)
++    require_project_access(project, user, write=True)
++    change = ChangeRequest(project_id=project_id, requested_by=user.id, **data.model_dump())
++    db.add(change)
++    db.commit()
++    db.refresh(change)
++    return _serialize(change)
++
++
++@router.get("/projects/{project_id}/change-requests")
++def list_change_requests(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    project = _get_project_or_404(project_id, db)
++    require_project_access(project, user)
++    changes = db.scalars(select(ChangeRequest).where(ChangeRequest.project_id == project_id)).all()
++    return [_serialize(c) for c in changes]
++
++
++def _decide(change_id: str, new_status: ChangeStatus, db: Session) -> ChangeRequest:
++    change = db.get(ChangeRequest, change_id)
++    if not change:
++        raise HTTPException(status_code=404, detail="Mudança não encontrada")
++    change.status = new_status
++    db.commit()
++    db.refresh(change)
++    return change
++
++
++@router.patch("/change-requests/{change_id}/approve")
++def approve_change_request(change_id: str, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    return _serialize(_decide(change_id, ChangeStatus.APPROVED, db))
++
++
++@router.patch("/change-requests/{change_id}/reject")
++def reject_change_request(change_id: str, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    return _serialize(_decide(change_id, ChangeStatus.REJECTED, db))
+diff --git a/app/routers/clients.py b/app/routers/clients.py
+new file mode 100644
+index 0000000..c6a92ed
+--- /dev/null
++++ b/app/routers/clients.py
+@@ -0,0 +1,69 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import EXTERNAL_ROLES, INTERNAL_ROLES, get_current_user, require_role
++from ..models import Client, User
++from ..schemas import ClientCreate, ClientUpdate
++
++router = APIRouter(prefix="/clients", tags=["clients"])
++
++
++def _serialize(client: Client) -> dict:
++    return {
++        "id": client.id,
++        "code": client.code,
++        "legal_name": client.legal_name,
++        "trade_name": client.trade_name,
++        "tax_id": client.tax_id,
++        "city": client.city,
++        "state": client.state,
++        "primary_contact_name": client.primary_contact_name,
++        "primary_contact_email": client.primary_contact_email,
++    }
++
++
++@router.post("", status_code=status.HTTP_201_CREATED)
++def create_client(data: ClientCreate, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    if db.scalar(select(Client).where(Client.code == data.code)):
++        raise HTTPException(status_code=409, detail="Já existe um cliente com esse código")
++    client = Client(**data.model_dump())
++    db.add(client)
++    db.commit()
++    db.refresh(client)
++    return _serialize(client)
++
++
++@router.get("")
++def list_clients(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    if user.role in EXTERNAL_ROLES:
++        clients = [db.get(Client, user.client_id)] if user.client_id else []
++        clients = [c for c in clients if c]
++    else:
++        clients = db.scalars(select(Client).order_by(Client.legal_name)).all()
++    return [_serialize(c) for c in clients]
++
++
++@router.get("/{client_id}")
++def read_client(client_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    client = db.get(Client, client_id)
++    if not client:
++        raise HTTPException(status_code=404, detail="Cliente não encontrado")
++    if user.role in EXTERNAL_ROLES and user.client_id != client.id:
++        raise HTTPException(status_code=403, detail="Fora do escopo do cliente")
++    return _serialize(client)
++
++
++@router.patch("/{client_id}")
++def update_client(client_id: str, data: ClientUpdate, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    client = db.get(Client, client_id)
++    if not client:
++        raise HTTPException(status_code=404, detail="Cliente não encontrado")
++    for field, value in data.model_dump(exclude_unset=True).items():
++        setattr(client, field, value)
++    db.commit()
++    db.refresh(client)
++    return _serialize(client)
+diff --git a/app/routers/expenses.py b/app/routers/expenses.py
+new file mode 100644
+index 0000000..f32b2df
+--- /dev/null
++++ b/app/routers/expenses.py
+@@ -0,0 +1,49 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import get_current_user, require_project_access
++from ..models import Project, ProjectExpense, User
++from ..schemas import ProjectExpenseCreate
++
++router = APIRouter(prefix="/projects/{project_id}/expenses", tags=["expenses"])
++
++
++def _serialize(expense: ProjectExpense) -> dict:
++    return {
++        "id": expense.id,
++        "project_id": expense.project_id,
++        "description": expense.description,
++        "category": expense.category,
++        "amount": expense.amount,
++        "expense_date": expense.expense_date,
++    }
++
++
++def _get_project_or_404(project_id: str, db: Session) -> Project:
++    project = db.get(Project, project_id)
++    if not project:
++        raise HTTPException(status_code=404, detail="Projeto não encontrado")
++    return project
++
++
++@router.post("", status_code=status.HTTP_201_CREATED)
++def create_expense(project_id: str, data: ProjectExpenseCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    project = _get_project_or_404(project_id, db)
++    require_project_access(project, user, write=True)
++    expense = ProjectExpense(project_id=project_id, **data.model_dump())
++    db.add(expense)
++    db.commit()
++    db.refresh(expense)
++    return _serialize(expense)
++
++
++@router.get("")
++def list_expenses(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    project = _get_project_or_404(project_id, db)
++    require_project_access(project, user)
++    expenses = db.scalars(select(ProjectExpense).where(ProjectExpense.project_id == project_id).order_by(ProjectExpense.expense_date.desc())).all()
++    return [_serialize(e) for e in expenses]
+diff --git a/app/routers/intakes.py b/app/routers/intakes.py
+new file mode 100644
+index 0000000..0027d28
+--- /dev/null
++++ b/app/routers/intakes.py
+@@ -0,0 +1,57 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import EXTERNAL_ROLES, INTERNAL_ROLES, get_current_user, require_role
++from ..models import Client, ProjectIntake, User
++from ..schemas import ProjectIntakeCreate, ProjectIntakeUpdate
++
++router = APIRouter(prefix="/project-intakes", tags=["project-intakes"])
++
++
++def _serialize(intake: ProjectIntake) -> dict:
++    return {
++        "id": intake.id,
++        "client_id": intake.client_id,
++        "title": intake.title,
++        "description": intake.description,
++        "estimated_budget": intake.estimated_budget,
++        "estimated_hours": intake.estimated_hours,
++        "status": intake.status.value,
++    }
++
++
++@router.post("", status_code=status.HTTP_201_CREATED)
++def create_intake(data: ProjectIntakeCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    if user.role in EXTERNAL_ROLES and data.client_id != user.client_id:
++        raise HTTPException(status_code=403, detail="Só é possível criar intake para o próprio cliente")
++    if not db.get(Client, data.client_id):
++        raise HTTPException(status_code=422, detail="client_id não corresponde a um cliente existente")
++    intake = ProjectIntake(**data.model_dump())
++    db.add(intake)
++    db.commit()
++    db.refresh(intake)
++    return _serialize(intake)
++
++
++@router.get("")
++def list_intakes(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    query = select(ProjectIntake)
++    if user.role in EXTERNAL_ROLES:
++        query = query.where(ProjectIntake.client_id == user.client_id)
++    intakes = db.scalars(query.order_by(ProjectIntake.created_at.desc())).all()
++    return [_serialize(i) for i in intakes]
++
++
++@router.patch("/{intake_id}")
++def decide_intake(intake_id: str, data: ProjectIntakeUpdate, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    intake = db.get(ProjectIntake, intake_id)
++    if not intake:
++        raise HTTPException(status_code=404, detail="Intake não encontrado")
++    intake.status = data.status
++    db.commit()
++    db.refresh(intake)
++    return _serialize(intake)
+diff --git a/app/routers/projects.py b/app/routers/projects.py
+new file mode 100644
+index 0000000..38a0cc2
+--- /dev/null
++++ b/app/routers/projects.py
+@@ -0,0 +1,80 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import EXTERNAL_ROLES, INTERNAL_ROLES, get_current_user, require_project_access, require_role
++from ..models import Client, Project, User
++from ..schemas import ProjectCreate, ProjectUpdate
++from ..services import project_financials
++
++router = APIRouter(prefix="/projects", tags=["projects"])
++
++
++def _serialize(project: Project) -> dict:
++    return {
++        "id": project.id,
++        "code": project.code,
++        "name": project.name,
++        "client_id": project.client_id,
++        "manager_id": project.manager_id,
++        "status": project.status.value,
++        "start_date": project.start_date,
++        "end_date": project.end_date,
++    }
++
++
++@router.post("", status_code=status.HTTP_201_CREATED)
++def create_project(data: ProjectCreate, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    if db.scalar(select(Project).where(Project.code == data.code)):
++        raise HTTPException(status_code=409, detail="Já existe um projeto com esse código")
++    if not db.get(Client, data.client_id):
++        raise HTTPException(status_code=422, detail="client_id não corresponde a um cliente existente")
++    manager = db.get(User, data.manager_id)
++    if not manager:
++        raise HTTPException(status_code=422, detail="manager_id não corresponde a um usuário existente")
++    project = Project(**data.model_dump())
++    db.add(project)
++    db.commit()
++    db.refresh(project)
++    return _serialize(project)
++
++
++@router.get("")
++def list_projects(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    query = select(Project)
++    if user.role in EXTERNAL_ROLES:
++        query = query.where(Project.client_id == user.client_id)
++    projects = db.scalars(query.order_by(Project.name)).all()
++    return [_serialize(p) for p in projects]
++
++
++@router.get("/{project_id}")
++def read_project(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    project = db.get(Project, project_id)
++    if not project:
++        raise HTTPException(status_code=404, detail="Projeto não encontrado")
++    require_project_access(project, user)
++    payload = _serialize(project)
++    if user.role not in EXTERNAL_ROLES:
++        payload["sold_value"] = project.sold_value
++        payload["financials"] = project_financials(db, project.id)
++    return payload
++
++
++@router.patch("/{project_id}")
++def update_project(project_id: str, data: ProjectUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    project = db.get(Project, project_id)
++    if not project:
++        raise HTTPException(status_code=404, detail="Projeto não encontrado")
++    require_project_access(project, user, write=True)
++    updates = data.model_dump(exclude_unset=True)
++    if "sold_value" in updates and user.role in EXTERNAL_ROLES:
++        raise HTTPException(status_code=403, detail="Perfil de cliente não pode alterar o valor vendido")
++    for field, value in updates.items():
++        setattr(project, field, value)
++    db.commit()
++    db.refresh(project)
++    return _serialize(project)
+diff --git a/app/routers/resources.py b/app/routers/resources.py
+new file mode 100644
+index 0000000..efa3de1
+--- /dev/null
++++ b/app/routers/resources.py
+@@ -0,0 +1,54 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import INTERNAL_ROLES, require_role
++from ..models import Resource, User
++from ..schemas import ResourceCreate, ResourceUpdate
++
++router = APIRouter(prefix="/resources", tags=["resources"])
++
++
++def _serialize(resource: Resource) -> dict:
++    return {
++        "id": resource.id,
++        "user_id": resource.user_id,
++        "role_title": resource.role_title,
++        "internal_cost_per_hour": resource.internal_cost_per_hour,
++        "billing_rate_per_hour": resource.billing_rate_per_hour,
++        "daily_capacity_hours": resource.daily_capacity_hours,
++    }
++
++
++@router.post("", status_code=status.HTTP_201_CREATED)
++def create_resource(data: ResourceCreate, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    if not db.get(User, data.user_id):
++        raise HTTPException(status_code=422, detail="user_id não corresponde a um usuário existente")
++    if db.scalar(select(Resource).where(Resource.user_id == data.user_id)):
++        raise HTTPException(status_code=409, detail="Esse usuário já possui um recurso cadastrado")
++    resource = Resource(**data.model_dump())
++    db.add(resource)
++    db.commit()
++    db.refresh(resource)
++    return _serialize(resource)
++
++
++@router.get("")
++def list_resources(user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    resources = db.scalars(select(Resource)).all()
++    return [_serialize(r) for r in resources]
++
++
++@router.patch("/{resource_id}")
++def update_resource(resource_id: str, data: ResourceUpdate, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    resource = db.get(Resource, resource_id)
++    if not resource:
++        raise HTTPException(status_code=404, detail="Recurso não encontrado")
++    for field, value in data.model_dump(exclude_unset=True).items():
++        setattr(resource, field, value)
++    db.commit()
++    db.refresh(resource)
++    return _serialize(resource)
+diff --git a/app/routers/risks.py b/app/routers/risks.py
+new file mode 100644
+index 0000000..c22707e
+--- /dev/null
++++ b/app/routers/risks.py
+@@ -0,0 +1,64 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import get_current_user, require_project_access
++from ..models import Project, Risk, User
++from ..schemas import RiskCreate, RiskUpdate
++
++router = APIRouter(tags=["risks"])
++
++
++def _serialize(risk: Risk) -> dict:
++    return {
++        "id": risk.id,
++        "project_id": risk.project_id,
++        "description": risk.description,
++        "probability": risk.probability.value,
++        "impact": risk.impact.value,
++        "mitigation_plan": risk.mitigation_plan,
++        "status": risk.status.value,
++    }
++
++
++def _get_project_or_404(project_id: str, db: Session) -> Project:
++    project = db.get(Project, project_id)
++    if not project:
++        raise HTTPException(status_code=404, detail="Projeto não encontrado")
++    return project
++
++
++@router.post("/projects/{project_id}/risks", status_code=status.HTTP_201_CREATED)
++def create_risk(project_id: str, data: RiskCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    project = _get_project_or_404(project_id, db)
++    require_project_access(project, user, write=True)
++    risk = Risk(project_id=project_id, **data.model_dump())
++    db.add(risk)
++    db.commit()
++    db.refresh(risk)
++    return _serialize(risk)
++
++
++@router.get("/projects/{project_id}/risks")
++def list_risks(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    project = _get_project_or_404(project_id, db)
++    require_project_access(project, user)
++    risks = db.scalars(select(Risk).where(Risk.project_id == project_id)).all()
++    return [_serialize(r) for r in risks]
++
++
++@router.patch("/risks/{risk_id}")
++def update_risk(risk_id: str, data: RiskUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    risk = db.get(Risk, risk_id)
++    if not risk:
++        raise HTTPException(status_code=404, detail="Risco não encontrado")
++    project = _get_project_or_404(risk.project_id, db)
++    require_project_access(project, user, write=True)
++    for field, value in data.model_dump(exclude_unset=True).items():
++        setattr(risk, field, value)
++    db.commit()
++    db.refresh(risk)
++    return _serialize(risk)
+diff --git a/app/routers/task_assignments.py b/app/routers/task_assignments.py
+new file mode 100644
+index 0000000..b945a58
+--- /dev/null
++++ b/app/routers/task_assignments.py
+@@ -0,0 +1,58 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import INTERNAL_ROLES, get_current_user, require_project_access, require_role
++from ..models import Project, Resource, Task, TaskAssignment, User
++from ..schemas import TaskAssignmentCreate
++
++router = APIRouter(tags=["task-assignments"])
++
++
++def _serialize(assignment: TaskAssignment) -> dict:
++    return {
++        "id": assignment.id,
++        "task_id": assignment.task_id,
++        "resource_id": assignment.resource_id,
++        "allocated_hours": assignment.allocated_hours,
++    }
++
++
++@router.post("/tasks/{task_id}/assignments", status_code=status.HTTP_201_CREATED)
++def create_assignment(task_id: str, data: TaskAssignmentCreate, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    task = db.get(Task, task_id)
++    if not task:
++        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
++    resource = db.get(Resource, data.resource_id)
++    if not resource:
++        raise HTTPException(status_code=404, detail="Recurso não encontrado")
++    if db.scalar(select(TaskAssignment).where(TaskAssignment.task_id == task_id, TaskAssignment.resource_id == data.resource_id)):
++        raise HTTPException(status_code=409, detail="Recurso já alocado nessa tarefa")
++    assignment = TaskAssignment(task_id=task_id, resource_id=data.resource_id, allocated_hours=data.allocated_hours)
++    db.add(assignment)
++    db.commit()
++    db.refresh(assignment)
++    return _serialize(assignment)
++
++
++@router.get("/tasks/{task_id}/assignments")
++def list_assignments(task_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    task = db.get(Task, task_id)
++    if not task:
++        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
++    project = db.get(Project, task.project_id)
++    require_project_access(project, user)
++    assignments = db.scalars(select(TaskAssignment).where(TaskAssignment.task_id == task_id)).all()
++    return [_serialize(a) for a in assignments]
++
++
++@router.delete("/task-assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
++def delete_assignment(assignment_id: str, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    assignment = db.get(TaskAssignment, assignment_id)
++    if not assignment:
++        raise HTTPException(status_code=404, detail="Alocação não encontrada")
++    db.delete(assignment)
++    db.commit()
+diff --git a/app/routers/task_dependencies.py b/app/routers/task_dependencies.py
+new file mode 100644
+index 0000000..80ea18e
+--- /dev/null
++++ b/app/routers/task_dependencies.py
+@@ -0,0 +1,82 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import get_current_user, require_project_access
++from ..models import Project, Task, TaskDependency, User
++from ..schemas import TaskDependencyCreate
++
++router = APIRouter(tags=["task-dependencies"])
++
++
++def _serialize(dep: TaskDependency) -> dict:
++    return {
++        "id": dep.id,
++        "predecessor_task_id": dep.predecessor_task_id,
++        "successor_task_id": dep.successor_task_id,
++        "dependency_type": dep.dependency_type.value,
++        "lag_days": dep.lag_days,
++    }
++
++
++def _project_for_task(task: Task, db: Session) -> Project:
++    project = db.get(Project, task.project_id)
++    if not project:
++        raise HTTPException(status_code=404, detail="Projeto não encontrado")
++    return project
++
++
++@router.post("/task-dependencies", status_code=status.HTTP_201_CREATED)
++def create_dependency(data: TaskDependencyCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    predecessor = db.get(Task, data.predecessor_task_id)
++    successor = db.get(Task, data.successor_task_id)
++    if not predecessor or not successor:
++        raise HTTPException(status_code=404, detail="Tarefa predecessora ou sucessora não encontrada")
++    if predecessor.project_id != successor.project_id:
++        raise HTTPException(status_code=422, detail="Predecessora e sucessora precisam pertencer ao mesmo projeto")
++    if predecessor.id == successor.id:
++        raise HTTPException(status_code=422, detail="Uma tarefa não pode depender de si mesma")
++    project = _project_for_task(predecessor, db)
++    require_project_access(project, user, write=True)
++    if db.scalar(
++        select(TaskDependency).where(
++            TaskDependency.predecessor_task_id == predecessor.id,
++            TaskDependency.successor_task_id == successor.id,
++        )
++    ):
++        raise HTTPException(status_code=409, detail="Essa dependência já existe")
++    dependency = TaskDependency(**data.model_dump())
++    db.add(dependency)
++    db.commit()
++    db.refresh(dependency)
++    return _serialize(dependency)
++
++
++@router.get("/tasks/{task_id}/dependencies")
++def list_dependencies(task_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    task = db.get(Task, task_id)
++    if not task:
++        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
++    project = _project_for_task(task, db)
++    require_project_access(project, user)
++    deps = db.scalars(
++        select(TaskDependency).where(
++            (TaskDependency.predecessor_task_id == task_id) | (TaskDependency.successor_task_id == task_id)
++        )
++    ).all()
++    return [_serialize(d) for d in deps]
++
++
++@router.delete("/task-dependencies/{dependency_id}", status_code=status.HTTP_204_NO_CONTENT)
++def delete_dependency(dependency_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    dependency = db.get(TaskDependency, dependency_id)
++    if not dependency:
++        raise HTTPException(status_code=404, detail="Dependência não encontrada")
++    predecessor = db.get(Task, dependency.predecessor_task_id)
++    project = _project_for_task(predecessor, db)
++    require_project_access(project, user, write=True)
++    db.delete(dependency)
++    db.commit()
+diff --git a/app/routers/tasks.py b/app/routers/tasks.py
+new file mode 100644
+index 0000000..4023c85
+--- /dev/null
++++ b/app/routers/tasks.py
+@@ -0,0 +1,100 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import get_current_user, require_project_access
++from ..models import Calendar, Project, Task, User
++from ..schemas import TaskCreate, TaskUpdate
++from ..services import BusinessCalendar, calendar_from_db, reschedule_cascade
++
++router = APIRouter(tags=["tasks"])
++
++
++def _serialize(task: Task) -> dict:
++    return {
++        "id": task.id,
++        "project_id": task.project_id,
++        "parent_task_id": task.parent_task_id,
++        "name": task.name,
++        "wbs_code": task.wbs_code,
++        "estimated_hours": task.estimated_hours,
++        "actual_hours": task.actual_hours,
++        "planned_start_date": task.planned_start_date,
++        "planned_end_date": task.planned_end_date,
++        "actual_start_date": task.actual_start_date,
++        "actual_end_date": task.actual_end_date,
++        "progress_percentage": task.progress_percentage,
++        "status": task.status.value,
++        "is_critical_path": task.is_critical_path,
++        "is_milestone": task.is_milestone,
++    }
++
++
++def _get_project_or_404(project_id: str, db: Session) -> Project:
++    project = db.get(Project, project_id)
++    if not project:
++        raise HTTPException(status_code=404, detail="Projeto não encontrado")
++    return project
++
++
++@router.post("/projects/{project_id}/tasks", status_code=status.HTTP_201_CREATED)
++def create_task(project_id: str, data: TaskCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    project = _get_project_or_404(project_id, db)
++    require_project_access(project, user, write=True)
++    if db.scalar(select(Task).where(Task.project_id == project_id, Task.wbs_code == data.wbs_code)):
++        raise HTTPException(status_code=409, detail="Já existe uma tarefa com esse código WBS neste projeto")
++    if data.parent_task_id:
++        parent = db.get(Task, data.parent_task_id)
++        if not parent or parent.project_id != project_id:
++            raise HTTPException(status_code=422, detail="parent_task_id precisa ser uma tarefa existente do mesmo projeto")
++    task = Task(project_id=project_id, **data.model_dump())
++    db.add(task)
++    db.commit()
++    db.refresh(task)
++    return _serialize(task)
++
++
++@router.get("/projects/{project_id}/tasks")
++def list_tasks(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    project = _get_project_or_404(project_id, db)
++    require_project_access(project, user)
++    tasks = db.scalars(select(Task).where(Task.project_id == project_id).order_by(Task.wbs_code)).all()
++    return [_serialize(t) for t in tasks]
++
++
++@router.patch("/tasks/{task_id}")
++def update_task(task_id: str, data: TaskUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    task = db.get(Task, task_id)
++    if not task:
++        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
++    project = _get_project_or_404(task.project_id, db)
++    require_project_access(project, user, write=True)
++    for field, value in data.model_dump(exclude_unset=True).items():
++        setattr(task, field, value)
++    db.commit()
++    db.refresh(task)
++    return _serialize(task)
++
++
++@router.post("/tasks/{task_id}/reschedule")
++def reschedule_task(task_id: str, calendar_id: str | None = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    task = db.get(Task, task_id)
++    if not task:
++        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
++    project = _get_project_or_404(task.project_id, db)
++    require_project_access(project, user, write=True)
++    if calendar_id:
++        if not db.get(Calendar, calendar_id):
++            raise HTTPException(status_code=404, detail="Calendário não encontrado")
++        cal = calendar_from_db(db, calendar_id)
++    else:
++        cal = BusinessCalendar()
++    try:
++        updated = reschedule_cascade(db, task_id, cal)
++    except ValueError as exc:
++        raise HTTPException(status_code=422, detail=str(exc)) from exc
++    db.commit()
++    return {"updated_tasks": [_serialize(t) for t in updated]}
+diff --git a/app/routers/timesheets.py b/app/routers/timesheets.py
+new file mode 100644
+index 0000000..0983398
+--- /dev/null
++++ b/app/routers/timesheets.py
+@@ -0,0 +1,93 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, HTTPException, status
++from sqlalchemy import select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import INTERNAL_ROLES, get_current_user, require_project_access, require_role
++from ..models import Project, Resource, Task, Timesheet, TimesheetStatus, User
++from ..schemas import TimesheetCreate
++from ..services import recalc_task_actual_hours
++
++router = APIRouter(tags=["timesheets"])
++
++
++def _serialize(entry: Timesheet) -> dict:
++    return {
++        "id": entry.id,
++        "task_id": entry.task_id,
++        "resource_id": entry.resource_id,
++        "date": entry.date,
++        "hours_spent": entry.hours_spent,
++        "description": entry.description,
++        "status": entry.status.value,
++    }
++
++
++@router.post("/timesheets", status_code=status.HTTP_201_CREATED)
++def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
++    task = db.get(Task, data.task_id)
++    if not task:
++        raise HTTPException(status_code=404, detail="Tarefa não encontrada")
++    project = db.get(Project, task.project_id)
++    require_project_access(project, user, write=True)
++    resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
++    if not resource:
++        raise HTTPException(status_code=422, detail="Usuário não possui recurso habilitado")
++    entry = Timesheet(task_id=task.id, resource_id=resource.id, date=data.date, hours_spent=data.hours_spent, description=data.description)
++    db.add(entry)
++    db.commit()
++    db.refresh(entry)
++    return _serialize(entry)
++
++
++@router.get("/timesheets")
++def list_timesheets(
++    project_id: str | None = None,
++    resource_id: str | None = None,
++    status_filter: TimesheetStatus | None = None,
++    user: User = Depends(get_current_user),
++    db: Session = Depends(get_db),
++):
++    query = select(Timesheet)
++    if project_id:
++        query = query.join(Task, Task.id == Timesheet.task_id).where(Task.project_id == project_id)
++        project = db.get(Project, project_id)
++        if not project:
++            raise HTTPException(status_code=404, detail="Projeto não encontrado")
++        require_project_access(project, user)
++    elif user.role not in INTERNAL_ROLES:
++        # Sem project_id, um perfil externo só pode ver os próprios lançamentos.
++        resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
++        query = query.where(Timesheet.resource_id == (resource.id if resource else "__none__"))
++    if resource_id:
++        query = query.where(Timesheet.resource_id == resource_id)
++    if status_filter:
++        query = query.where(Timesheet.status == status_filter)
++    entries = db.scalars(query.order_by(Timesheet.date.desc())).all()
++    return [_serialize(e) for e in entries]
++
++
++def _set_status(timesheet_id: str, new_status: TimesheetStatus, db: Session) -> Timesheet:
++    entry = db.get(Timesheet, timesheet_id)
++    if not entry:
++        raise HTTPException(status_code=404, detail="Lançamento não encontrado")
++    entry.status = new_status
++    db.flush()
++    recalc_task_actual_hours(db, entry.task_id)
++    db.commit()
++    db.refresh(entry)
++    return entry
++
++
++@router.patch("/timesheets/{timesheet_id}/approve")
++def approve_timesheet(timesheet_id: str, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    entry = _set_status(timesheet_id, TimesheetStatus.APPROVED, db)
++    return _serialize(entry)
++
++
++@router.patch("/timesheets/{timesheet_id}/reject")
++def reject_timesheet(timesheet_id: str, user: User = Depends(require_role(*INTERNAL_ROLES)), db: Session = Depends(get_db)):
++    entry = _set_status(timesheet_id, TimesheetStatus.REJECTED, db)
++    return _serialize(entry)
+diff --git a/app/routers/users.py b/app/routers/users.py
+new file mode 100644
+index 0000000..11bd294
+--- /dev/null
++++ b/app/routers/users.py
+@@ -0,0 +1,96 @@
++from __future__ import annotations
++
++from typing import Annotated
++
++from fastapi import APIRouter, Depends, Header, HTTPException, status
++from sqlalchemy import func, select
++from sqlalchemy.orm import Session
++
++from ..db import get_db
++from ..deps import EXTERNAL_ROLES, get_current_user, require_role
++from ..models import Client, User, UserRole, UserStatus
++from ..schemas import LoginRequest, UserCreate, UserUpdate
++from ..security import hash_password, verify_password
++
++router = APIRouter(tags=["users"])
++
++
++def _serialize(user: User) -> dict:
++    return {
++        "id": user.id,
++        "name": user.name,
++        "email": user.email,
++        "role": user.role.value,
++        "status": user.status.value,
++        "client_id": user.client_id,
++    }
++
++
++@router.post("/users", status_code=status.HTTP_201_CREATED)
++def create_user(data: UserCreate, db: Session = Depends(get_db), x_user_id: Annotated[str | None, Header()] = None):
++    # Bootstrap: o primeiro usuário do sistema pode ser criado sem autenticação
++    # (não há como logar sem nenhum usuário existente). A partir do segundo
++    # usuário, só um ADMIN autenticado pode cadastrar novos usuários.
++    existing_count = db.scalar(select(func.count()).select_from(User)) or 0
++    if existing_count > 0:
++        if not x_user_id:
++            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credencial ausente")
++        actor = db.get(User, x_user_id)
++        if not actor or actor.status != UserStatus.ACTIVE:
++            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário inválido ou inativo")
++        if actor.role != UserRole.ADMIN:
++            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas ADMIN pode criar usuários")
++    elif data.role != UserRole.ADMIN:
++        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="O primeiro usuário do sistema precisa ser ADMIN")
++
++    if db.scalar(select(User).where(User.email == data.email)):
++        raise HTTPException(status_code=409, detail="E-mail já cadastrado")
++    if data.role in EXTERNAL_ROLES and not data.client_id:
++        raise HTTPException(status_code=422, detail="client_id é obrigatório para perfis de cliente")
++    if data.client_id and not db.get(Client, data.client_id):
++        raise HTTPException(status_code=422, detail="client_id não corresponde a um cliente existente")
++
++    user = User(
++        name=data.name,
++        email=data.email,
++        password_hash=hash_password(data.password),
++        role=data.role,
++        client_id=data.client_id,
++    )
++    db.add(user)
++    db.commit()
++    db.refresh(user)
++    return _serialize(user)
++
++
++@router.post("/auth/login")
++def login(data: LoginRequest, db: Session = Depends(get_db)):
++    user = db.scalar(select(User).where(User.email == data.email))
++    if not user or user.status != UserStatus.ACTIVE or not verify_password(data.password, user.password_hash):
++        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="E-mail ou senha inválidos")
++    # Demonstrativo: retorna o próprio id do usuário para uso no header X-User-Id.
++    # Antes de produção, substituir por um JWT assinado com expiração.
++    return {"user_id": user.id, "role": user.role.value}
++
++
++@router.get("/users/me")
++def read_me(user: User = Depends(get_current_user)):
++    return _serialize(user)
++
++
++@router.get("/users")
++def list_users(user: User = Depends(require_role(UserRole.ADMIN)), db: Session = Depends(get_db)):
++    users = db.scalars(select(User).order_by(User.name)).all()
++    return [_serialize(u) for u in users]
++
++
++@router.patch("/users/{user_id}")
++def update_user(user_id: str, data: UserUpdate, user: User = Depends(require_role(UserRole.ADMIN)), db: Session = Depends(get_db)):
++    target = db.get(User, user_id)
++    if not target:
++        raise HTTPException(status_code=404, detail="Usuário não encontrado")
++    for field, value in data.model_dump(exclude_unset=True).items():
++        setattr(target, field, value)
++    db.commit()
++    db.refresh(target)
++    return _serialize(target)
+diff --git a/app/schemas.py b/app/schemas.py
+new file mode 100644
+index 0000000..dcbe2dd
+--- /dev/null
++++ b/app/schemas.py
+@@ -0,0 +1,213 @@
++from __future__ import annotations
++
++from datetime import date
++from decimal import Decimal
++
++from pydantic import BaseModel, EmailStr, Field
++
++from .models import (
++    ChangeStatus,
++    DependencyType,
++    IntakeStatus,
++    ProjectStatus,
++    RiskLevel,
++    RiskStatus,
++    TaskStatus,
++    UserRole,
++    UserStatus,
++)
++
++
++# ---------- Client ----------
++class ClientCreate(BaseModel):
++    code: str
++    legal_name: str
++    trade_name: str | None = None
++    tax_id: str | None = None
++    address: str | None = None
++    city: str | None = None
++    state: str | None = None
++    zip_code: str | None = None
++    primary_contact_name: str | None = None
++    primary_contact_email: EmailStr | None = None
++    primary_contact_phone: str | None = None
++
++
++class ClientUpdate(BaseModel):
++    legal_name: str | None = None
++    trade_name: str | None = None
++    tax_id: str | None = None
++    address: str | None = None
++    city: str | None = None
++    state: str | None = None
++    zip_code: str | None = None
++    primary_contact_name: str | None = None
++    primary_contact_email: EmailStr | None = None
++    primary_contact_phone: str | None = None
++
++
++# ---------- User ----------
++class UserCreate(BaseModel):
++    name: str
++    email: EmailStr
++    password: str = Field(min_length=8)
++    role: UserRole
++    client_id: str | None = None
++
++
++class UserUpdate(BaseModel):
++    name: str | None = None
++    role: UserRole | None = None
++    status: UserStatus | None = None
++
++
++class LoginRequest(BaseModel):
++    email: EmailStr
++    password: str
++
++
++# ---------- Project ----------
++class ProjectCreate(BaseModel):
++    client_id: str
++    manager_id: str
++    code: str
++    name: str
++    sold_value: Decimal = Decimal("0")
++    start_date: date | None = None
++    end_date: date | None = None
++
++
++class ProjectUpdate(BaseModel):
++    name: str | None = None
++    status: ProjectStatus | None = None
++    sold_value: Decimal | None = None
++    start_date: date | None = None
++    end_date: date | None = None
++
++
++# ---------- ProjectIntake ----------
++class ProjectIntakeCreate(BaseModel):
++    client_id: str
++    title: str
++    description: str | None = None
++    estimated_budget: Decimal | None = None
++    estimated_hours: Decimal | None = None
++
++
++class ProjectIntakeUpdate(BaseModel):
++    status: IntakeStatus
++
++
++# ---------- Task ----------
++class TaskCreate(BaseModel):
++    name: str
++    wbs_code: str
++    parent_task_id: str | None = None
++    estimated_hours: Decimal = Decimal("0")
++    planned_start_date: date | None = None
++    planned_end_date: date | None = None
++    dependency_type: DependencyType = DependencyType.FS
++    lag_days: int = 0
++    is_milestone: bool = False
++
++
++class TaskUpdate(BaseModel):
++    name: str | None = None
++    estimated_hours: Decimal | None = None
++    planned_start_date: date | None = None
++    planned_end_date: date | None = None
++    actual_start_date: date | None = None
++    actual_end_date: date | None = None
++    progress_percentage: Decimal | None = None
++    status: TaskStatus | None = None
++    is_critical_path: bool | None = None
++    is_milestone: bool | None = None
++
++
++# ---------- TaskDependency ----------
++class TaskDependencyCreate(BaseModel):
++    predecessor_task_id: str
++    successor_task_id: str
++    dependency_type: DependencyType = DependencyType.FS
++    lag_days: int = 0
++
++
++# ---------- TaskAssignment ----------
++class TaskAssignmentCreate(BaseModel):
++    resource_id: str
++    allocated_hours: Decimal
++
++
++# ---------- Resource ----------
++class ResourceCreate(BaseModel):
++    user_id: str
++    role_title: str
++    internal_cost_per_hour: Decimal
++    billing_rate_per_hour: Decimal
++    daily_capacity_hours: Decimal = Decimal("8")
++
++
++class ResourceUpdate(BaseModel):
++    role_title: str | None = None
++    internal_cost_per_hour: Decimal | None = None
++    billing_rate_per_hour: Decimal | None = None
++    daily_capacity_hours: Decimal | None = None
++
++
++# ---------- Timesheet ----------
++class TimesheetCreate(BaseModel):
++    task_id: str
++    date: date
++    hours_spent: Decimal = Field(gt=0, le=24)
++    description: str | None = None
++
++
++# ---------- ProjectExpense ----------
++class ProjectExpenseCreate(BaseModel):
++    description: str
++    category: str
++    amount: Decimal
++    expense_date: date
++
++
++# ---------- Calendar / Holiday ----------
++class CalendarCreate(BaseModel):
++    name: str
++    working_days: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
++
++
++class HolidayCreate(BaseModel):
++    date: date
++    description: str
++
++
++# ---------- Risk ----------
++class RiskCreate(BaseModel):
++    description: str
++    probability: RiskLevel
++    impact: RiskLevel
++    mitigation_plan: str | None = None
++
++
++class RiskUpdate(BaseModel):
++    description: str | None = None
++    probability: RiskLevel | None = None
++    impact: RiskLevel | None = None
++    mitigation_plan: str | None = None
++    status: RiskStatus | None = None
++
++
++# ---------- ChangeRequest ----------
++class ChangeRequestCreate(BaseModel):
++    description: str
++    cost_impact: Decimal = Decimal("0")
++    schedule_impact_days: int = 0
++
++
++class ChangeRequestDecision(BaseModel):
++    status: ChangeStatus
++
++
++# ---------- Baseline ----------
++class BaselineCreate(BaseModel):
++    version_name: str
+diff --git a/app/security.py b/app/security.py
+new file mode 100644
+index 0000000..de141c8
+--- /dev/null
++++ b/app/security.py
+@@ -0,0 +1,30 @@
++from __future__ import annotations
++
++import hashlib
++import hmac
++import secrets
++
++# PBKDF2-HMAC-SHA256, biblioteca padrão apenas (sem dependência extra de bcrypt/passlib).
++# Formato armazenado: "pbkdf2_sha256$<iterações>$<salt hex>$<hash hex>"
++_ALGORITHM = "pbkdf2_sha256"
++_ITERATIONS = 390_000
++
++
++def hash_password(password: str) -> str:
++    if not password:
++        raise ValueError("Senha não pode ser vazia")
++    salt = secrets.token_hex(16)
++    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), _ITERATIONS)
++    return f"{_ALGORITHM}${_ITERATIONS}${salt}${digest.hex()}"
++
++
++def verify_password(password: str, stored_hash: str) -> bool:
++    try:
++        algorithm, iterations_str, salt, expected_hex = stored_hash.split("$")
++        if algorithm != _ALGORITHM:
++            return False
++        iterations = int(iterations_str)
++    except (ValueError, AttributeError):
++        return False
++    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), iterations)
++    return hmac.compare_digest(digest.hex(), expected_hex)
+diff --git a/app/services.py b/app/services.py
+index 1f7ce06..7012e32 100644
+--- a/app/services.py
++++ b/app/services.py
+@@ -4,10 +4,10 @@ from collections import defaultdict
+ from datetime import date, timedelta
+ from decimal import Decimal
+ 
+-from sqlalchemy import select
++from sqlalchemy import func, select
+ from sqlalchemy.orm import Session
+ 
+-from .models import Calendar, DependencyType, Holiday, Project, Task, TaskDependency, Timesheet, Resource, ProjectExpense
++from .models import Calendar, DependencyType, Holiday, Project, Task, TaskDependency, Timesheet, TimesheetStatus, Resource, ProjectExpense
+ 
+ 
+ class BusinessCalendar:
+@@ -112,10 +112,30 @@ def project_financials(session: Session, project_id: str) -> dict[str, Decimal]:
+         select(Timesheet.hours_spent, Resource.internal_cost_per_hour)
+         .join(Resource, Resource.id == Timesheet.resource_id)
+         .join(Task, Task.id == Timesheet.task_id)
+-        .where(Task.project_id == project_id, Timesheet.status != "REJECTED")
++        .where(Task.project_id == project_id, Timesheet.status != TimesheetStatus.REJECTED)
+     ).all()
+     timesheet_cost = sum((Decimal(hours) * Decimal(rate) for hours, rate in rows), Decimal("0"))
+     expense_cost = sum((Decimal(x) for x in session.scalars(select(ProjectExpense.amount).where(ProjectExpense.project_id == project_id)).all()), Decimal("0"))
+     real_cost = timesheet_cost + expense_cost
+     sold = Decimal(project.sold_value or 0)
+     return {"sold_value": sold, "timesheet_cost": timesheet_cost, "expense_cost": expense_cost, "real_cost": real_cost, "profit_margin": sold - real_cost}
++
++
++def recalc_task_actual_hours(session: Session, task_id: str) -> Decimal:
++    """Recalcula Task.actual_hours como a soma dos timesheets aprovados da tarefa.
++
++    Timesheets PENDING/REJECTED não contam como horas realizadas; só a aprovação
++    de um apontamento deve mover a tarefa. Chamar sempre que um timesheet mudar
++    de status (aprovar/rejeitar/reverter) para manter o campo consistente.
++    """
++    task = session.get(Task, task_id)
++    if not task:
++        raise ValueError("Tarefa não encontrada")
++    total = session.scalar(
++        select(func.sum(Timesheet.hours_spent)).where(
++            Timesheet.task_id == task_id, Timesheet.status == TimesheetStatus.APPROVED
++        )
++    )
++    task.actual_hours = Decimal(total) if total is not None else Decimal("0")
++    session.flush()
++    return task.actual_hours
+diff --git a/requirements.txt b/requirements.txt
+index 7378543..a828f81 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -3,5 +3,6 @@ uvicorn[standard]>=0.30
+ sqlalchemy>=2.0
+ psycopg[binary]>=3.2
+ pydantic>=2.7
++email-validator>=2.1
+ pytest>=8.0
+ httpx>=0.27
+diff --git a/scripts/configurar_porta_3035.sh b/scripts/configurar_porta_3035.sh
+new file mode 100755
+index 0000000..ea6f01e
+--- /dev/null
++++ b/scripts/configurar_porta_3035.sh
+@@ -0,0 +1,50 @@
++#!/usr/bin/env bash
++# Configura o ambiente para expor a API na porta 3035, cria o .env quando
++# necessário, valida a senha do PostgreSQL, valida o docker-compose.yml e
++# executa o build. Na primeira execução, interrompe antes do
++# `docker compose up` para que a senha padrão seja trocada.
++set -euo pipefail
++
++cd "$(dirname "${BASH_SOURCE[0]}")/.."
++
++ENV_FILE=".env"
++ENV_EXAMPLE=".env.example"
++DEFAULT_PASSWORD="troque-esta-senha"
++
++if [ ! -f "$ENV_FILE" ]; then
++    if [ ! -f "$ENV_EXAMPLE" ]; then
++        echo "Erro: $ENV_EXAMPLE não encontrado." >&2
++        exit 1
++    fi
++    cp "$ENV_EXAMPLE" "$ENV_FILE"
++    echo "Arquivo $ENV_FILE criado a partir de $ENV_EXAMPLE."
++    echo "Edite $ENV_FILE e defina uma senha forte em POSTGRES_PASSWORD antes de continuar."
++    echo "Execute este script novamente depois de trocar a senha."
++    exit 0
++fi
++
++# shellcheck disable=SC1090
++set -a
++source "$ENV_FILE"
++set +a
++
++if [ -z "${POSTGRES_PASSWORD:-}" ] || [ "${POSTGRES_PASSWORD}" = "$DEFAULT_PASSWORD" ]; then
++    echo "Erro: defina uma senha forte em POSTGRES_PASSWORD dentro de $ENV_FILE (valor padrão ainda em uso)." >&2
++    exit 1
++fi
++
++if ! grep -q '^API_PORT=' "$ENV_FILE"; then
++    echo "API_PORT=3035" >> "$ENV_FILE"
++    echo "API_PORT=3035 adicionado a $ENV_FILE."
++else
++    sed -i.bak 's/^API_PORT=.*/API_PORT=3035/' "$ENV_FILE" && rm -f "$ENV_FILE.bak"
++fi
++
++echo "Validando docker-compose.yml..."
++docker compose config >/dev/null
++
++echo "Construindo as imagens..."
++docker compose build
++
++echo "Configuração concluída. Para subir os serviços, execute:"
++echo "  docker compose up -d"
+diff --git a/tests/conftest.py b/tests/conftest.py
+new file mode 100644
+index 0000000..c01590c
+--- /dev/null
++++ b/tests/conftest.py
+@@ -0,0 +1,31 @@
++import pytest
++from fastapi.testclient import TestClient
++from sqlalchemy import create_engine
++from sqlalchemy.orm import sessionmaker
++
++from app.db import get_db
++from app.main import app
++from app.models import Base
++
++
++@pytest.fixture()
++def db_session():
++    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
++    Base.metadata.create_all(engine)
++    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
++    session = TestingSessionLocal()
++    try:
++        yield session
++    finally:
++        session.close()
++
++
++@pytest.fixture()
++def client(db_session):
++    def _override_get_db():
++        yield db_session
++
++    app.dependency_overrides[get_db] = _override_get_db
++    with TestClient(app) as test_client:
++        yield test_client
++    app.dependency_overrides.clear()
+diff --git a/tests/test_api.py b/tests/test_api.py
+new file mode 100644
+index 0000000..8d2a68f
+--- /dev/null
++++ b/tests/test_api.py
+@@ -0,0 +1,113 @@
++from decimal import Decimal
++
++
++def _create_user(client, name, email, role, client_id=None, actor_id=None):
++    headers = {"X-User-Id": actor_id} if actor_id else {}
++    resp = client.post(
++        "/users",
++        json={"name": name, "email": email, "password": "senha-forte-123", "role": role, "client_id": client_id},
++        headers=headers,
++    )
++    assert resp.status_code == 201, resp.text
++    return resp.json()["id"]
++
++
++def test_full_flow_bootstrap_project_task_timesheet_approval(client):
++    # Bootstrap: primeiro usuário do sistema, sem autenticação, precisa ser ADMIN.
++    admin_id = _create_user(client, "Admin", "admin@example.com", "ADMIN")
++
++    # Depois do bootstrap, criar usuário sem credencial deve falhar.
++    resp = client.post("/users", json={"name": "X", "email": "x@example.com", "password": "senha-forte-123", "role": "CONSULTANT"})
++    assert resp.status_code == 401
++
++    pm_id = _create_user(client, "Gerente", "pm@example.com", "INTERNAL_PM", actor_id=admin_id)
++    consultant_id = _create_user(client, "Consultor", "consultor@example.com", "CONSULTANT", actor_id=admin_id)
++
++    login = client.post("/auth/login", json={"email": "admin@example.com", "password": "senha-forte-123"})
++    assert login.status_code == 200
++    assert login.json()["user_id"] == admin_id
++
++    client_resp = client.post(
++        "/clients",
++        json={"code": "CLI-1", "legal_name": "Acme Ltda"},
++        headers={"X-User-Id": pm_id},
++    )
++    assert client_resp.status_code == 201, client_resp.text
++    client_id = client_resp.json()["id"]
++
++    project_resp = client.post(
++        "/projects",
++        json={"client_id": client_id, "manager_id": pm_id, "code": "PRJ-1", "name": "Implantação"},
++        headers={"X-User-Id": pm_id},
++    )
++    assert project_resp.status_code == 201, project_resp.text
++    project_id = project_resp.json()["id"]
++
++    resource_resp = client.post(
++        "/resources",
++        json={"user_id": consultant_id, "role_title": "Consultor Sênior", "internal_cost_per_hour": "80", "billing_rate_per_hour": "150"},
++        headers={"X-User-Id": pm_id},
++    )
++    assert resource_resp.status_code == 201, resource_resp.text
++
++    task_resp = client.post(
++        f"/projects/{project_id}/tasks",
++        json={"name": "Levantamento", "wbs_code": "1.1"},
++        headers={"X-User-Id": pm_id},
++    )
++    assert task_resp.status_code == 201, task_resp.text
++    task_id = task_resp.json()["id"]
++
++    # Criar tarefa com o mesmo wbs_code no mesmo projeto deve falhar (unicidade nova).
++    dup_resp = client.post(
++        f"/projects/{project_id}/tasks",
++        json={"name": "Duplicada", "wbs_code": "1.1"},
++        headers={"X-User-Id": pm_id},
++    )
++    assert dup_resp.status_code == 409
++
++    timesheet_resp = client.post(
++        "/timesheets",
++        json={"task_id": task_id, "date": "2026-09-01", "hours_spent": "5"},
++        headers={"X-User-Id": consultant_id},
++    )
++    assert timesheet_resp.status_code == 201, timesheet_resp.text
++    timesheet_id = timesheet_resp.json()["id"]
++
++    approve_resp = client.patch(f"/timesheets/{timesheet_id}/approve", headers={"X-User-Id": pm_id})
++    assert approve_resp.status_code == 200
++
++    tasks_resp = client.get(f"/projects/{project_id}/tasks", headers={"X-User-Id": pm_id})
++    assert tasks_resp.status_code == 200
++    task = next(t for t in tasks_resp.json() if t["id"] == task_id)
++    assert Decimal(task["actual_hours"]) == Decimal("5")
++
++
++def test_client_user_role_is_blocked_from_writing_via_api(client):
++    admin_id = _create_user(client, "Admin", "admin2@example.com", "ADMIN")
++    pm_id = _create_user(client, "Gerente", "pm2@example.com", "INTERNAL_PM", actor_id=admin_id)
++
++    client_resp = client.post("/clients", json={"code": "CLI-2", "legal_name": "Beta"}, headers={"X-User-Id": pm_id})
++    client_id = client_resp.json()["id"]
++
++    project_resp = client.post(
++        "/projects",
++        json={"client_id": client_id, "manager_id": pm_id, "code": "PRJ-2", "name": "Projeto Beta"},
++        headers={"X-User-Id": pm_id},
++    )
++    project_id = project_resp.json()["id"]
++
++    client_user_id = _create_user(client, "Usuário Cliente", "clientuser@example.com", "CLIENT_USER", client_id=client_id, actor_id=admin_id)
++
++    # Leitura permitida.
++    read_resp = client.get(f"/projects/{project_id}", headers={"X-User-Id": client_user_id})
++    assert read_resp.status_code == 200
++    assert "sold_value" not in read_resp.json()
++
++    # Escrita bloqueada — este é o comportamento corrigido do bug em require_project_access.
++    write_resp = client.post(
++        f"/projects/{project_id}/tasks",
++        json={"name": "Não deveria criar", "wbs_code": "9.9"},
++        headers={"X-User-Id": client_user_id},
++    )
++    assert write_resp.status_code == 403
+diff --git a/tests/test_authorization.py b/tests/test_authorization.py
+new file mode 100644
+index 0000000..0111e75
+--- /dev/null
++++ b/tests/test_authorization.py
+@@ -0,0 +1,58 @@
++import pytest
++from fastapi import HTTPException
++from sqlalchemy import create_engine
++from sqlalchemy.orm import Session
++
++from app.deps import require_project_access
++from app.models import Base, Client, Project, User, UserRole
++
++
++def session():
++    engine = create_engine("sqlite:///:memory:")
++    Base.metadata.create_all(engine)
++    return Session(engine)
++
++
++def _make_project_and_users(db):
++    client_a = Client(code="CLI-A", legal_name="Cliente A")
++    client_b = Client(code="CLI-B", legal_name="Cliente B")
++    pm = User(name="PM", email="pm@example.com", password_hash="x", role=UserRole.INTERNAL_PM)
++    db.add_all([client_a, client_b, pm])
++    db.flush()
++    project = Project(client_id=client_a.id, manager_id=pm.id, code="PRJ-A", name="Projeto A")
++    db.add(project)
++    db.flush()
++    client_pm = User(name="Cliente PM", email="client-pm@example.com", password_hash="x", role=UserRole.CLIENT_PM, client_id=client_a.id)
++    client_user = User(name="Cliente User", email="client-user@example.com", password_hash="x", role=UserRole.CLIENT_USER, client_id=client_a.id)
++    outsider = User(name="Outro cliente", email="outsider@example.com", password_hash="x", role=UserRole.CLIENT_PM, client_id=client_b.id)
++    db.add_all([client_pm, client_user, outsider])
++    db.commit()
++    return project, client_pm, client_user, outsider
++
++
++def test_client_user_cannot_write_within_own_project():
++    db = session()
++    project, client_pm, client_user, outsider = _make_project_and_users(db)
++    # Leitura é permitida para CLIENT_USER dentro do próprio escopo.
++    require_project_access(project, client_user, write=False)
++    # Escrita não é permitida para CLIENT_USER — este é o bug corrigido:
++    # antes, essa checagem nunca disparava porque a condição testava um
++    # papel que já havia sido confirmado como pertencente ao conjunto oposto.
++    with pytest.raises(HTTPException) as exc:
++        require_project_access(project, client_user, write=True)
++    assert exc.value.status_code == 403
++
++
++def test_client_pm_can_write_within_own_scope():
++    db = session()
++    project, client_pm, client_user, outsider = _make_project_and_users(db)
++    # CLIENT_PM pode escrever dentro do próprio cliente.
++    require_project_access(project, client_pm, write=True)
++
++
++def test_external_user_cannot_access_project_of_another_client():
++    db = session()
++    project, client_pm, client_user, outsider = _make_project_and_users(db)
++    with pytest.raises(HTTPException) as exc:
++        require_project_access(project, outsider, write=False)
++    assert exc.value.status_code == 403
+diff --git a/tests/test_services.py b/tests/test_services.py
+index e08bbc5..29d9255 100644
+--- a/tests/test_services.py
++++ b/tests/test_services.py
+@@ -4,8 +4,8 @@ from decimal import Decimal
+ from sqlalchemy import create_engine
+ from sqlalchemy.orm import Session
+ 
+-from app.models import Base, Client, Project, Resource, Task, TaskDependency, Timesheet, ProjectExpense, User, UserRole
+-from app.services import BusinessCalendar, project_financials, reschedule_cascade
++from app.models import Base, Client, Project, Resource, Task, TaskDependency, Timesheet, TimesheetStatus, ProjectExpense, User, UserRole
++from app.services import BusinessCalendar, project_financials, recalc_task_actual_hours, reschedule_cascade
+ 
+ 
+ def session():
+@@ -42,3 +42,42 @@ def test_financials_hide_no_data_and_calculate_margin():
+     result = project_financials(db, project.id)
+     assert result["real_cost"] == Decimal("600.00")
+     assert result["profit_margin"] == Decimal("400.00")
++
++
++def test_financials_exclude_rejected_timesheet_using_enum_status():
++    # Regressão do bug em que o filtro comparava Timesheet.status com a string
++    # literal "REJECTED" em vez do enum TimesheetStatus.REJECTED.
++    db = session()
++    client = Client(code="CLI-3", legal_name="Gama")
++    user = User(name="PM", email="pm3@example.com", password_hash="x", role=UserRole.INTERNAL_PM)
++    db.add_all([client, user]); db.flush()
++    project = Project(client_id=client.id, manager_id=user.id, code="PRJ-3", name="Projeto", sold_value=Decimal("1000"))
++    db.add(project); db.flush()
++    task = Task(project_id=project.id, name="Tarefa", wbs_code="1")
++    resource = Resource(user_id=user.id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100"))
++    db.add_all([task, resource]); db.flush()
++    db.add(Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 24), hours_spent=Decimal("10"), status=TimesheetStatus.APPROVED))
++    db.add(Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 25), hours_spent=Decimal("5"), status=TimesheetStatus.REJECTED))
++    db.commit()
++    result = project_financials(db, project.id)
++    # Só as 10h aprovadas devem entrar no custo; as 5h rejeitadas, não.
++    assert result["timesheet_cost"] == Decimal("500.00")
++
++
++def test_recalc_task_actual_hours_counts_only_approved():
++    db = session()
++    client = Client(code="CLI-4", legal_name="Delta")
++    user = User(name="PM", email="pm4@example.com", password_hash="x", role=UserRole.INTERNAL_PM)
++    db.add_all([client, user]); db.flush()
++    project = Project(client_id=client.id, manager_id=user.id, code="PRJ-4", name="Projeto")
++    db.add(project); db.flush()
++    task = Task(project_id=project.id, name="Tarefa", wbs_code="1")
++    resource = Resource(user_id=user.id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100"))
++    db.add_all([task, resource]); db.flush()
++    db.add(Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 24), hours_spent=Decimal("6"), status=TimesheetStatus.APPROVED))
++    db.add(Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 25), hours_spent=Decimal("3"), status=TimesheetStatus.PENDING))
++    db.add(Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 26), hours_spent=Decimal("8"), status=TimesheetStatus.REJECTED))
++    db.commit()
++    total = recalc_task_actual_hours(db, task.id)
++    assert total == Decimal("6")
++    assert task.actual_hours == Decimal("6")
+-- 
+2.43.0
+

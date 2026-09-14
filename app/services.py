@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Calendar, DependencyType, Holiday, Project, Task, TaskDependency, Timesheet, Resource, ProjectExpense
+from .models import Calendar, DependencyType, Holiday, Project, Task, TaskAssignment, TaskDependency, Timesheet, Resource, ProjectExpense
 
 
 class BusinessCalendar:
@@ -65,14 +66,14 @@ def _successor_start(cal: BusinessCalendar, predecessor: Task, successor: Task, 
     if dependency.dependency_type == DependencyType.SS:
         return cal.next_working_day(lagged_start)
     if dependency.dependency_type == DependencyType.FF:
-        successor_duration = _duration_days(cal, successor.planned_start_date or lagged_end, successor.planned_end_date or lagged_end)
+        successor_duration = max(1, int(successor.duration_days or _duration_days(cal, successor.planned_start_date or lagged_end, successor.planned_end_date or lagged_end)))
         return cal.add_working_days(lagged_end, -(successor_duration - 1))
     # SF: sucessora termina quando a predecessora inicia; derive início pela duração atual.
-    successor_duration = _duration_days(cal, successor.planned_start_date or lagged_start, successor.planned_end_date or lagged_start)
+    successor_duration = max(1, int(successor.duration_days or _duration_days(cal, successor.planned_start_date or lagged_start, successor.planned_end_date or lagged_start)))
     return cal.add_working_days(lagged_start, -(successor_duration - 1))
 
 
-def reschedule_cascade(session: Session, changed_task_id: str, cal: BusinessCalendar) -> list[Task]:
+def reschedule_cascade(session: Session, changed_task_id: str, cal: BusinessCalendar, calendar_resolver: Callable[[Task], BusinessCalendar] | None = None) -> list[Task]:
     """Recalcula sucessoras em profundidade; rejeita ciclos no grafo de dependências."""
     changed = session.get(Task, changed_task_id)
     if not changed:
@@ -89,11 +90,12 @@ def reschedule_cascade(session: Session, changed_task_id: str, cal: BusinessCale
             successor = session.get(Task, dep.successor_task_id)
             if not successor:
                 continue
+            successor_calendar = calendar_resolver(successor) if calendar_resolver else cal
             old_start = successor.planned_start_date
-            new_start = _successor_start(cal, predecessor, successor, dep)
-            duration = _duration_days(cal, successor.planned_start_date or new_start, successor.planned_end_date or new_start)
+            new_start = _successor_start(successor_calendar, predecessor, successor, dep)
+            duration = max(1, int(successor.duration_days or _duration_days(successor_calendar, successor.planned_start_date or new_start, successor.planned_end_date or new_start)))
             successor.planned_start_date = new_start
-            successor.planned_end_date = cal.add_working_days(new_start, duration - 1)
+            successor.planned_end_date = successor_calendar.add_working_days(new_start, duration - 1)
             if successor.planned_start_date != old_start:
                 updated.append(successor)
             visit(successor)
@@ -102,6 +104,182 @@ def reschedule_cascade(session: Session, changed_task_id: str, cal: BusinessCale
     visit(changed)
     session.flush()
     return updated
+
+
+def task_tree_ids(session: Session, task_id: str) -> list[str]:
+    """Retorna a tarefa e todos os descendentes, preservando o escopo do projeto."""
+    task = session.get(Task, task_id)
+    if not task:
+        return []
+    tasks = session.scalars(select(Task).where(Task.project_id == task.project_id)).all()
+    children_by_parent: dict[str | None, list[Task]] = defaultdict(list)
+    for row in tasks:
+        children_by_parent[row.parent_task_id].append(row)
+    result: list[str] = []
+    visiting: set[str] = set()
+
+    def visit(current_id: str) -> None:
+        if current_id in visiting:
+            raise ValueError("Ciclo detectado na hierarquia de tarefas")
+        visiting.add(current_id)
+        result.append(current_id)
+        for child in children_by_parent.get(current_id, []):
+            visit(child.id)
+        visiting.remove(current_id)
+
+    visit(task_id)
+    return result
+
+
+def renumber_task_tree(session: Session, project_id: str) -> None:
+    """Gera WBS 1, 1.1, 1.2... a partir da hierarquia pai/filho.
+
+    A ordem entre irmãos preserva o código anterior quando existir; uma tarefa
+    nova, sem código, entra ao final da lista de irmãos. O cliente não controla
+    mais o código: ele é sempre reescrito antes do commit.
+    """
+    tasks = session.scalars(select(Task).where(Task.project_id == project_id)).all()
+    children_by_parent: dict[str | None, list[Task]] = defaultdict(list)
+    previous_order: dict[str, tuple[tuple[int, ...], str]] = {}
+    for row in tasks:
+        children_by_parent[row.parent_task_id].append(row)
+        pieces: list[int] = []
+        try:
+            pieces = [int(piece) for piece in (row.wbs_code or "").split(".") if piece != ""]
+        except ValueError:
+            pieces = []
+        previous_order[row.id] = (tuple(pieces) if pieces else (10**9,), row.id)
+    for siblings in children_by_parent.values():
+        siblings.sort(key=lambda row: previous_order[row.id])
+
+    visited: set[str] = set()
+
+    def assign(parent_id: str | None, prefix: str, path: set[str]) -> None:
+        for index, row in enumerate(children_by_parent.get(parent_id, []), start=1):
+            if row.id in path:
+                raise ValueError("Ciclo detectado na hierarquia de tarefas")
+            if row.id in visited:
+                continue
+            visited.add(row.id)
+            row.wbs_code = f"{prefix}.{index}" if prefix else str(index)
+            assign(row.id, row.wbs_code, path | {row.id})
+
+    assign(None, "", set())
+    # Não descartar silenciosamente uma árvore corrompida: a API deve sinalizar.
+    if len(visited) != len(tasks):
+        raise ValueError("A hierarquia contém tarefa órfã ou ciclo")
+    session.flush()
+
+
+def rollup_task_derived_fields(session: Session, project_id: str, calendar_resolver: Callable[[Task], BusinessCalendar] | None = None, capacity_resolver: Callable[[Task], Decimal] | None = None) -> None:
+    """Consolida horas e agenda dos pais a partir da árvore de tarefas.
+
+    Para uma tarefa com filhos, as horas são a soma recursiva das folhas. O
+    intervalo planejado cobre o menor início e o maior término dos filhos; a
+    duração é contada em dias úteis. Se os filhos ainda não tiverem datas, a
+    duração usa oito horas úteis por dia como fallback e as datas ficam vazias.
+    """
+    tasks = session.scalars(select(Task).where(Task.project_id == project_id)).all()
+    by_id = {row.id: row for row in tasks}
+    children_by_parent: dict[str | None, list[Task]] = defaultdict(list)
+    for row in tasks:
+        children_by_parent[row.parent_task_id].append(row)
+    visiting: set[str] = set()
+
+    def total(task: Task) -> Decimal:
+        if task.id in visiting:
+            raise ValueError("Ciclo detectado na hierarquia de tarefas")
+        visiting.add(task.id)
+        children = children_by_parent.get(task.id, [])
+        if children:
+            child_totals = [total(child) for child in children]
+            task.estimated_hours = sum(child_totals, Decimal("0"))
+            starts = [child.planned_start_date for child in children if child.planned_start_date]
+            ends = [child.planned_end_date for child in children if child.planned_end_date]
+            task.planned_start_date = min(starts) if starts else None
+            task.planned_end_date = max(ends) if ends else None
+            capacity = capacity_resolver(task) if capacity_resolver else Decimal("8")
+            task.duration_days = max(1, int((task.estimated_hours / max(capacity, Decimal("0.01"))).to_integral_value(rounding=ROUND_CEILING)))
+        value = Decimal(task.estimated_hours or 0)
+        visiting.remove(task.id)
+        return value
+
+    for row in tasks:
+        if row.parent_task_id is None or row.parent_task_id not in by_id:
+            total(row)
+    session.flush()
+
+
+def rollup_estimated_hours(session: Session, project_id: str) -> None:
+    """Compatibilidade: consolida horas e campos planejados da hierarquia."""
+    rollup_task_derived_fields(session, project_id)
+
+
+def normalize_task_hierarchy(session: Session, project_id: str, calendar_resolver: Callable[[Task], BusinessCalendar] | None = None, capacity_resolver: Callable[[Task], Decimal] | None = None) -> None:
+    renumber_task_tree(session, project_id)
+    rollup_task_derived_fields(session, project_id, calendar_resolver, capacity_resolver)
+
+
+def task_actuals(session: Session, task_id: str) -> dict[str, Decimal | date | None]:
+    task_ids = task_tree_ids(session, task_id) or [task_id]
+    rows = session.execute(
+        select(Timesheet.date, Timesheet.hours_spent, Resource.internal_cost_per_hour)
+        .join(Resource, Resource.id == Timesheet.resource_id)
+        .where(Timesheet.task_id.in_(task_ids), Timesheet.status != "REJECTED")
+        .order_by(Timesheet.date)
+    ).all()
+    actual_hours = sum((Decimal(hours) for _, hours, _ in rows), Decimal("0"))
+    actual_cost = sum((Decimal(hours) * Decimal(rate) for _, hours, rate in rows), Decimal("0"))
+    return {
+        "actual_hours": actual_hours,
+        "actual_cost": actual_cost,
+        "actual_start_date": rows[0][0] if rows else None,
+        "actual_end_date": rows[-1][0] if rows else None,
+    }
+
+
+def task_planned_progress(task: Task, cal: BusinessCalendar, today: date | None = None) -> Decimal:
+    today = today or date.today()
+    if not task.planned_start_date or not task.planned_end_date:
+        return Decimal("0")
+    start = cal.next_working_day(task.planned_start_date)
+    end = task.planned_end_date
+    if today < start:
+        return Decimal("0")
+    total = _duration_days(cal, start, end)
+    if today >= end:
+        return Decimal("100")
+    elapsed = _duration_days(cal, start, min(today, end))
+    return (Decimal(elapsed) / Decimal(total) * Decimal("100")).quantize(Decimal("0.01"))
+
+
+def task_evm(session: Session, task: Task, cal: BusinessCalendar, today: date | None = None) -> dict[str, Decimal | date | None]:
+    actuals = task_actuals(session, task.id)
+    task_ids = task_tree_ids(session, task.id) or [task.id]
+    assignments = session.execute(
+        select(TaskAssignment.allocated_hours, Resource.internal_cost_per_hour)
+        .join(Resource, Resource.id == TaskAssignment.resource_id)
+        .where(TaskAssignment.task_id.in_(task_ids))
+    ).all()
+    budget = sum((Decimal(hours) * Decimal(rate) for hours, rate in assignments), Decimal("0"))
+    if budget <= 0:
+        budget = Decimal(task.estimated_hours or 0)
+    planned = task_planned_progress(task, cal, today)
+    actual = Decimal(task.progress_percentage or 0)
+    pv = (budget * planned / Decimal("100")).quantize(Decimal("0.01"))
+    ev = (budget * actual / Decimal("100")).quantize(Decimal("0.01"))
+    ac = Decimal(actuals["actual_cost"] or 0)
+    spi = (ev / pv).quantize(Decimal("0.01")) if pv > 0 else (Decimal("1.00") if ev == 0 else Decimal("0.00"))
+    cpi = (ev / ac).quantize(Decimal("0.01")) if ac > 0 else (Decimal("1.00") if ev == 0 else Decimal("0.00"))
+    return {
+        **actuals,
+        "planned_percentage": planned,
+        "earned_value": ev,
+        "planned_value": pv,
+        "actual_cost": ac,
+        "spi": spi,
+        "cpi": cpi,
+    }
 
 
 def project_financials(session: Session, project_id: str) -> dict[str, Decimal]:
