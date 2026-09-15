@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,12 +15,37 @@ from ..models import (
     Task,
     TaskAssignment,
     Timesheet,
+    TimesheetStatus,
     User,
     UserRole,
 )
 from ..schemas import TimesheetCreate, TimesheetRead, TimesheetStatusUpdate
 
 router = APIRouter(tags=["timesheets"])
+
+
+def _recalculate_actual_hours(db: Session, task_id: str) -> None:
+    """Mantém `Task.actual_hours` como a soma dos timesheets APROVADOS da
+    tarefa. Recalcula do zero a cada mudança de status (em vez de somar/
+    subtrair incrementalmente) para nunca deixar o total dessincronizar.
+
+    Esse campo existe no modelo desde a versão original, mas nada nunca o
+    atualizava — toda tarefa ficava com `actual_hours = 0` para sempre.
+
+    Soma em Python (em vez de `func.sum` no SQL) pelo mesmo motivo de
+    `project_financials` em services.py: evita depender de como cada dialeto
+    tipa o resultado de um agregado, e trabalha direto com os `Decimal`
+    que o SQLAlchemy já entrega para colunas `Numeric`.
+    """
+    task = db.get(Task, task_id)
+    if not task:
+        return
+    hours = db.scalars(
+        select(Timesheet.hours_spent).where(
+            Timesheet.task_id == task_id, Timesheet.status == TimesheetStatus.APPROVED
+        )
+    ).all()
+    task.actual_hours = sum((Decimal(h) for h in hours), Decimal("0"))
 
 
 @router.post("/timesheets", response_model=TimesheetRead, status_code=status.HTTP_201_CREATED)
@@ -96,6 +123,7 @@ def update_timesheet_status(
     if not entry:
         raise HTTPException(status_code=404, detail="Apontamento não encontrado")
     entry.status = data.status
+    _recalculate_actual_hours(db, entry.task_id)
     db.commit()
     db.refresh(entry)
     return entry

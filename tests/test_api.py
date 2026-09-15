@@ -156,6 +156,56 @@ def test_timesheet_requires_assignment_active_project_and_rejects_duplicates(cli
     assert duplicate.status_code == 409
 
 
+def test_approving_timesheet_updates_task_actual_hours(client, setup):
+    """Regressão: Task.actual_hours nunca era recalculado a partir dos
+    timesheets aprovados (ficava sempre em 0)."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Tarefa", "wbs_code": "1"}, headers=admin_headers
+    ).json()
+    resource = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    ).json()
+    client.post(
+        f"/tasks/{task['id']}/assignments",
+        json={"resource_id": resource["id"], "allocated_hours": "20"},
+        headers=admin_headers,
+    )
+
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    timesheet = client.post(
+        "/timesheets",
+        json={"task_id": task["id"], "date": "2026-08-24", "hours_spent": "6"},
+        headers=consultant_headers,
+    ).json()
+
+    before = client.get(f"/tasks/{task['id']}", headers=admin_headers).json()
+    assert float(before["actual_hours"]) == 0.0
+
+    approved = client.patch(
+        f"/timesheets/{timesheet['id']}/status", json={"status": "APPROVED"}, headers=admin_headers
+    )
+    assert approved.status_code == 200
+    after_approval = client.get(f"/tasks/{task['id']}", headers=admin_headers).json()
+    assert float(after_approval["actual_hours"]) == 6.0
+
+    rejected = client.patch(
+        f"/timesheets/{timesheet['id']}/status", json={"status": "REJECTED"}, headers=admin_headers
+    )
+    assert rejected.status_code == 200
+    after_rejection = client.get(f"/tasks/{task['id']}", headers=admin_headers).json()
+    assert float(after_rejection["actual_hours"]) == 0.0
+
+
 def test_timesheet_blocked_when_project_not_active(client, setup):
     admin_headers = setup["admin_headers"]
     # project_b ainda está em PLANNING (nunca foi ativado no fixture setup).
