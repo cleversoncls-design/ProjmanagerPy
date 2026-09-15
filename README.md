@@ -12,8 +12,11 @@ Base em **Python 3.12, FastAPI, SQLAlchemy 2 e PostgreSQL 16**, preparada para e
 | `app/security.py` | Hash de senha (bcrypt) e emissão/validação de tokens JWT. |
 | `app/deps.py` | Dependências de autenticação e autorização (escopo por perfil/`client_id`). |
 | `app/schemas.py` | Modelos Pydantic de entrada/saída da API. |
-| `app/routers/` | Rotas da API, uma por domínio (auth, projetos, tarefas, timesheets, riscos, etc.). |
-| `app/main.py` | Monta a aplicação FastAPI, inclui os routers e trata erros de integridade do banco. |
+| `app/audit.py` | Helper de auditoria mínima (`record_audit`), usado pelos routers de negócio. |
+| `app/rate_limit.py` | Middleware opcional de rate limiting (janela deslizante em memória). |
+| `app/routers/` | Rotas da API, uma por domínio (auth, projetos, tarefas, timesheets, riscos, auditoria, etc.). |
+| `app/main.py` | Monta a aplicação FastAPI, inclui os routers, CORS e trata erros de integridade do banco. |
+| `alembic/` | Migrações versionadas de schema (ver seção própria abaixo). |
 | `docker-compose.yml` | Serviços `api` e `db`, persistência PostgreSQL, healthcheck e reinício automático. |
 | `Dockerfile` | Imagem reproduzível da API, rodando com usuário não-root. |
 | `scripts/seed_admin.py` | Cria o primeiro usuário `ADMIN` (necessário para começar a usar a API). |
@@ -77,6 +80,14 @@ curl http://localhost:3035/projects \
 
 O token expira em `JWT_EXPIRE_MINUTES` (padrão 480 minutos) e é assinado com `JWT_SECRET_KEY`. Troque essa chave por um valor aleatório forte antes de qualquer ambiente com dados reais — quem tiver a chave consegue forjar tokens.
 
+### CORS
+
+Por padrão, nenhuma origem de navegador é liberada (chamadas via curl, Swagger ou servidor-a-servidor continuam funcionando normalmente, pois CORS é uma restrição aplicada pelo navegador, não pela API). Para permitir que um front-end em outro domínio consuma a API diretamente do navegador, defina `CORS_ORIGINS` no `.env` com as origens autorizadas, separadas por vírgula:
+
+```bash
+CORS_ORIGINS=https://app.exemplo.com,https://admin.exemplo.com
+```
+
 ## Endpoints
 
 | Domínio | Rotas |
@@ -95,9 +106,52 @@ O token expira em `JWT_EXPIRE_MINUTES` (padrão 480 minutos) e é assinado com `
 | Riscos | `POST /projects/{project_id}/risks`, `GET /projects/{project_id}/risks`, `PATCH /risks/{id}` |
 | Mudanças | `POST /projects/{project_id}/change-requests`, `GET /projects/{project_id}/change-requests`, `PATCH /change-requests/{id}/status` |
 | Baselines | `POST /projects/{project_id}/baselines`, `GET /projects/{project_id}/baselines` |
+| Auditoria | `GET /audit-log?entity_type=&entity_id=&limit=` (ADMIN/INTERNAL_PM) |
 | Operação | `GET /health` |
 
 A documentação interativa (`/docs`) traz o schema completo de cada rota, incluindo os campos obrigatórios de cada payload.
+
+## Migrações de banco (Alembic)
+
+O projeto usa Alembic para controlar o schema do banco. A migração inicial (`alembic/versions/0001_initial_schema.py`) delega para `Base.metadata.create_all`/`drop_all` — a mesma definição de `app/models.py` já usada pelos testes — em vez de DDL escrito à mão tabela por tabela.
+
+```bash
+# Dentro do container da API (ou de um venv com requirements-dev.txt instalado):
+docker compose exec api alembic upgrade head
+# ou, em desenvolvimento local sem Docker:
+alembic upgrade head
+```
+
+Isso é seguro tanto para uma instalação nova quanto para um banco que já existia antes do Alembic (criado pelo `init_db()` automático no startup da API): `create_all` só cria tabelas que ainda não existem, então rodar `alembic upgrade head` num banco já populado apenas registra a versão atual na tabela `alembic_version`, sem recriar nada. O `init_db()` no startup continua rodando por conveniência (principalmente para o fallback SQLite e para os testes), mas a partir de agora **qualquer alteração de schema deve virar uma nova revisão Alembic**:
+
+```bash
+alembic revision --autogenerate -m "descrição da mudança"
+alembic upgrade head
+```
+
+`create_all` nunca altera uma tabela que já existe (não adiciona/remove coluna, não muda tipo, não cria índice novo em tabela existente) — por isso, sem uma migração real, uma mudança em `app/models.py` feita depois da primeira instalação simplesmente não chegaria ao banco de produção.
+
+## Auditoria
+
+Toda criação/atualização de projeto, tarefa, timesheet e mudança de status de solicitação de mudança grava uma entrada em `audit_logs` (quem fez, o quê, quando, e em qual registro — não um diff campo-a-campo completo, apenas os nomes dos campos alterados). Consulte pela API:
+
+```bash
+curl "http://localhost:3035/audit-log?entity_type=task&entity_id=<id>" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Restrito a `ADMIN` e `INTERNAL_PM` — é informação operacional interna sobre quem alterou o quê, não algo exposto a `CONSULTANT` nem aos perfis de cliente.
+
+## Rate limiting
+
+Um rate limiting básico por cliente (janela deslizante em memória, chave por header `Authorization` quando presente, senão por IP) está disponível mas **desativado por padrão** — não há custo nem risco de bloquear tráfego legítimo até ser explicitamente ligado:
+
+```bash
+RATE_LIMIT_MAX_REQUESTS=100
+RATE_LIMIT_WINDOW_SECONDS=60
+```
+
+O estado do contador vive na memória do processo da API: cada worker/réplica conta de forma independente, então isto é uma primeira barreira contra abuso vindo de uma única origem, não uma solução distribuída (para isso, um proxy/API gateway com um backend compartilhado como Redis é o caminho recomendado). Requisições acima do limite recebem `429 Too Many Requests`.
 
 ## Backup e restauração
 
@@ -144,4 +198,4 @@ uvicorn app.main:app --reload
 
 ## Próximas evoluções recomendadas
 
-Antes de produção, adicione Alembic para migrações versionadas, rotação de chave JWT/refresh tokens, auditoria (quem alterou o quê), rate limiting e observabilidade (logs estruturados, métricas). A criação automática das tabelas por `Base.metadata.create_all` é adequada para a primeira instalação, mas deve ser substituída por migrações controladas em ambientes produtivos.
+Antes de produção, considere rotação de chave JWT/refresh tokens e observabilidade (logs estruturados, métricas), além de expandir a auditoria e o rate limiting básicos já incluídos (veja as seções acima).
