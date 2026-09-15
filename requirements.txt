@@ -6,3 +6,4 @@ pydantic[email]>=2.7
 python-multipart>=0.0.9
 bcrypt>=4.1
 PyJWT>=2.9
+alembic>=1.13
