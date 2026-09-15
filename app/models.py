@@ -279,3 +279,25 @@ class TaskDependency(Base):
     dependency_type: Mapped[DependencyType] = mapped_column(nullable=False, default=DependencyType.FS)
     lag_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     __table_args__ = (UniqueConstraint("predecessor_task_id", "successor_task_id", name="uq_dependency_pair"),)
+
+
+class AuditAction(StrEnum):
+    CREATE = "CREATE"
+    UPDATE = "UPDATE"
+
+
+class AuditLog(Base):
+    """Registro mínimo de auditoria: quem criou/alterou qual registro e
+    quando. Não é um log de todas as leituras nem um diff campo-a-campo
+    completo — apenas o suficiente para responder "quem mexeu nisso e
+    quando" nas entidades de negócio mais sensíveis (projetos, tarefas,
+    timesheets, mudanças)."""
+
+    __tablename__ = "audit_logs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    action: Mapped[AuditAction] = mapped_column(nullable=False)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    details: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)

@@ -6,6 +6,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from .models import (
+    AuditAction,
     ChangeStatus,
     DependencyType,
     IntakeStatus,
@@ -395,4 +396,19 @@ class BaselineRead(ORMModel):
     project_id: str
     version_name: str
     snapshot_data: dict
+    created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Auditoria
+# ---------------------------------------------------------------------------
+
+
+class AuditLogRead(ORMModel):
+    id: str
+    entity_type: str
+    entity_id: str
+    action: AuditAction
+    user_id: str | None
+    details: dict | None
     created_at: datetime

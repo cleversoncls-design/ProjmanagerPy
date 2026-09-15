@@ -116,6 +116,31 @@ def test_duplicate_wbs_code_in_same_project_is_rejected(client, setup):
     assert second.status_code == 409
 
 
+def test_audit_log_records_actions_and_is_restricted_to_internal_management(client, setup):
+    """Regressão/cobertura da auditoria mínima: criar uma tarefa gera uma
+    entrada de auditoria, e a listagem só é acessível a ADMIN/INTERNAL_PM."""
+    admin_headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Tarefa", "wbs_code": "1"}, headers=admin_headers
+    ).json()
+
+    denied = client.get("/audit-log", headers=auth_headers(client, setup["consultant"].email))
+    assert denied.status_code == 403
+
+    response = client.get(
+        "/audit-log", params={"entity_type": "task", "entity_id": task["id"]}, headers=admin_headers
+    )
+    assert response.status_code == 200
+    entries = response.json()
+    assert len(entries) == 1
+    assert entries[0]["action"] == "CREATE"
+    assert entries[0]["entity_type"] == "task"
+    assert entries[0]["entity_id"] == task["id"]
+    assert entries[0]["user_id"] == setup["admin"].id
+
+
 def test_timesheet_requires_assignment_active_project_and_rejects_duplicates(client, setup):
     project_id = setup["project_a"].id
     admin_headers = setup["admin_headers"]

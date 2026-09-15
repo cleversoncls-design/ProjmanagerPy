@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
+from ..audit import record_audit
 from ..database import get_db
 from ..deps import get_current_user, require_project_access
-from ..models import Project, Resource, Task, TaskAssignment, TaskDependency, User
+from ..models import AuditAction, Project, Resource, Task, TaskAssignment, TaskDependency, User
 from ..schemas import (
     RescheduleRequest,
     TaskAssignmentCreate,
@@ -48,6 +49,8 @@ def create_task(
         raise HTTPException(status_code=409, detail="Já existe uma tarefa com este código WBS neste projeto")
     task = Task(project_id=project_id, **data.model_dump())
     db.add(task)
+    db.flush()
+    record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.CREATE, user_id=user.id)
     db.commit()
     db.refresh(task)
     return task
@@ -78,8 +81,11 @@ def update_task(
 ) -> Task:
     task = _get_task_or_404(db, task_id)
     require_project_access(task.project, user, write=True)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    for field, value in changes.items():
         setattr(task, field, value)
+    if changes:
+        record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.UPDATE, user_id=user.id, details={"fields": sorted(changes.keys())})
     db.commit()
     db.refresh(task)
     return task

@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..audit import record_audit
 from ..database import get_db
 from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access, require_roles
-from ..models import Client, Project, User, UserRole
+from ..models import AuditAction, Client, Project, User, UserRole
 from ..schemas import ProjectCreate, ProjectDetail, ProjectSummary, ProjectUpdate
 from ..services import project_financials
 
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 @router.post("", response_model=ProjectDetail, status_code=status.HTTP_201_CREATED)
 def create_project(
     data: ProjectCreate,
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
     db: Session = Depends(get_db),
 ) -> Project:
     if not db.get(Client, data.client_id):
@@ -28,6 +29,8 @@ def create_project(
         raise HTTPException(status_code=409, detail="Já existe um projeto com este código")
     project = Project(**data.model_dump())
     db.add(project)
+    db.flush()
+    record_audit(db, entity_type="project", entity_id=project.id, action=AuditAction.CREATE, user_id=user.id)
     db.commit()
     db.refresh(project)
     return project
@@ -82,6 +85,8 @@ def update_project(
         changes.pop("sold_value", None)
     for field, value in changes.items():
         setattr(project, field, value)
+    if changes:
+        record_audit(db, entity_type="project", entity_id=project.id, action=AuditAction.UPDATE, user_id=user.id, details={"fields": sorted(changes.keys())})
     db.commit()
     db.refresh(project)
     return project

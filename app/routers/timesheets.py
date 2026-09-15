@@ -6,9 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..audit import record_audit
 from ..database import get_db
 from ..deps import get_current_user, require_project_access, require_roles
 from ..models import (
+    AuditAction,
     Project,
     ProjectStatus,
     Resource,
@@ -86,6 +88,8 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
         description=data.description,
     )
     db.add(entry)
+    db.flush()
+    record_audit(db, entity_type="timesheet", entity_id=entry.id, action=AuditAction.CREATE, user_id=user.id)
     db.commit()
     db.refresh(entry)
     return entry
@@ -116,7 +120,7 @@ def list_timesheets(
 def update_timesheet_status(
     timesheet_id: str,
     data: TimesheetStatusUpdate,
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
     db: Session = Depends(get_db),
 ) -> Timesheet:
     entry = db.get(Timesheet, timesheet_id)
@@ -124,6 +128,14 @@ def update_timesheet_status(
         raise HTTPException(status_code=404, detail="Apontamento não encontrado")
     entry.status = data.status
     _recalculate_actual_hours(db, entry.task_id)
+    record_audit(
+        db,
+        entity_type="timesheet",
+        entity_id=entry.id,
+        action=AuditAction.UPDATE,
+        user_id=user.id,
+        details={"status": data.status.value},
+    )
     db.commit()
     db.refresh(entry)
     return entry
