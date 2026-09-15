@@ -7,7 +7,18 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Calendar, DependencyType, Holiday, Project, Task, TaskDependency, Timesheet, Resource, ProjectExpense
+from .models import (
+    Calendar,
+    DependencyType,
+    Holiday,
+    Project,
+    Task,
+    TaskDependency,
+    Timesheet,
+    TimesheetStatus,
+    Resource,
+    ProjectExpense,
+)
 
 
 class BusinessCalendar:
@@ -73,33 +84,101 @@ def _successor_start(cal: BusinessCalendar, predecessor: Task, successor: Task, 
 
 
 def reschedule_cascade(session: Session, changed_task_id: str, cal: BusinessCalendar) -> list[Task]:
-    """Recalcula sucessoras em profundidade; rejeita ciclos no grafo de dependências."""
+    """Recalcula as sucessoras a partir da tarefa alterada.
+
+    Duas propriedades importantes que a versão anterior (DFS recursivo) não
+    garantia:
+
+    1. Uma sucessora com MÚLTIPLAS predecessoras precisa respeitar a mais
+       restritiva (a que empurra o início mais tarde) entre todas elas, não
+       apenas a última visitada — por isso o grafo afetado é processado em
+       ordem topológica e a data final de cada sucessora é o `max()` dos
+       candidatos calculados a partir de cada uma de suas predecessoras.
+    2. A travessia é iterativa (fila de Kahn), então uma EAP muito profunda
+       não esbarra no limite de recursão do Python.
+
+    Ciclos no grafo de dependências continuam sendo rejeitados com
+    ValueError.
+    """
     changed = session.get(Task, changed_task_id)
     if not changed:
         raise ValueError("Tarefa não encontrada")
-    updated: list[Task] = []
-    visiting: set[str] = set()
 
-    def visit(predecessor: Task) -> None:
-        if predecessor.id in visiting:
-            raise ValueError("Ciclo detectado nas dependências")
-        visiting.add(predecessor.id)
-        deps = session.scalars(select(TaskDependency).where(TaskDependency.predecessor_task_id == predecessor.id)).all()
+    # 1) BFS a partir da tarefa alterada para descobrir todas as sucessoras
+    #    potencialmente afetadas (direta ou transitivamente).
+    affected: set[str] = set()
+    frontier = [changed_task_id]
+    while frontier:
+        current_id = frontier.pop()
+        deps = session.scalars(
+            select(TaskDependency).where(TaskDependency.predecessor_task_id == current_id)
+        ).all()
         for dep in deps:
-            successor = session.get(Task, dep.successor_task_id)
-            if not successor:
-                continue
-            old_start = successor.planned_start_date
-            new_start = _successor_start(cal, predecessor, successor, dep)
-            duration = _duration_days(cal, successor.planned_start_date or new_start, successor.planned_end_date or new_start)
-            successor.planned_start_date = new_start
-            successor.planned_end_date = cal.add_working_days(new_start, duration - 1)
-            if successor.planned_start_date != old_start:
-                updated.append(successor)
-            visit(successor)
-        visiting.remove(predecessor.id)
+            if dep.successor_task_id not in affected:
+                affected.add(dep.successor_task_id)
+                frontier.append(dep.successor_task_id)
 
-    visit(changed)
+    if not affected:
+        session.flush()
+        return []
+
+    # 2) Para cada sucessora afetada, carrega TODAS as suas dependências de
+    #    predecessora (inclusive as que não mudaram nesta cascata), porque a
+    #    data final precisa respeitar todas elas, não só o caminho que
+    #    disparou a mudança.
+    deps_by_successor: dict[str, list[TaskDependency]] = {}
+    in_degree: dict[str, int] = {tid: 0 for tid in affected}
+    successors_by_predecessor: dict[str, list[str]] = defaultdict(list)
+    for tid in affected:
+        deps = session.scalars(
+            select(TaskDependency).where(TaskDependency.successor_task_id == tid)
+        ).all()
+        deps_by_successor[tid] = deps
+        for dep in deps:
+            if dep.predecessor_task_id in affected:
+                in_degree[tid] += 1
+                successors_by_predecessor[dep.predecessor_task_id].append(tid)
+
+    # 3) Ordenação topológica (Kahn) do subconjunto afetado: uma sucessora só
+    #    é processada depois que todas as suas predecessoras afetadas já
+    #    tiverem sido recalculadas.
+    queue = [tid for tid, degree in in_degree.items() if degree == 0]
+    order: list[str] = []
+    remaining = dict(in_degree)
+    while queue:
+        node = queue.pop()
+        order.append(node)
+        for succ in successors_by_predecessor.get(node, []):
+            remaining[succ] -= 1
+            if remaining[succ] == 0:
+                queue.append(succ)
+
+    if len(order) != len(affected):
+        raise ValueError("Ciclo detectado nas dependências")
+
+    # 4) Recalcula cada sucessora, tomando a data mais tardia entre todas as
+    #    suas predecessoras (afetadas ou não).
+    updated: list[Task] = []
+    for successor_id in order:
+        successor = session.get(Task, successor_id)
+        if not successor:
+            continue
+        candidate_starts: list[date] = []
+        for dep in deps_by_successor[successor_id]:
+            predecessor = session.get(Task, dep.predecessor_task_id)
+            if not predecessor or not predecessor.planned_start_date or not predecessor.planned_end_date:
+                continue
+            candidate_starts.append(_successor_start(cal, predecessor, successor, dep))
+        if not candidate_starts:
+            continue
+        new_start = max(candidate_starts)
+        old_start = successor.planned_start_date
+        duration = _duration_days(cal, successor.planned_start_date or new_start, successor.planned_end_date or new_start)
+        successor.planned_start_date = new_start
+        successor.planned_end_date = cal.add_working_days(new_start, duration - 1)
+        if successor.planned_start_date != old_start:
+            updated.append(successor)
+
     session.flush()
     return updated
 
@@ -112,7 +191,7 @@ def project_financials(session: Session, project_id: str) -> dict[str, Decimal]:
         select(Timesheet.hours_spent, Resource.internal_cost_per_hour)
         .join(Resource, Resource.id == Timesheet.resource_id)
         .join(Task, Task.id == Timesheet.task_id)
-        .where(Task.project_id == project_id, Timesheet.status != "REJECTED")
+        .where(Task.project_id == project_id, Timesheet.status != TimesheetStatus.REJECTED)
     ).all()
     timesheet_cost = sum((Decimal(hours) * Decimal(rate) for hours, rate in rows), Decimal("0"))
     expense_cost = sum((Decimal(x) for x in session.scalars(select(ProjectExpense.amount).where(ProjectExpense.project_id == project_id)).all()), Decimal("0"))
