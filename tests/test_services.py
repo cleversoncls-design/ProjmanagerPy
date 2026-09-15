@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.models import Base, Client, Project, Resource, Task, TaskDependency, Timesheet, ProjectExpense, User, UserRole
+from app.models import Base, Client, DependencyType, Project, Resource, Task, TaskDependency, Timesheet, ProjectExpense, User, UserRole
 from app.services import BusinessCalendar, project_financials, reschedule_cascade
 
 
@@ -13,6 +13,17 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     return Session(engine)
+
+
+def _make_project(db, *, code: str) -> Project:
+    client = Client(code=code, legal_name=f"Cliente {code}")
+    user = User(name="PM", email=f"pm-{code.lower()}@example.com", password_hash="x", role=UserRole.INTERNAL_PM)
+    db.add_all([client, user])
+    db.flush()
+    project = Project(client_id=client.id, manager_id=user.id, code=code, name=f"Projeto {code}")
+    db.add(project)
+    db.flush()
+    return project
 
 
 def test_fs_cascade_skips_weekend_and_holiday():
@@ -81,6 +92,77 @@ def test_cascade_uses_most_restrictive_predecessor():
     assert updated[0].planned_start_date == date(2026, 8, 27)
     # Duração original de C (2 dias úteis) é preservada.
     assert updated[0].planned_end_date == date(2026, 8, 28)
+
+
+def test_ss_cascade_starts_successor_together_with_predecessor():
+    """SS (Start-to-Start): a sucessora deve iniciar junto com a predecessora
+    (sem lag), preservando sua própria duração original."""
+    db = session()
+    project = _make_project(db, code="PRJ-SS")
+
+    pred = Task(project_id=project.id, name="A", wbs_code="1", planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 26))
+    succ = Task(project_id=project.id, name="B", wbs_code="2", planned_start_date=date(2026, 9, 1), planned_end_date=date(2026, 9, 2))
+    db.add_all([pred, succ])
+    db.flush()
+    db.add(TaskDependency(predecessor_task_id=pred.id, successor_task_id=succ.id, dependency_type=DependencyType.SS))
+    db.commit()
+
+    updated = reschedule_cascade(db, pred.id, BusinessCalendar())
+
+    assert len(updated) == 1
+    assert updated[0].id == succ.id
+    # B passa a iniciar junto com A (24/08, segunda), preservando os 2 dias
+    # úteis de duração que já tinha (24/08 a 25/08).
+    assert updated[0].planned_start_date == date(2026, 8, 24)
+    assert updated[0].planned_end_date == date(2026, 8, 25)
+
+
+def test_ff_cascade_finishes_successor_together_with_predecessor():
+    """FF (Finish-to-Finish): a sucessora deve terminar junto com a
+    predecessora, com seu início recalculado para trás a partir da duração
+    original."""
+    db = session()
+    project = _make_project(db, code="PRJ-FF")
+
+    pred = Task(project_id=project.id, name="A", wbs_code="1", planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 26))
+    succ = Task(project_id=project.id, name="B", wbs_code="2", planned_start_date=date(2026, 8, 20), planned_end_date=date(2026, 8, 21))
+    db.add_all([pred, succ])
+    db.flush()
+    db.add(TaskDependency(predecessor_task_id=pred.id, successor_task_id=succ.id, dependency_type=DependencyType.FF))
+    db.commit()
+
+    updated = reschedule_cascade(db, pred.id, BusinessCalendar())
+
+    assert len(updated) == 1
+    assert updated[0].id == succ.id
+    # B (2 dias úteis de duração) passa a terminar junto com A, em 26/08
+    # (quarta), logo precisa iniciar em 25/08 (terça).
+    assert updated[0].planned_start_date == date(2026, 8, 25)
+    assert updated[0].planned_end_date == date(2026, 8, 26)
+
+
+def test_sf_cascade_finishes_successor_when_predecessor_starts():
+    """SF (Start-to-Finish): a sucessora deve terminar quando a predecessora
+    inicia, com seu início recalculado para trás a partir da duração
+    original. É a dependência mais incomum das quatro, mas a API a expõe."""
+    db = session()
+    project = _make_project(db, code="PRJ-SF")
+
+    pred = Task(project_id=project.id, name="A", wbs_code="1", planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 26))
+    succ = Task(project_id=project.id, name="B", wbs_code="2", planned_start_date=date(2026, 8, 17), planned_end_date=date(2026, 8, 19))
+    db.add_all([pred, succ])
+    db.flush()
+    db.add(TaskDependency(predecessor_task_id=pred.id, successor_task_id=succ.id, dependency_type=DependencyType.SF))
+    db.commit()
+
+    updated = reschedule_cascade(db, pred.id, BusinessCalendar())
+
+    assert len(updated) == 1
+    assert updated[0].id == succ.id
+    # B (3 dias úteis de duração) passa a terminar quando A inicia (24/08,
+    # segunda), logo precisa iniciar em 20/08 (quinta).
+    assert updated[0].planned_start_date == date(2026, 8, 20)
+    assert updated[0].planned_end_date == date(2026, 8, 24)
 
 
 def test_cascade_detects_cycle():
