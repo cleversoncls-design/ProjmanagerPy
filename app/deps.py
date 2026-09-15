@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+from typing import Annotated
+
+import jwt
+from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy.orm import Session
+
+from .database import get_db
+from .models import Project, User, UserRole, UserStatus
+from .security import decode_access_token
+
+INTERNAL_ROLES = {UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.CONSULTANT}
+EXTERNAL_ROLES = {UserRole.CLIENT_PM, UserRole.CLIENT_USER}
+
+
+def get_current_user(
+    authorization: Annotated[str | None, Header()] = None,
+    db: Session = Depends(get_db),
+) -> User:
+    """Exige `Authorization: Bearer <token>` emitido por POST /auth/login.
+
+    Substitui o antigo adaptador de demonstração baseado no header
+    `X-User-Id` (que aceitava qualquer identidade informada pelo cliente,
+    sem nenhuma verificação de senha ou assinatura).
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token de acesso ausente",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        user_id = decode_access_token(token)
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido ou expirado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = db.get(User, user_id)
+    if not user or user.status != UserStatus.ACTIVE:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário inválido ou inativo")
+    return user
+
+
+def require_roles(*roles: UserRole):
+    """Fábrica de dependência: só libera a rota para os perfis informados."""
+
+    def dependency(user: User = Depends(get_current_user)) -> User:
+        if user.role not in roles:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Perfil sem permissão para esta operação")
+        return user
+
+    return dependency
+
+
+def require_project_access(project: Project, user: User, write: bool = False) -> None:
+    """Aplica o isolamento por cliente e a regra de escrita.
+
+    - Perfis internos (ADMIN, INTERNAL_PM, CONSULTANT) enxergam e escrevem em
+      qualquer projeto.
+    - Perfis externos (CLIENT_PM, CLIENT_USER) só enxergam projetos do
+      próprio `client_id`.
+    - Dentro do escopo do cliente, CLIENT_PM pode escrever; CLIENT_USER é
+      sempre somente leitura.
+
+    (Corrige o bug da versão anterior: a checagem de escrita comparava
+    `user.role not in {CLIENT_PM, CLIENT_USER}` sob a guarda `external`, que
+    por definição já exige `user.role in {CLIENT_PM, CLIENT_USER}` — as duas
+    condições nunca eram verdadeiras ao mesmo tempo, então a restrição de
+    escrita nunca era aplicada.)
+    """
+    if user.role in EXTERNAL_ROLES and project.client_id != user.client_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Projeto fora do escopo do cliente")
+    if write and user.role == UserRole.CLIENT_USER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Perfil sem permissão de escrita")

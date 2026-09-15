@@ -177,6 +177,7 @@ class Task(Base):
     is_milestone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     progress_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
     status: Mapped[TaskStatus] = mapped_column(nullable=False, default=TaskStatus.NOT_STARTED)
+    __table_args__ = (UniqueConstraint("project_id", "wbs_code", name="uq_task_project_wbs"),)
     project: Mapped[Project] = relationship(back_populates="tasks")
     parent: Mapped[Task | None] = relationship(remote_side=[id], back_populates="children")
     children: Mapped[list[Task]] = relationship(back_populates="parent")
@@ -255,6 +256,7 @@ class Risk(Base):
     impact: Mapped[RiskLevel] = mapped_column(nullable=False)
     mitigation_plan: Mapped[str | None] = mapped_column(Text)
     status: Mapped[RiskStatus] = mapped_column(nullable=False, default=RiskStatus.OPEN)
+    project: Mapped[Project] = relationship()
 
 
 class ChangeRequest(Base):
@@ -265,6 +267,7 @@ class ChangeRequest(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     cost_impact: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     schedule_impact_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    project: Mapped[Project] = relationship()
     status: Mapped[ChangeStatus] = mapped_column(nullable=False, default=ChangeStatus.PENDING)
 
 
