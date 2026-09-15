@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 from .database import init_db
+from .rate_limit import RateLimitMiddleware, rate_limit_settings
 from .routers import (
+    audit,
     auth,
     baselines,
     calendars,
@@ -36,6 +40,36 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Controle de Projetos Corporativo", version="0.2.0", lifespan=lifespan)
 
 
+def _cors_origins() -> list[str]:
+    """`CORS_ORIGINS` é uma lista separada por vírgulas de origens autorizadas
+    (ex.: "https://app.exemplo.com,https://admin.exemplo.com"). Sem a
+    variável definida, nenhuma origem de navegador é liberada — a API
+    continua acessível normalmente via curl/Swagger/servidor-a-servidor,
+    apenas sem os cabeçalhos de CORS que um browser exige."""
+    raw = os.getenv("CORS_ORIGINS", "")
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Desligado por padrão (RATE_LIMIT_MAX_REQUESTS=0) — só entra na pilha de
+# middlewares quando explicitamente habilitado, para não custar nada (nem
+# risco de flakiness nos testes) quando não está em uso.
+_rate_limit_max_requests, _rate_limit_window_seconds = rate_limit_settings()
+if _rate_limit_max_requests > 0:
+    app.add_middleware(
+        RateLimitMiddleware,
+        max_requests=_rate_limit_max_requests,
+        window_seconds=_rate_limit_window_seconds,
+    )
+
+
 @app.exception_handler(IntegrityError)
 async def integrity_error_handler(request: Request, exc: IntegrityError) -> JSONResponse:
     """Converte violações de integridade do banco (unicidade, FK, etc.) em uma
@@ -62,3 +96,4 @@ app.include_router(calendars.router)
 app.include_router(risks.router)
 app.include_router(changes.router)
 app.include_router(baselines.router)
+app.include_router(audit.router)
