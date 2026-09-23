@@ -14,7 +14,7 @@ Base em **Python 3.12, FastAPI, SQLAlchemy 2 e PostgreSQL 16**, preparada para e
 | `app/schemas.py` | Modelos Pydantic de entrada/saída da API. |
 | `app/audit.py` | Helper de auditoria mínima (`record_audit`), usado pelos routers de negócio. |
 | `app/rate_limit.py` | Middleware opcional de rate limiting (janela deslizante em memória). |
-| `app/routers/` | Rotas da API, uma por domínio (auth, projetos, tarefas, timesheets, riscos, auditoria, etc.). |
+| `app/routers/` | Rotas da API, uma por domínio (auth, projetos, tarefas, timesheets, riscos, auditoria, relatórios/dashboard, etc.). |
 | `app/main.py` | Monta a aplicação FastAPI, inclui os routers, CORS e trata erros de integridade do banco. |
 | `alembic/` | Migrações versionadas de schema (ver seção própria abaixo). |
 | `docker-compose.yml` | Serviços `api` e `db`, persistência PostgreSQL, healthcheck e reinício automático. |
@@ -108,6 +108,7 @@ CORS_ORIGINS=https://app.exemplo.com,https://admin.exemplo.com
 | Mudanças | `POST /projects/{project_id}/change-requests`, `GET /projects/{project_id}/change-requests`, `PATCH /change-requests/{id}/status` |
 | Baselines | `POST /projects/{project_id}/baselines`, `GET /projects/{project_id}/baselines` |
 | Auditoria | `GET /audit-log?entity_type=&entity_id=&limit=` (ADMIN/INTERNAL_PM) |
+| Relatórios / dashboard | `GET /dashboard`, `GET /reports/portfolio`, `GET /projects/{id}/report`, `GET /resources/utilization`, `GET /projects/{id}/risks/matrix`, `GET /reports/velocity`, `GET /reports/roi` (ADMIN/INTERNAL_PM), `GET /projects/{id}/gantt` |
 | Operação | `GET /health` |
 
 A documentação interativa (`/docs`) traz o schema completo de cada rota, incluindo os campos obrigatórios de cada payload.
@@ -146,7 +147,7 @@ alembic upgrade head
 
 `Project.sold_value` não é mais um campo de entrada — é sempre calculado como `management_hours × management_rate + consulting_hours × consulting_rate`, recalculado a cada `POST /projects` ou `PATCH /projects/{id}` que toque qualquer um desses quatro campos. Perfis externos (`CLIENT_PM`/`CLIENT_USER`) não podem alterá-los (o valor enviado é silenciosamente ignorado, mesmo padrão já usado para `sold_value` antes desta mudança) nem vê-los na resposta de `GET /projects/{id}`.
 
-Cada tarefa tem um `task_type` (acima) que indica se ela consome a bolsa de horas de gestão ou de consultoria — a apuração de quanto de cada bolsa já foi consumido fica para a Fase 2 (relatório financeiro), já que a base de dados para calcular isso já existe.
+Cada tarefa tem um `task_type` (acima) que indica se ela consome a bolsa de horas de gestão ou de consultoria — a apuração de quanto de cada bolsa já foi consumido está em `GET /projects/{id}/report` (`financials_by_task_type`, ver seção de relatórios abaixo).
 
 ## Calendário do recurso
 
@@ -159,6 +160,29 @@ Cada tarefa tem um `task_type` (acima) que indica se ela consome a bolsa de hora
 - **Vinculado a uma tarefa** (`task_id` informado): comportamento de sempre — exige `TaskAssignment` prévio, projeto `ACTIVE`, e bloqueia duplicidade por recurso+tarefa+data.
 - **Avulso vinculado a um projeto** (`project_id` informado, sem `task_id`): não exige alocação prévia, mas ainda exige acesso de escrita ao projeto e projeto `ACTIVE`. Entra no custo real do projeto (`project_financials`) e aparece em `GET /timesheets?project_id=`.
 - **Hora administrativa** (nem `task_id` nem `project_id`): qualquer recurso autenticado pode lançar, sem checagem de escopo de cliente — não é alocada a projeto nenhum.
+
+## Relatórios e dashboard (Fase 2)
+
+Endpoints somente-leitura que agregam dados já existentes — nenhum deles grava nada novo no banco. Todos respeitam o mesmo isolamento por `client_id`/`require_project_access` do resto da API: perfil externo só vê o(s) projeto(s) do próprio cliente, e nunca vê dado financeiro (`financials`, `financials_by_task_type`, `margin`, ROI).
+
+| Endpoint | O que traz |
+|---|---|
+| `GET /dashboard` | Visão de portfólio: contagem de projetos por status, tarefas por status/tipo, tarefas atrasadas, progresso médio, e a lista `portfolio` (uma linha por projeto). |
+| `GET /reports/portfolio` | Só a lista "uma linha por projeto" do dashboard (status, % concluído, tarefas restantes, margem, próximo marco) — útil quando só isso é preciso, sem o resto do payload do dashboard. Aceita `client_id` (perfis internos). |
+| `GET /projects/{id}/report` | Relatório do projeto: % concluído (ponderado por `estimated_hours`, não média simples entre tarefas), tarefas restantes, `financials` (Budget vs Actual, igual a `ProjectDetail.financials`), `financials_by_task_type` (quebra GESTÃO/CONSULTORIA/ADHOC) e `burndown`. |
+| `GET /resources/utilization` | Carga de trabalho por recurso: capacidade do período (dias úteis do calendário pessoal × capacidade diária), horas realmente apontadas no período, e horas alocadas (total de `TaskAssignment`, não filtrado por período — ver ressalva abaixo). Aceita `start`/`end` (padrão: mês corrente) e `resource_id`. Restrito a `ADMIN`/`INTERNAL_PM`/`CONSULTANT`. |
+| `GET /projects/{id}/risks/matrix` | Grade probabilidade × impacto (contagem por célula) e a lista de riscos `HIGH`/`HIGH` ainda não `CLOSED`. |
+| `GET /reports/velocity` | Horas entregues por semana ou mês (`granularity=week\|month`), opcionalmente filtradas por `project_id` e/ou `resource_id`. Sem `project_id`, é uma métrica de portfólio — perfil externo é obrigado a informar um `project_id` do próprio cliente. Padrão: últimos 90 dias. |
+| `GET /reports/roi` | `sold_value`, `real_cost` e `roi_percentage` por projeto (ou de todos, sem `project_id`). Restrito a `ADMIN`/`INTERNAL_PM`. |
+| `GET /projects/{id}/gantt` | Tarefas (ordenadas por WBS) + dependências do projeto num único payload, pronto para desenhar um Gantt sem N chamadas separadas. |
+
+Três decisões de design que valem registrar:
+
+- **Burndown sem snapshot diário**: `project_burndown` calcula a série sob demanda a partir dos dados atuais, em vez de gravar um snapshot por dia. "Planejado" assume que cada tarefa consome 100% da sua `estimated_hours` exatamente em `planned_end_date`; "realizado" é o acumulado de `Timesheet.hours_spent` (excluindo `REJECTED`) até cada data amostrada semanalmente entre o início e o fim do projeto. Mais simples e nunca fica dessincronizado dos dados reais — um snapshot congelado continua possível via `Baseline` (`snapshot_data`), se algum dia for preciso comparar contra um plano histórico específico em vez do plano atual.
+- **ROI = margem ÷ custo real**: não há uma receita externa própria a medir além do valor vendido do pacote (`sold_value`), então o ROI aqui é o retorno sobre o custo efetivamente incorrido no projeto — a leitura mais direta possível com os dados hoje modelados. `None` quando ainda não há custo real lançado.
+- **"Velocity" é literal**: horas entregues por semana/mês, confirmado com o usuário como a definição desejada — não é velocidade de Scrum/story points, e o sistema não modela nenhuma entidade de sprint.
+
+E uma ressalva conhecida: `TaskAssignment` não tem data própria neste modelo, então `allocated_hours` em `GET /resources/utilization` é o total alocado ao recurso em todas as tarefas, não o alocado especificamente dentro de `[start, end]` — só `capacity_hours` e `actual_hours` são de fato escopados ao período pedido.
 
 ## Auditoria
 
@@ -208,6 +232,8 @@ A função `project_financials` calcula o custo real como horas apontadas multip
 Perfis `CLIENT_PM` e `CLIENT_USER` só acessam projetos cujo `client_id` seja igual ao seu próprio; para esses perfis, a resposta de `GET /projects/{id}` omite `sold_value`, `financials` e os quatro campos de horas/taxa. Dentro do escopo do cliente, `CLIENT_PM` pode escrever (criar tarefas, riscos, mudanças, despesas) e validar tarefas (`client-approval`); `CLIENT_USER` é somente leitura em tudo, exceto validar tarefas — que é a própria razão desse perfil existir. Perfis internos (`ADMIN`, `INTERNAL_PM`, `CONSULTANT`) têm acesso de leitura e escrita a qualquer projeto.
 
 Um apontamento de horas vinculado a uma tarefa (`POST /timesheets` com `task_id`) só é aceito se: o projeto estiver `ACTIVE`; o usuário autenticado tiver um `Resource` cadastrado; e esse recurso estiver alocado à tarefa via `TaskAssignment`. Não é permitido mais de um apontamento do mesmo recurso, na mesma tarefa, na mesma data. Apontamentos avulsos (sem `task_id`) dispensam a alocação prévia — ver seção própria acima.
+
+`tasks.is_critical_path` é um campo gravável manualmente (`PATCH /tasks/{id}`), não calculado automaticamente por um motor de caminho crítico (CPM forward/backward pass) — `GET /projects/{id}/gantt` devolve o valor como está armazenado. Calcular o caminho crítico de verdade é uma extensão natural de `reschedule_cascade`, mas fica fora do escopo desta fase de relatórios.
 
 ## Desenvolvimento sem Docker
 
