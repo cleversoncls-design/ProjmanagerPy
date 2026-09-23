@@ -445,3 +445,90 @@ class AuditLogRead(ORMModel):
     user_id: str | None
     details: dict | None
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Relatórios / dashboard (Fase 2)
+# ---------------------------------------------------------------------------
+
+
+class ProjectPortfolioRow(BaseModel):
+    """Uma linha por projeto — usada tanto em GET /reports/portfolio quanto
+    dentro de GET /dashboard. `margin` e vem None para perfis externos (o
+    mesmo tratamento de ocultação de dado financeiro usado em
+    ProjectDetail)."""
+
+    id: str
+    code: str
+    name: str
+    status: ProjectStatus
+    percent_complete: Decimal
+    tasks_total: int
+    tasks_remaining: int
+    margin: Decimal | None = None
+    next_milestone_name: str | None = None
+    next_milestone_date: date | None = None
+
+
+class DashboardResponse(BaseModel):
+    projects_total: int
+    projects_by_status: dict[str, int]
+    tasks_total: int
+    tasks_by_status: dict[str, int]
+    tasks_by_type: dict[str, int]
+    tasks_overdue: int
+    avg_progress_percentage: Decimal
+    portfolio: list[ProjectPortfolioRow]
+
+
+class BurndownPoint(BaseModel):
+    date: date
+    planned_remaining_hours: Decimal
+    actual_remaining_hours: Decimal
+
+
+class ProjectReportResponse(BaseModel):
+    project_id: str
+    percent_complete: Decimal
+    tasks_total: int
+    tasks_remaining: int
+    tasks_by_status: dict[str, int]
+    financials: dict[str, Decimal] | None = None
+    financials_by_task_type: dict[str, dict[str, Decimal]] | None = None
+    burndown: list[BurndownPoint]
+
+
+class ResourceUtilizationRow(BaseModel):
+    resource_id: str
+    user_id: str
+    role_title: str
+    period_start: date
+    period_end: date
+    capacity_hours: Decimal
+    allocated_hours: Decimal
+    actual_hours: Decimal
+    utilization_percentage: Decimal | None
+
+
+class RiskMatrixResponse(BaseModel):
+    project_id: str
+    grid: dict[str, dict[str, int]]
+    high_priority: list[RiskRead]
+
+
+class VelocityPoint(BaseModel):
+    period_start: date
+    hours_delivered: Decimal
+
+
+class RoiRow(BaseModel):
+    project_id: str
+    code: str
+    sold_value: Decimal
+    real_cost: Decimal
+    roi_percentage: Decimal | None
+
+
+class GanttResponse(BaseModel):
+    tasks: list[TaskRead]
+    dependencies: list[TaskDependencyRead]
