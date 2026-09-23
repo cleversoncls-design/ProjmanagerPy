@@ -21,16 +21,22 @@ def build_database_url() -> str:
         return raw_database_url
     if os.getenv("POSTGRES_PASSWORD"):
         # URL.create escapa a senha corretamente; '@', ':', '/', '#' etc. não quebram o hostname.
-        return str(
-            URL.create(
-                "postgresql+psycopg",
-                username=os.getenv("POSTGRES_USER", "projmanager"),
-                password=os.environ["POSTGRES_PASSWORD"],
-                host=os.getenv("POSTGRES_HOST", "db"),
-                port=int(os.getenv("POSTGRES_PORT", "5432")),
-                database=os.getenv("POSTGRES_DB", "projmanager"),
-            )
-        )
+        #
+        # IMPORTANTE: str(url) (ou repr(url)) mascara a senha como "***" —
+        # é o comportamento padrão do SQLAlchemy desde a 1.4, pensado para
+        # não vazar credenciais em logs. Usar str() aqui faria a aplicação
+        # tentar autenticar literalmente com a senha "***", o que sempre
+        # falharia com "password authentication failed" mesmo com a senha
+        # certa no .env. render_as_string(hide_password=False) devolve a
+        # senha de verdade.
+        return URL.create(
+            "postgresql+psycopg",
+            username=os.getenv("POSTGRES_USER", "projmanager"),
+            password=os.environ["POSTGRES_PASSWORD"],
+            host=os.getenv("POSTGRES_HOST", "db"),
+            port=int(os.getenv("POSTGRES_PORT", "5432")),
+            database=os.getenv("POSTGRES_DB", "projmanager"),
+        ).render_as_string(hide_password=False)
     return "sqlite:///./controle_projetos.db"
 
 
