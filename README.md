@@ -98,6 +98,7 @@ CORS_ORIGINS=https://app.exemplo.com,https://admin.exemplo.com
 | Solicitações de projeto | `POST /clients/{client_id}/intakes`, `GET /clients/{client_id}/intakes`, `PATCH /intakes/{id}/status` |
 | Projetos | `POST /projects`, `GET /projects`, `GET /projects/{id}`, `PATCH /projects/{id}` |
 | Tarefas / EAP | `POST /projects/{project_id}/tasks`, `GET /projects/{project_id}/tasks`, `GET /tasks/{id}`, `PATCH /tasks/{id}` |
+| Aprovação da tarefa pelo cliente | `POST /tasks/{id}/submit-for-approval`, `PATCH /tasks/{id}/client-approval` (CLIENT_PM/CLIENT_USER) |
 | Dependências | `POST /task-dependencies`, `GET /tasks/{id}/dependencies`, `POST /tasks/{id}/reschedule` |
 | Recursos e alocação | `POST /resources`, `GET /resources/{id}`, `POST /tasks/{id}/assignments`, `GET /tasks/{id}/assignments` |
 | Timesheets | `POST /timesheets`, `GET /timesheets?project_id=\|task_id=`, `PATCH /timesheets/{id}/status` |
@@ -110,6 +111,16 @@ CORS_ORIGINS=https://app.exemplo.com,https://admin.exemplo.com
 | Operação | `GET /health` |
 
 A documentação interativa (`/docs`) traz o schema completo de cada rota, incluindo os campos obrigatórios de cada payload.
+
+## Tipo de tarefa e aprovação do cliente
+
+Toda tarefa tem um `task_type` (`MANAGEMENT` ou `CONSULTING`, padrão `CONSULTING`), usado para separar o consumo das horas vendidas por gestão das horas vendidas por consultoria (ver seção financeira abaixo).
+
+Independentemente do `status` de execução da tarefa (`NOT_STARTED`/`IN_PROGRESS`/`COMPLETED`/`DELAYED`), existe um segundo campo, `client_approval_status`, para o fluxo de validação pelo lado do cliente — uma tarefa pode estar `COMPLETED` e ainda não ter sido aprovada pelo cliente:
+
+- `NOT_REQUIRED` (padrão) → `POST /tasks/{id}/submit-for-approval` (quem tem acesso de escrita na tarefa) → `PENDING`.
+- `PENDING` → `PATCH /tasks/{id}/client-approval` com `{"status": "APPROVED"}` ou `{"status": "REJECTED", "comment": "..."}`, feito por `CLIENT_PM` ou `CLIENT_USER` do cliente do projeto. `CLIENT_USER` é somente-leitura em todo o resto da API, mas validar a própria tarefa é a razão desse perfil existir.
+- `REJECTED` pode ser resubmetido (`submit-for-approval` de novo), reiniciando o ciclo.
 
 ## Migrações de banco (Alembic)
 
@@ -129,7 +140,25 @@ alembic revision --autogenerate -m "descrição da mudança"
 alembic upgrade head
 ```
 
-`create_all` nunca altera uma tabela que já existe (não adiciona/remove coluna, não muda tipo, não cria índice novo em tabela existente) — por isso, sem uma migração real, uma mudança em `app/models.py` feita depois da primeira instalação simplesmente não chegaria ao banco de produção.
+`create_all` nunca altera uma tabela que já existe (não adiciona/remove coluna, não muda tipo, não cria índice novo em tabela existente) — por isso, sem uma migração real, uma mudança em `app/models.py` feita depois da primeira instalação simplesmente não chegaria ao banco de produção. A partir da `0002` isso já vale na prática: é a primeira migração com DDL de verdade (`op.add_column`/`op.alter_column`), em vez de delegar para `create_all` como a baseline `0001`.
+
+## Valor vendido do projeto (horas de gestão × consultoria)
+
+`Project.sold_value` não é mais um campo de entrada — é sempre calculado como `management_hours × management_rate + consulting_hours × consulting_rate`, recalculado a cada `POST /projects` ou `PATCH /projects/{id}` que toque qualquer um desses quatro campos. Perfis externos (`CLIENT_PM`/`CLIENT_USER`) não podem alterá-los (o valor enviado é silenciosamente ignorado, mesmo padrão já usado para `sold_value` antes desta mudança) nem vê-los na resposta de `GET /projects/{id}`.
+
+Cada tarefa tem um `task_type` (acima) que indica se ela consome a bolsa de horas de gestão ou de consultoria — a apuração de quanto de cada bolsa já foi consumido fica para a Fase 2 (relatório financeiro), já que a base de dados para calcular isso já existe.
+
+## Calendário do recurso
+
+`POST /resources` aceita um `calendar_id` opcional, vinculando o recurso (consultor/PM) a um calendário próprio de dias úteis/feriados — junto com o custo interno, a taxa de faturamento e a capacidade diária já existentes, fica reunido num único cadastro o "perfil completo" do recurso.
+
+## Apontamento avulso
+
+`POST /timesheets` aceita `task_id` opcional (era obrigatório). Três modos:
+
+- **Vinculado a uma tarefa** (`task_id` informado): comportamento de sempre — exige `TaskAssignment` prévio, projeto `ACTIVE`, e bloqueia duplicidade por recurso+tarefa+data.
+- **Avulso vinculado a um projeto** (`project_id` informado, sem `task_id`): não exige alocação prévia, mas ainda exige acesso de escrita ao projeto e projeto `ACTIVE`. Entra no custo real do projeto (`project_financials`) e aparece em `GET /timesheets?project_id=`.
+- **Hora administrativa** (nem `task_id` nem `project_id`): qualquer recurso autenticado pode lançar, sem checagem de escopo de cliente — não é alocada a projeto nenhum.
 
 ## Auditoria
 
@@ -174,11 +203,11 @@ docker compose start api
 
 O motor `reschedule_cascade` percorre o grafo de dependências em ordem topológica, detecta ciclos e recalcula cada sucessora pela predecessora mais restritiva entre todas as suas dependências (não apenas a última processada), ignorando finais de semana e feriados cadastrados. A tabela `task_dependencies` representa múltiplas relações predecessor/sucessor, enquanto `tasks.parent_task_id` permanece dedicada à hierarquia da EAP/WBS. O endpoint `POST /tasks/{id}/reschedule` aciona esse motor.
 
-A função `project_financials` calcula o custo real como horas apontadas multiplicadas pelo custo interno do recurso, acrescidas das despesas do projeto, excluindo timesheets rejeitados (`PENDING` e `APPROVED` entram no custo real). A margem é calculada como `sold_value - real_cost`.
+A função `project_financials` calcula o custo real como horas apontadas multiplicadas pelo custo interno do recurso (incluindo apontamentos avulsos alocados ao projeto via `project_id`, não só os vinculados a uma tarefa), acrescidas das despesas do projeto, excluindo timesheets rejeitados (`PENDING` e `APPROVED` entram no custo real). A margem é calculada como `sold_value - real_cost`, e `sold_value` por sua vez vem de `management_hours × management_rate + consulting_hours × consulting_rate` (seção própria acima).
 
-Perfis `CLIENT_PM` e `CLIENT_USER` só acessam projetos cujo `client_id` seja igual ao seu próprio; para esses perfis, a resposta de `GET /projects/{id}` omite `sold_value` e `financials`. Dentro do escopo do cliente, `CLIENT_PM` pode escrever (criar tarefas, riscos, mudanças, despesas); `CLIENT_USER` é sempre somente leitura. Perfis internos (`ADMIN`, `INTERNAL_PM`, `CONSULTANT`) têm acesso de leitura e escrita a qualquer projeto.
+Perfis `CLIENT_PM` e `CLIENT_USER` só acessam projetos cujo `client_id` seja igual ao seu próprio; para esses perfis, a resposta de `GET /projects/{id}` omite `sold_value`, `financials` e os quatro campos de horas/taxa. Dentro do escopo do cliente, `CLIENT_PM` pode escrever (criar tarefas, riscos, mudanças, despesas) e validar tarefas (`client-approval`); `CLIENT_USER` é somente leitura em tudo, exceto validar tarefas — que é a própria razão desse perfil existir. Perfis internos (`ADMIN`, `INTERNAL_PM`, `CONSULTANT`) têm acesso de leitura e escrita a qualquer projeto.
 
-Um apontamento de horas (`POST /timesheets`) só é aceito se: o projeto estiver `ACTIVE`; o usuário autenticado tiver um `Resource` cadastrado; e esse recurso estiver alocado à tarefa via `TaskAssignment`. Não é permitido mais de um apontamento do mesmo recurso, na mesma tarefa, na mesma data.
+Um apontamento de horas vinculado a uma tarefa (`POST /timesheets` com `task_id`) só é aceito se: o projeto estiver `ACTIVE`; o usuário autenticado tiver um `Resource` cadastrado; e esse recurso estiver alocado à tarefa via `TaskAssignment`. Não é permitido mais de um apontamento do mesmo recurso, na mesma tarefa, na mesma data. Apontamentos avulsos (sem `task_id`) dispensam a alocação prévia — ver seção própria acima.
 
 ## Desenvolvimento sem Docker
 
