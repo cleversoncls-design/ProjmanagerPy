@@ -60,6 +60,23 @@ class TaskStatus(StrEnum):
     DELAYED = "DELAYED"
 
 
+class TaskType(StrEnum):
+    MANAGEMENT = "MANAGEMENT"
+    CONSULTING = "CONSULTING"
+
+
+class TaskApprovalStatus(StrEnum):
+    """Aprovação da tarefa pelo lado do cliente (gerente de projeto do
+    cliente ou usuário-chave), independente do TaskStatus de execução —
+    uma tarefa pode estar COMPLETED e ainda não ter sido validada pelo
+    cliente."""
+
+    NOT_REQUIRED = "NOT_REQUIRED"
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
 class TimesheetStatus(StrEnum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
@@ -140,6 +157,16 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[ProjectStatus] = mapped_column(nullable=False, default=ProjectStatus.PLANNING)
     sold_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    # Quebra do valor vendido entre horas de gestão e de consultoria — cada
+    # bolsa tem sua própria quantidade de horas contratadas e seu próprio
+    # valor/hora. `sold_value` continua existindo como coluna (usado direto
+    # por project_financials), mas passa a ser CALCULADO a partir destes 4
+    # campos no momento de criar/atualizar o projeto (ver app/routers/projects.py),
+    # em vez de ser digitado diretamente.
+    management_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    management_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    consulting_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    consulting_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -165,6 +192,7 @@ class Task(Base):
     parent_task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     wbs_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    task_type: Mapped[TaskType] = mapped_column(nullable=False, default=TaskType.CONSULTING)
     estimated_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     actual_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     planned_start_date: Mapped[date | None] = mapped_column(Date)
@@ -177,6 +205,7 @@ class Task(Base):
     is_milestone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     progress_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
     status: Mapped[TaskStatus] = mapped_column(nullable=False, default=TaskStatus.NOT_STARTED)
+    client_approval_status: Mapped[TaskApprovalStatus] = mapped_column(nullable=False, default=TaskApprovalStatus.NOT_REQUIRED)
     __table_args__ = (UniqueConstraint("project_id", "wbs_code", name="uq_task_project_wbs"),)
     project: Mapped[Project] = relationship(back_populates="tasks")
     parent: Mapped[Task | None] = relationship(remote_side=[id], back_populates="children")
@@ -193,7 +222,12 @@ class Resource(Base):
     internal_cost_per_hour: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     billing_rate_per_hour: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     daily_capacity_hours: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=8)
+    # Calendário pessoal (dias úteis/feriados) usado para nivelar a agenda
+    # deste recurso — opcional; sem ele, o recálculo de cronograma usa o
+    # calendário do projeto/calendar_id informado explicitamente na chamada.
+    calendar_id: Mapped[str | None] = mapped_column(ForeignKey("calendars.id", ondelete="SET NULL"))
     user: Mapped[User] = relationship(back_populates="resource")
+    calendar: Mapped[Calendar | None] = relationship()
 
 
 class TaskAssignment(Base):
@@ -209,13 +243,19 @@ class TaskAssignment(Base):
 class Timesheet(Base):
     __tablename__ = "timesheets"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    # Apontamento "avulso" (sem tarefa pré-definida na EAP, padrão
+    # Clockify/Toggl): task_id fica nulo e project_id opcionalmente aloca o
+    # custo a um projeto sem exigir WBS. Os dois nulos = hora administrativa
+    # interna, sem alocação a nenhum projeto.
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     resource_id: Mapped[str] = mapped_column(ForeignKey("resources.id", ondelete="CASCADE"), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     hours_spent: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[TimesheetStatus] = mapped_column(nullable=False, default=TimesheetStatus.PENDING)
-    task: Mapped[Task] = relationship(back_populates="timesheets")
+    task: Mapped[Task | None] = relationship(back_populates="timesheets")
+    project: Mapped[Project | None] = relationship()
 
 
 class ProjectExpense(Base):

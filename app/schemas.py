@@ -13,7 +13,9 @@ from .models import (
     ProjectStatus,
     RiskLevel,
     RiskStatus,
+    TaskApprovalStatus,
     TaskStatus,
+    TaskType,
     TimesheetStatus,
     UserRole,
     UserStatus,
@@ -123,7 +125,14 @@ class ProjectCreate(BaseModel):
     manager_id: str
     code: str = Field(min_length=1, max_length=40)
     name: str = Field(min_length=1, max_length=255)
-    sold_value: Decimal = Field(default=Decimal("0"), ge=0)
+    # sold_value NÃO é mais um campo de entrada: é calculado no backend a
+    # partir das horas × taxa de gestão e de consultoria (ver
+    # app/routers/projects.py), para o valor vendido nunca ficar
+    # dessincronizado da composição real do pacote contratado.
+    management_hours: Decimal = Field(default=Decimal("0"), ge=0)
+    management_rate: Decimal = Field(default=Decimal("0"), ge=0)
+    consulting_hours: Decimal = Field(default=Decimal("0"), ge=0)
+    consulting_rate: Decimal = Field(default=Decimal("0"), ge=0)
     start_date: date | None = None
     end_date: date | None = None
 
@@ -132,7 +141,10 @@ class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     manager_id: str | None = None
     status: ProjectStatus | None = None
-    sold_value: Decimal | None = Field(default=None, ge=0)
+    management_hours: Decimal | None = Field(default=None, ge=0)
+    management_rate: Decimal | None = Field(default=None, ge=0)
+    consulting_hours: Decimal | None = Field(default=None, ge=0)
+    consulting_rate: Decimal | None = Field(default=None, ge=0)
     start_date: date | None = None
     end_date: date | None = None
 
@@ -150,6 +162,10 @@ class ProjectSummary(ORMModel):
 
 class ProjectDetail(ProjectSummary):
     sold_value: Decimal | None = None
+    management_hours: Decimal | None = None
+    management_rate: Decimal | None = None
+    consulting_hours: Decimal | None = None
+    consulting_rate: Decimal | None = None
     financials: dict[str, Decimal] | None = None
 
 
@@ -161,6 +177,7 @@ class ProjectDetail(ProjectSummary):
 class TaskCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     wbs_code: str = Field(min_length=1, max_length=50)
+    task_type: TaskType = TaskType.CONSULTING
     parent_task_id: str | None = None
     estimated_hours: Decimal = Field(default=Decimal("0"), ge=0)
     planned_start_date: date | None = None
@@ -170,6 +187,7 @@ class TaskCreate(BaseModel):
 
 class TaskUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    task_type: TaskType | None = None
     planned_start_date: date | None = None
     planned_end_date: date | None = None
     actual_start_date: date | None = None
@@ -181,12 +199,18 @@ class TaskUpdate(BaseModel):
     is_milestone: bool | None = None
 
 
+class TaskClientApprovalUpdate(BaseModel):
+    status: TaskApprovalStatus
+    comment: str | None = None
+
+
 class TaskRead(ORMModel):
     id: str
     project_id: str
     parent_task_id: str | None
     name: str
     wbs_code: str
+    task_type: TaskType
     estimated_hours: Decimal
     actual_hours: Decimal
     planned_start_date: date | None
@@ -197,6 +221,7 @@ class TaskRead(ORMModel):
     is_milestone: bool
     progress_percentage: Decimal
     status: TaskStatus
+    client_approval_status: TaskApprovalStatus
 
 
 class TaskDependencyCreate(BaseModel):
@@ -241,6 +266,7 @@ class ResourceCreate(BaseModel):
     internal_cost_per_hour: Decimal = Field(gt=0)
     billing_rate_per_hour: Decimal = Field(gt=0)
     daily_capacity_hours: Decimal = Field(default=Decimal("8"), gt=0, le=24)
+    calendar_id: str | None = None
 
 
 class ResourceRead(ORMModel):
@@ -250,6 +276,7 @@ class ResourceRead(ORMModel):
     internal_cost_per_hour: Decimal
     billing_rate_per_hour: Decimal
     daily_capacity_hours: Decimal
+    calendar_id: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +285,12 @@ class ResourceRead(ORMModel):
 
 
 class TimesheetCreate(BaseModel):
-    task_id: str
+    # Apontamento "avulso" (padrão Clockify/Toggl): omita task_id para um
+    # lançamento sem tarefa pré-definida na EAP. project_id é opcional e só
+    # faz sentido quando task_id é omitido — aloca a hora avulsa a um
+    # projeto sem exigir WBS; os dois nulos = hora administrativa interna.
+    task_id: str | None = None
+    project_id: str | None = None
     date: date
     hours_spent: Decimal = Field(gt=0, le=24)
     description: str | None = None
@@ -270,7 +302,8 @@ class TimesheetStatusUpdate(BaseModel):
 
 class TimesheetRead(ORMModel):
     id: str
-    task_id: str
+    task_id: str | None
+    project_id: str | None
     resource_id: str
     date: date
     hours_spent: Decimal
