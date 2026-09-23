@@ -6,12 +6,13 @@ from sqlalchemy.orm import Session
 
 from ..audit import record_audit
 from ..database import get_db
-from ..deps import get_current_user, require_project_access
-from ..models import AuditAction, Project, Resource, Task, TaskAssignment, TaskDependency, User
+from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access
+from ..models import AuditAction, Project, Resource, Task, TaskApprovalStatus, TaskAssignment, TaskDependency, User
 from ..schemas import (
     RescheduleRequest,
     TaskAssignmentCreate,
     TaskAssignmentRead,
+    TaskClientApprovalUpdate,
     TaskCreate,
     TaskDependencyCreate,
     TaskDependencyRead,
@@ -86,6 +87,67 @@ def update_task(
         setattr(task, field, value)
     if changes:
         record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.UPDATE, user_id=user.id, details={"fields": sorted(changes.keys())})
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@router.post("/tasks/{task_id}/submit-for-approval", response_model=TaskRead)
+def submit_task_for_approval(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Task:
+    """Quem tem acesso de escrita na tarefa (interno, ou CLIENT_PM no escopo
+    do próprio cliente) marca a tarefa como pronta para o usuário-chave do
+    cliente validar. Pode ser chamado de novo depois de uma rejeição, para
+    reenviar."""
+    task = _get_task_or_404(db, task_id)
+    require_project_access(task.project, user, write=True)
+    if task.client_approval_status == TaskApprovalStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Tarefa já está aguardando validação do cliente")
+    task.client_approval_status = TaskApprovalStatus.PENDING
+    record_audit(
+        db,
+        entity_type="task",
+        entity_id=task.id,
+        action=AuditAction.UPDATE,
+        user_id=user.id,
+        details={"client_approval_status": TaskApprovalStatus.PENDING.value},
+    )
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@router.patch("/tasks/{task_id}/client-approval", response_model=TaskRead)
+def review_task_client_approval(
+    task_id: str,
+    data: TaskClientApprovalUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Task:
+    """Validação da tarefa pelo lado do cliente (gerente de projeto do
+    cliente ou usuário-chave) — inclusive CLIENT_USER, que em todo o resto
+    da API é somente-leitura: aprovar/rejeitar não é editar a tarefa, é a
+    própria razão de existir desse perfil."""
+    task = _get_task_or_404(db, task_id)
+    require_project_access(task.project, user, write=False)
+    if user.role not in EXTERNAL_ROLES:
+        raise HTTPException(status_code=403, detail="Só o cliente valida suas próprias tarefas")
+    if data.status not in (TaskApprovalStatus.APPROVED, TaskApprovalStatus.REJECTED):
+        raise HTTPException(status_code=422, detail="status precisa ser APPROVED ou REJECTED")
+    if task.client_approval_status != TaskApprovalStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Tarefa não está aguardando validação do cliente")
+    task.client_approval_status = data.status
+    record_audit(
+        db,
+        entity_type="task",
+        entity_id=task.id,
+        action=AuditAction.UPDATE,
+        user_id=user.id,
+        details={"client_approval_status": data.status.value, "comment": data.comment},
+    )
     db.commit()
     db.refresh(task)
     return task

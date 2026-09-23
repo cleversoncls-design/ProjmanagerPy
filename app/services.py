@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -187,11 +187,18 @@ def project_financials(session: Session, project_id: str) -> dict[str, Decimal]:
     project = session.get(Project, project_id)
     if not project:
         raise ValueError("Projeto não encontrado")
+    # outerjoin (não join) porque um apontamento avulso (Timesheet.task_id
+    # nulo) pode mesmo assim estar alocado a este projeto via
+    # Timesheet.project_id — sem isso, hora avulsa nunca entraria no custo
+    # real do projeto.
     rows = session.execute(
         select(Timesheet.hours_spent, Resource.internal_cost_per_hour)
         .join(Resource, Resource.id == Timesheet.resource_id)
-        .join(Task, Task.id == Timesheet.task_id)
-        .where(Task.project_id == project_id, Timesheet.status != TimesheetStatus.REJECTED)
+        .outerjoin(Task, Task.id == Timesheet.task_id)
+        .where(
+            or_(Task.project_id == project_id, Timesheet.project_id == project_id),
+            Timesheet.status != TimesheetStatus.REJECTED,
+        )
     ).all()
     timesheet_cost = sum((Decimal(hours) * Decimal(rate) for hours, rate in rows), Decimal("0"))
     expense_cost = sum((Decimal(x) for x in session.scalars(select(ProjectExpense.amount).where(ProjectExpense.project_id == project_id)).all()), Decimal("0"))

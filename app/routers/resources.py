@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import require_roles
-from ..models import Resource, User, UserRole
+from ..models import Calendar, Resource, User, UserRole
 from ..schemas import ResourceCreate, ResourceRead
 
 router = APIRouter(prefix="/resources", tags=["resources"])
@@ -23,6 +23,8 @@ def create_resource(
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     if db.scalar(select(Resource).where(Resource.user_id == data.user_id)):
         raise HTTPException(status_code=409, detail="Este usuário já possui um recurso cadastrado")
+    if data.calendar_id and not db.get(Calendar, data.calendar_id):
+        raise HTTPException(status_code=404, detail="Calendário não encontrado")
     resource = Resource(**data.model_dump())
     db.add(resource)
     db.commit()

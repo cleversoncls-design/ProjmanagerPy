@@ -13,6 +13,18 @@ from ..services import project_financials
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
+_FINANCIAL_FIELDS = ("management_hours", "management_rate", "consulting_hours", "consulting_rate")
+
+
+def _recompute_sold_value(project: Project) -> None:
+    """`sold_value` nunca é digitado diretamente: é sempre horas × taxa de
+    cada bolsa (gestão + consultoria), recalculado aqui sempre que qualquer
+    um dos quatro campos muda — para nunca ficar dessincronizado do pacote
+    realmente vendido."""
+    project.sold_value = (project.management_hours * project.management_rate) + (
+        project.consulting_hours * project.consulting_rate
+    )
+
 
 @router.post("", response_model=ProjectDetail, status_code=status.HTTP_201_CREATED)
 def create_project(
@@ -28,6 +40,7 @@ def create_project(
     if db.scalar(select(Project).where(Project.code == data.code)):
         raise HTTPException(status_code=409, detail="Já existe um projeto com este código")
     project = Project(**data.model_dump())
+    _recompute_sold_value(project)
     db.add(project)
     db.flush()
     record_audit(db, entity_type="project", entity_id=project.id, action=AuditAction.CREATE, user_id=user.id)
@@ -60,6 +73,8 @@ def read_project(project_id: str, user: User = Depends(get_current_user), db: Se
     if user.role in EXTERNAL_ROLES:
         payload["sold_value"] = None
         payload["financials"] = None
+        for field in _FINANCIAL_FIELDS:
+            payload[field] = None
     else:
         payload["financials"] = project_financials(db, project.id)
     return payload
@@ -82,9 +97,12 @@ def update_project(
         if not manager or manager.role not in {UserRole.ADMIN, UserRole.INTERNAL_PM}:
             raise HTTPException(status_code=422, detail="manager_id precisa ser um usuário interno (ADMIN ou INTERNAL_PM)")
     if user.role in EXTERNAL_ROLES:
-        changes.pop("sold_value", None)
+        for field in _FINANCIAL_FIELDS:
+            changes.pop(field, None)
     for field, value in changes.items():
         setattr(project, field, value)
+    if any(field in changes for field in _FINANCIAL_FIELDS):
+        _recompute_sold_value(project)
     if changes:
         record_audit(db, entity_type="project", entity_id=project.id, action=AuditAction.UPDATE, user_id=user.id, details={"fields": sorted(changes.keys())})
     db.commit()
