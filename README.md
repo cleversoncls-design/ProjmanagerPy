@@ -93,17 +93,17 @@ CORS_ORIGINS=https://app.exemplo.com,https://admin.exemplo.com
 | Domínio | Rotas |
 |---|---|
 | Autenticação | `POST /auth/login` |
-| Usuários | `POST /users` (ADMIN), `GET /users/me` |
+| Usuários | `POST /users` (ADMIN), `GET /users/me`, `GET /users?role=&client_id=` (ADMIN/INTERNAL_PM) |
 | Clientes | `POST /clients`, `GET /clients`, `GET /clients/{id}` |
 | Solicitações de projeto | `POST /clients/{client_id}/intakes`, `GET /clients/{client_id}/intakes`, `PATCH /intakes/{id}/status` |
 | Projetos | `POST /projects`, `GET /projects`, `GET /projects/{id}`, `PATCH /projects/{id}` |
 | Tarefas / EAP | `POST /projects/{project_id}/tasks`, `GET /projects/{project_id}/tasks`, `GET /tasks/{id}`, `PATCH /tasks/{id}` |
 | Aprovação da tarefa pelo cliente | `POST /tasks/{id}/submit-for-approval`, `PATCH /tasks/{id}/client-approval` (CLIENT_PM/CLIENT_USER) |
 | Dependências | `POST /task-dependencies`, `GET /tasks/{id}/dependencies`, `POST /tasks/{id}/reschedule` |
-| Recursos e alocação | `POST /resources`, `GET /resources/{id}`, `POST /tasks/{id}/assignments`, `GET /tasks/{id}/assignments` |
+| Recursos e alocação | `POST /resources`, `GET /resources?user_id=`, `GET /resources/{id}`, `POST /tasks/{id}/assignments`, `GET /tasks/{id}/assignments` |
 | Timesheets | `POST /timesheets`, `GET /timesheets?project_id=\|task_id=`, `PATCH /timesheets/{id}/status` |
 | Despesas | `POST /projects/{project_id}/expenses`, `GET /projects/{project_id}/expenses` |
-| Calendário | `POST /calendars`, `GET /calendars/{id}`, `POST /calendars/{id}/holidays`, `GET /calendars/{id}/holidays` |
+| Calendário | `POST /calendars`, `GET /calendars`, `GET /calendars/{id}`, `POST /calendars/{id}/holidays`, `GET /calendars/{id}/holidays` |
 | Riscos | `POST /projects/{project_id}/risks`, `GET /projects/{project_id}/risks`, `PATCH /risks/{id}` |
 | Mudanças | `POST /projects/{project_id}/change-requests`, `GET /projects/{project_id}/change-requests`, `PATCH /change-requests/{id}/status` |
 | Baselines | `POST /projects/{project_id}/baselines`, `GET /projects/{project_id}/baselines` |
@@ -112,6 +112,8 @@ CORS_ORIGINS=https://app.exemplo.com,https://admin.exemplo.com
 | Operação | `GET /health` |
 
 A documentação interativa (`/docs`) traz o schema completo de cada rota, incluindo os campos obrigatórios de cada payload.
+
+`GET /users`, `GET /resources` e `GET /calendars` (listagem) foram adicionados no início da Fase 3: antes só existia leitura por id (ou, no caso de usuário, só `GET /users/me`), o que é suficiente para uma API consumida via Swagger/curl mas não para um frontend montar um seletor (`manager_id` ao criar projeto, `user_id`/`calendar_id` ao criar recurso, etc.) sem o usuário saber o id de cor.
 
 ## Tipo de tarefa e aprovação do cliente
 

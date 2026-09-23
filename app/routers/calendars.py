@@ -23,6 +23,14 @@ def create_calendar(data: CalendarCreate, _: User = Depends(require_roles(*_MANA
     return calendar
 
 
+@router.get("/calendars", response_model=list[CalendarRead])
+def list_calendars(_: User = Depends(require_roles(*_MANAGE_ROLES)), db: Session = Depends(get_db)) -> list[Calendar]:
+    """Só existia leitura por `calendar_id` — sem listagem, um formulário
+    não tem como oferecer os calendários já cadastrados como opção
+    (precisaria que o usuário soubesse o id de cor)."""
+    return list(db.scalars(select(Calendar).order_by(Calendar.name)).all())
+
+
 @router.get("/calendars/{calendar_id}", response_model=CalendarRead)
 def read_calendar(calendar_id: str, _: User = Depends(require_roles(*_MANAGE_ROLES)), db: Session = Depends(get_db)) -> Calendar:
     calendar = db.get(Calendar, calendar_id)

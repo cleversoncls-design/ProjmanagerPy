@@ -41,3 +41,23 @@ def create_user(
 @router.get("/users/me", response_model=UserRead)
 def read_current_user(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+@router.get("/users", response_model=list[UserRead])
+def list_users(
+    role: UserRole | None = None,
+    client_id: str | None = None,
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    db: Session = Depends(get_db),
+) -> list[User]:
+    """Faltava um jeito de listar usuários — só existia `GET /users/me`. Sem
+    isso, uma tela (de gestão de usuários, ou só o seletor de `manager_id`
+    ao criar um projeto / `user_id` ao criar um recurso) não tem como
+    popular a lista de opções. Restrito a quem já pode criar usuário/recurso
+    (ADMIN/INTERNAL_PM)."""
+    stmt = select(User)
+    if role:
+        stmt = stmt.where(User.role == role)
+    if client_id:
+        stmt = stmt.where(User.client_id == client_id)
+    return list(db.scalars(stmt.order_by(User.name)).all())

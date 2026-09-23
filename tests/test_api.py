@@ -79,6 +79,52 @@ def test_only_admin_can_create_user(client, setup):
     assert response.status_code == 201
 
 
+def test_list_users_filters_by_role_and_is_restricted_to_management(client, setup):
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    denied = client.get("/users", headers=consultant_headers)
+    assert denied.status_code == 403
+
+    all_users = client.get("/users", headers=setup["admin_headers"])
+    assert all_users.status_code == 200
+    assert setup["pm"].id in {u["id"] for u in all_users.json()}
+
+    only_client_pm = client.get("/users", params={"role": "CLIENT_PM"}, headers=setup["admin_headers"])
+    assert only_client_pm.status_code == 200
+    assert [u["id"] for u in only_client_pm.json()] == [setup["client_pm_a"].id]
+
+
+def test_list_resources_filters_by_user_and_allows_consultant(client, setup):
+    admin_headers = setup["admin_headers"]
+    created = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    ).json()
+
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    scoped = client.get("/resources", params={"user_id": setup["consultant"].id}, headers=consultant_headers)
+    assert scoped.status_code == 200
+    assert [r["id"] for r in scoped.json()] == [created["id"]]
+
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    denied = client.get("/resources", headers=external_headers)
+    assert denied.status_code == 403
+
+
+def test_list_calendars(client, setup):
+    admin_headers = setup["admin_headers"]
+    created = client.post("/calendars", json={"name": "Padrão"}, headers=admin_headers).json()
+
+    response = client.get("/calendars", headers=admin_headers)
+    assert response.status_code == 200
+    assert created["id"] in {c["id"] for c in response.json()}
+
+
 def test_cross_client_access_is_denied(client, setup):
     headers = auth_headers(client, setup["client_pm_a"].email)
     response = client.get(f"/projects/{setup['project_b'].id}", headers=headers)
