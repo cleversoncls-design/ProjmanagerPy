@@ -17,8 +17,9 @@ Base em **Python 3.12, FastAPI, SQLAlchemy 2 e PostgreSQL 16**, preparada para e
 | `app/routers/` | Rotas da API, uma por domínio (auth, projetos, tarefas, timesheets, riscos, auditoria, relatórios/dashboard, etc.). |
 | `app/main.py` | Monta a aplicação FastAPI, inclui os routers, CORS e trata erros de integridade do banco. |
 | `alembic/` | Migrações versionadas de schema (ver seção própria abaixo). |
-| `docker-compose.yml` | Serviços `api` e `db`, persistência PostgreSQL, healthcheck e reinício automático. |
+| `docker-compose.yml` | Serviços `api`, `db` e `web` (frontend), persistência PostgreSQL, healthcheck e reinício automático. |
 | `Dockerfile` | Imagem reproduzível da API, rodando com usuário não-root. |
+| `frontend/` | SPA React (Fase 3) — ver `frontend/README.md` para desenvolvimento local; o `frontend/Dockerfile` builda a partir do código-fonte (não é um artefato pré-compilado commitado). |
 | `scripts/seed_admin.py` | Cria o primeiro usuário `ADMIN` (necessário para começar a usar a API). |
 | `tests/` | Testes de calendário, cascata, cálculo financeiro e da API (autenticação, autorização, endpoints). |
 | `.github/workflows/tests.yml` | CI: roda `pytest` a cada push/PR. |
@@ -39,6 +40,11 @@ docker compose ps
 ```
 
 A API ficará disponível em `http://localhost:3035` e a documentação interativa em `http://localhost:3035/docs`. A aplicação espera o PostgreSQL passar no healthcheck antes de iniciar. Os dados são persistidos no volume Docker `postgres_data`, portanto a remoção dos containers não remove o banco. O padrão configurado para acesso externo é a porta **3035**; a porta interna do container continua sendo `8000`. A aplicação recebe as credenciais do PostgreSQL em variáveis separadas e monta a URL com SQLAlchemy, permitindo senhas com caracteres como `@`, `:`, `/` e `#`.
+
+O mesmo `docker compose up -d --build` já sobe o frontend junto (serviço `web`), disponível por padrão em `http://localhost:3036` (ou `http://<ip-do-servidor>:3036` quando acessado de outra máquina na rede). Dois pontos importantes antes do primeiro build:
+
+- **`VITE_API_BASE_URL`** (no `.env`) precisa ser o endereço em que *quem acessa o navegador* alcança a API — não `api:8000` (isso só existe dentro da rede interna do Docker). Se o servidor tem IP fixo na rede, use `http://<esse-ip>:3035`. Esse valor é gravado dentro do JavaScript estático no momento do build, então mudar depois exige `docker compose build web && docker compose up -d web` — reiniciar o container sozinho não é suficiente.
+- **`CORS_ORIGINS`** precisa incluir a origem do frontend (ex.: `http://<esse-ip>:3036`), senão a API rejeita as chamadas do navegador por CORS mesmo com tudo no ar.
 
 Para aplicar a configuração automaticamente, tornar o processo repetível e recriar os serviços, execute:
 

@@ -25,7 +25,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-projmanager}
       POSTGRES_USER: ${POSTGRES_USER:-projmanager}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Defina JWT_SECRET_KEY no arquivo .env (ex.: openssl rand -hex 32)}
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:?Defina JWT_SECRET_KEY no arquivo .env (ex.: openssl rand -hex 32)}"
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-480}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-0}
@@ -41,6 +41,21 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 5
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        # Endereço em que o NAVEGADOR (não o container) alcança a API — é
+        # gravado dentro do JS estático no build, então mudar isso exige
+        # reconstruir a imagem: docker compose build web && docker compose up -d web
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3035}
+    container_name: projmanager-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3036}:80"
+    depends_on:
+      - api
 
 volumes:
   postgres_data:

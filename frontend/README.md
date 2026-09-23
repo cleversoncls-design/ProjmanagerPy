@@ -35,6 +35,17 @@ e faça login com ele.
 servidor de arquivos estáticos, apontando `VITE_API_BASE_URL` (em tempo de
 build) para a URL pública da API.
 
+## Rodando via Docker (deploy)
+
+Este diretório tem um `Dockerfile` (build multi-stage: compila com Node e
+serve o resultado com nginx) e um `nginx.conf` com fallback de SPA. Ele é
+consumido pelo serviço `web` do `docker-compose.yml` na raiz do repositório
+— não precisa rodar nada manualmente aqui: `docker compose up -d --build`
+na raiz já builda e sobe o frontend junto com a API e o banco. Veja o README
+da raiz (seção "Instalação com Docker e PostgreSQL") para as variáveis
+`VITE_API_BASE_URL`, `WEB_PORT` e `CORS_ORIGINS` que precisam ser ajustadas
+antes do primeiro build.
+
 ## Estrutura
 
 ```
