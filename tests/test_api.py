@@ -496,3 +496,151 @@ def test_reschedule_endpoint_moves_successor(client, setup):
     assert len(updated) == 1
     assert updated[0]["id"] == successor["id"]
     assert updated[0]["planned_start_date"] == "2026-08-25"
+
+
+# ---------------------------------------------------------------------------
+# Fase 2: relatórios / dashboard
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_scopes_projects_by_client_and_hides_margin_externally(client, setup):
+    """Admin enxerga o portfólio inteiro (os dois projetos do setup); um
+    perfil externo só enxerga o(s) projeto(s) do próprio cliente, e sem
+    margem na linha de portfólio — mesmo tratamento de dado financeiro do
+    resto da API."""
+    admin_view = client.get("/dashboard", headers=setup["admin_headers"]).json()
+    assert admin_view["projects_total"] == 2
+    admin_row = next(row for row in admin_view["portfolio"] if row["id"] == setup["project_a"].id)
+    assert admin_row["margin"] is not None
+
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    external_view = client.get("/dashboard", headers=external_headers).json()
+    assert external_view["projects_total"] == 1
+    assert external_view["portfolio"][0]["id"] == setup["project_a"].id
+    assert external_view["portfolio"][0]["margin"] is None
+
+
+def test_reports_portfolio_endpoint_scopes_by_client(client, setup):
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    response = client.get("/reports/portfolio", headers=external_headers)
+    assert response.status_code == 200
+    rows = response.json()
+    assert [row["id"] for row in rows] == [setup["project_a"].id]
+
+
+def test_project_report_includes_burndown_and_hides_financials_externally(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+
+    client.patch(f"/projects/{project_id}", json={"start_date": "2026-08-03", "end_date": "2026-08-17"}, headers=admin_headers)
+    client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Entrega", "wbs_code": "1", "estimated_hours": "10", "planned_end_date": "2026-08-10"},
+        headers=admin_headers,
+    )
+
+    internal = client.get(f"/projects/{project_id}/report", headers=admin_headers)
+    assert internal.status_code == 200
+    internal_body = internal.json()
+    assert internal_body["tasks_total"] == 1
+    assert internal_body["financials"] is not None
+    assert internal_body["financials_by_task_type"] is not None
+    assert len(internal_body["burndown"]) >= 2
+    assert internal_body["burndown"][0]["date"] == "2026-08-03"
+    assert internal_body["burndown"][-1]["date"] == "2026-08-17"
+
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    external = client.get(f"/projects/{project_id}/report", headers=external_headers)
+    assert external.status_code == 200
+    external_body = external.json()
+    assert external_body["financials"] is None
+    assert external_body["financials_by_task_type"] is None
+    assert external_body["tasks_total"] == 1
+
+
+def test_resources_utilization_endpoint_requires_internal_role(client, setup):
+    admin_headers = setup["admin_headers"]
+    client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    )
+
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    denied = client.get("/resources/utilization", headers=external_headers)
+    assert denied.status_code == 403
+
+    allowed = client.get("/resources/utilization", headers=admin_headers)
+    assert allowed.status_code == 200
+    row = next(r for r in allowed.json() if r["user_id"] == setup["consultant"].id)
+    assert {"capacity_hours", "allocated_hours", "actual_hours", "utilization_percentage"} <= row.keys()
+
+
+def test_risk_matrix_endpoint_counts_project_risks(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    client.post(
+        f"/projects/{project_id}/risks",
+        json={"description": "Atraso de fornecedor", "probability": "HIGH", "impact": "HIGH"},
+        headers=admin_headers,
+    )
+
+    response = client.get(f"/projects/{project_id}/risks/matrix", headers=admin_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["grid"]["HIGH"]["HIGH"] == 1
+    assert len(body["high_priority"]) == 1
+
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    cross_client = client.get(f"/projects/{setup['project_b'].id}/risks/matrix", headers=external_headers)
+    assert cross_client.status_code == 403
+
+
+def test_velocity_endpoint_requires_project_id_for_external_role(client, setup):
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    missing_project = client.get("/reports/velocity", headers=external_headers)
+    assert missing_project.status_code == 422
+
+    scoped = client.get("/reports/velocity", params={"project_id": setup["project_a"].id}, headers=external_headers)
+    assert scoped.status_code == 200
+
+    portfolio_wide = client.get("/reports/velocity", headers=setup["admin_headers"])
+    assert portfolio_wide.status_code == 200
+
+
+def test_roi_endpoint_is_restricted_to_internal_roles(client, setup):
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    denied = client.get("/reports/roi", headers=external_headers)
+    assert denied.status_code == 403
+
+    allowed = client.get("/reports/roi", params={"project_id": setup["project_a"].id}, headers=setup["admin_headers"])
+    assert allowed.status_code == 200
+    assert allowed.json()[0]["project_id"] == setup["project_a"].id
+
+
+def test_gantt_endpoint_bundles_tasks_and_dependencies(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    pred = client.post(f"/projects/{project_id}/tasks", json={"name": "A", "wbs_code": "1"}, headers=admin_headers).json()
+    succ = client.post(f"/projects/{project_id}/tasks", json={"name": "B", "wbs_code": "2"}, headers=admin_headers).json()
+    client.post(
+        "/task-dependencies",
+        json={"predecessor_task_id": pred["id"], "successor_task_id": succ["id"]},
+        headers=admin_headers,
+    )
+
+    response = client.get(f"/projects/{project_id}/gantt", headers=admin_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert {t["id"] for t in body["tasks"]} == {pred["id"], succ["id"]}
+    assert len(body["dependencies"]) == 1
+    assert body["dependencies"][0]["predecessor_task_id"] == pred["id"]
+
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    cross_client = client.get(f"/projects/{setup['project_b'].id}/gantt", headers=external_headers)
+    assert cross_client.status_code == 403

@@ -1,12 +1,44 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.models import Base, Client, DependencyType, Project, Resource, Task, TaskDependency, Timesheet, ProjectExpense, User, UserRole
-from app.services import BusinessCalendar, project_financials, reschedule_cascade
+from app.models import (
+    Base,
+    Calendar,
+    Client,
+    DependencyType,
+    Holiday,
+    Project,
+    Resource,
+    Risk,
+    RiskLevel,
+    RiskStatus,
+    Task,
+    TaskAssignment,
+    TaskDependency,
+    TaskStatus,
+    TaskType,
+    Timesheet,
+    ProjectExpense,
+    User,
+    UserRole,
+)
+from app.services import (
+    BusinessCalendar,
+    financials_by_task_type,
+    portfolio_rows,
+    project_burndown,
+    project_financials,
+    project_progress,
+    project_roi,
+    reschedule_cascade,
+    resource_utilization,
+    risk_matrix,
+    velocity_series,
+)
 
 
 def session():
@@ -211,3 +243,210 @@ def test_cascade_detects_cycle():
 
     with pytest.raises(ValueError, match="Ciclo"):
         reschedule_cascade(db, task_x.id, BusinessCalendar())
+
+
+def test_project_progress_weighted_by_estimated_hours():
+    """Regressão: o % concluído do projeto é ponderado pelas
+    estimated_hours de cada tarefa, não uma média simples entre elas —
+    senão uma tarefa de 2h concluída pesaria o mesmo que uma de 18h ainda
+    não iniciada."""
+    db = session()
+    project = _make_project(db, code="PRJ-PROG")
+    small = Task(
+        project_id=project.id, name="Pequena", wbs_code="1",
+        estimated_hours=Decimal("2"), progress_percentage=Decimal("100"), status=TaskStatus.COMPLETED,
+    )
+    big = Task(
+        project_id=project.id, name="Grande", wbs_code="2",
+        estimated_hours=Decimal("18"), progress_percentage=Decimal("0"), status=TaskStatus.NOT_STARTED,
+    )
+    db.add_all([small, big])
+    db.commit()
+
+    result = project_progress(db, project.id)
+    assert result["tasks_total"] == 2
+    assert result["tasks_remaining"] == 1
+    assert result["tasks_by_status"] == {"COMPLETED": 1, "NOT_STARTED": 1}
+    # (2h*100% + 18h*0%) / 20h = 10% — a média simples daria 50%.
+    assert result["percent_complete"] == Decimal("10.00")
+
+
+def test_financials_by_task_type_splits_management_consulting_and_adhoc():
+    db = session()
+    project = _make_project(db, code="PRJ-SPLIT")
+    mgmt_task = Task(project_id=project.id, name="Gestão", wbs_code="1", task_type=TaskType.MANAGEMENT)
+    cons_task = Task(project_id=project.id, name="Consultoria", wbs_code="2", task_type=TaskType.CONSULTING)
+    resource = Resource(
+        user_id=project.manager_id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
+    )
+    db.add_all([mgmt_task, cons_task, resource])
+    db.flush()
+    db.add_all(
+        [
+            Timesheet(task_id=mgmt_task.id, resource_id=resource.id, date=date(2026, 8, 24), hours_spent=Decimal("2")),
+            Timesheet(task_id=cons_task.id, resource_id=resource.id, date=date(2026, 8, 24), hours_spent=Decimal("3")),
+            # Avulso: sem task_id, alocado só via project_id — não tem task_type, cai em "ADHOC".
+            Timesheet(task_id=None, project_id=project.id, resource_id=resource.id, date=date(2026, 8, 24), hours_spent=Decimal("1")),
+        ]
+    )
+    db.commit()
+
+    result = financials_by_task_type(db, project.id)
+    assert result["MANAGEMENT"] == {"hours": Decimal("2.00"), "cost": Decimal("100.00")}
+    assert result["CONSULTING"] == {"hours": Decimal("3.00"), "cost": Decimal("150.00")}
+    assert result["ADHOC"] == {"hours": Decimal("1.00"), "cost": Decimal("50.00")}
+
+
+def test_project_burndown_reflects_timesheets_and_planned_end_dates():
+    db = session()
+    project = _make_project(db, code="PRJ-BURN")
+    project.start_date = date(2026, 8, 3)
+    project.end_date = date(2026, 8, 17)
+    task = Task(project_id=project.id, name="Única", wbs_code="1", estimated_hours=Decimal("10"), planned_end_date=date(2026, 8, 10))
+    resource = Resource(
+        user_id=project.manager_id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
+    )
+    db.add_all([task, resource])
+    db.flush()
+    db.add(Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 5), hours_spent=Decimal("4")))
+    db.commit()
+
+    points = project_burndown(db, project.id)
+    assert [p["date"] for p in points] == [date(2026, 8, 3), date(2026, 8, 10), date(2026, 8, 17)]
+    # No início: nada apontado ainda e a tarefa não chegou no planned_end_date.
+    assert points[0]["planned_remaining_hours"] == Decimal("10.00")
+    assert points[0]["actual_remaining_hours"] == Decimal("10.00")
+    # No fim do projeto: a tarefa já passou do planned_end_date (queda total no
+    # "planejado") e as 4h apontadas em 05/08 já entraram no "realizado".
+    assert points[-1]["planned_remaining_hours"] == Decimal("0.00")
+    assert points[-1]["actual_remaining_hours"] == Decimal("6.00")
+
+
+def test_resource_utilization_computes_capacity_and_actual_hours():
+    db = session()
+    project = _make_project(db, code="PRJ-UTIL")
+    calendar = Calendar(name="Padrão", working_days=[0, 1, 2, 3, 4])
+    db.add(calendar)
+    db.flush()
+    db.add(Holiday(calendar_id=calendar.id, date=date(2026, 8, 5), description="Feriado"))
+    resource = Resource(
+        user_id=project.manager_id,
+        role_title="Consultor",
+        internal_cost_per_hour=Decimal("50"),
+        billing_rate_per_hour=Decimal("100"),
+        daily_capacity_hours=Decimal("8"),
+        calendar_id=calendar.id,
+    )
+    task = Task(project_id=project.id, name="T", wbs_code="1")
+    db.add_all([resource, task])
+    db.flush()
+    db.add(TaskAssignment(task_id=task.id, resource_id=resource.id, allocated_hours=Decimal("40")))
+    db.add(Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 4), hours_spent=Decimal("6")))
+    db.commit()
+
+    # 03/08 (segunda) a 07/08 (sexta): 5 dias úteis - 1 feriado (05/08) = 4.
+    rows = resource_utilization(db, start=date(2026, 8, 3), end=date(2026, 8, 7), resource_id=resource.id)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["capacity_hours"] == Decimal("32.00")
+    assert row["actual_hours"] == Decimal("6.00")
+    assert row["allocated_hours"] == Decimal("40.00")
+    assert row["utilization_percentage"] == Decimal("18.75")
+
+
+def test_velocity_series_buckets_hours_by_week():
+    db = session()
+    project = _make_project(db, code="PRJ-VEL")
+    task = Task(project_id=project.id, name="T", wbs_code="1")
+    resource = Resource(
+        user_id=project.manager_id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
+    )
+    db.add_all([task, resource])
+    db.flush()
+    db.add_all(
+        [
+            # Semana de 03/08 (segunda).
+            Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 4), hours_spent=Decimal("5")),
+            Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 6), hours_spent=Decimal("3")),
+            # Semana seguinte, de 10/08.
+            Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 11), hours_spent=Decimal("7")),
+        ]
+    )
+    db.commit()
+
+    points = velocity_series(db, start=date(2026, 8, 1), end=date(2026, 8, 15), project_id=project.id)
+    assert points == [
+        {"period_start": date(2026, 8, 3), "hours_delivered": Decimal("8.00")},
+        {"period_start": date(2026, 8, 10), "hours_delivered": Decimal("7.00")},
+    ]
+
+
+def test_project_roi_uses_margin_over_real_cost():
+    db = session()
+    project = _make_project(db, code="PRJ-ROI")
+    project.sold_value = Decimal("1000")
+    task = Task(project_id=project.id, name="T", wbs_code="1")
+    resource = Resource(
+        user_id=project.manager_id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
+    )
+    db.add_all([task, resource])
+    db.flush()
+    db.add(Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 24), hours_spent=Decimal("10")))
+    db.commit()
+
+    result = project_roi(db, project.id)
+    # real_cost = 10h * 50 = 500; margem = 1000 - 500 = 500; ROI = margem/custo*100 = 100%.
+    assert result["real_cost"] == Decimal("500.00")
+    assert result["roi_percentage"] == Decimal("100.00")
+
+
+def test_project_roi_is_none_without_real_cost():
+    db = session()
+    project = _make_project(db, code="PRJ-ROI-0")
+    project.sold_value = Decimal("1000")
+    db.commit()
+
+    result = project_roi(db, project.id)
+    assert result["roi_percentage"] is None
+
+
+def test_portfolio_rows_show_next_milestone_and_hide_margin_when_excluded():
+    db = session()
+    project = _make_project(db, code="PRJ-PORT")
+    project.sold_value = Decimal("1000")
+    future_milestone = date.today() + timedelta(days=10)
+    past_milestone = date.today() - timedelta(days=10)
+    m1 = Task(project_id=project.id, name="Marco passado", wbs_code="1", is_milestone=True, planned_end_date=past_milestone)
+    m2 = Task(project_id=project.id, name="Marco futuro", wbs_code="2", is_milestone=True, planned_end_date=future_milestone)
+    db.add_all([m1, m2])
+    db.commit()
+
+    internal_rows = portfolio_rows(db, [project], include_financials=True)
+    assert internal_rows[0]["next_milestone_name"] == "Marco futuro"
+    assert internal_rows[0]["next_milestone_date"] == future_milestone
+    assert internal_rows[0]["margin"] == Decimal("1000.00")
+
+    external_rows = portfolio_rows(db, [project], include_financials=False)
+    assert external_rows[0]["margin"] is None
+
+
+def test_risk_matrix_counts_by_cell_and_flags_high_priority_open_risks():
+    db = session()
+    project = _make_project(db, code="PRJ-RISK")
+    db.add_all(
+        [
+            Risk(project_id=project.id, description="Baixo/baixo", probability=RiskLevel.LOW, impact=RiskLevel.LOW),
+            Risk(project_id=project.id, description="Alto/alto aberto", probability=RiskLevel.HIGH, impact=RiskLevel.HIGH, status=RiskStatus.OPEN),
+            Risk(
+                project_id=project.id, description="Alto/alto fechado", probability=RiskLevel.HIGH, impact=RiskLevel.HIGH, status=RiskStatus.CLOSED
+            ),
+        ]
+    )
+    db.commit()
+
+    result = risk_matrix(db, project.id)
+    assert result["grid"]["HIGH"]["HIGH"] == 2
+    assert result["grid"]["LOW"]["LOW"] == 1
+    # Só o risco HIGH/HIGH ainda aberto (não CLOSED) entra na priorização.
+    assert len(result["high_priority"]) == 1
+    assert result["high_priority"][0].description == "Alto/alto aberto"
