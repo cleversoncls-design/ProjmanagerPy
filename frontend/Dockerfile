@@ -4,7 +4,13 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+# Sem package-lock.json commitado ainda (nunca foi gerado com npm install
+# de verdade) — "npm ci" exige um lockfile existente e falha sem ele. Usa
+# "npm install", que resolve e instala mesmo sem lockfile prévio. Depois
+# que alguém rodar "npm install" localmente uma vez e commitar o
+# package-lock.json gerado, trocar para "npm ci" (mais rápido e 100%
+# reprodutível) é uma melhoria válida.
+RUN npm install
 
 COPY . .
 
