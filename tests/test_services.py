@@ -56,6 +56,33 @@ def test_financials_hide_no_data_and_calculate_margin():
     assert result["profit_margin"] == Decimal("400.00")
 
 
+def test_financials_include_adhoc_timesheet_allocated_to_project():
+    """Regressão: um apontamento avulso (sem task, só com project_id) precisa
+    entrar no custo real do projeto — o outerjoin em project_financials()
+    existe para isso; um INNER JOIN via Task excluiria esse lançamento."""
+    db = session()
+    project = _make_project(db, code="PRJ-ADHOC")
+    resource = Resource(
+        user_id=project.manager_id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
+    )
+    db.add(resource)
+    db.flush()
+    db.add(
+        Timesheet(
+            task_id=None,
+            project_id=project.id,
+            resource_id=resource.id,
+            date=date(2026, 8, 24),
+            hours_spent=Decimal("3"),
+        )
+    )
+    db.commit()
+
+    result = project_financials(db, project.id)
+    assert result["timesheet_cost"] == Decimal("150.00")
+    assert result["real_cost"] == Decimal("150.00")
+
+
 def test_cascade_uses_most_restrictive_predecessor():
     """Regressão do bug em que a sucessora era recalculada com base apenas na
     última predecessora visitada, em vez da mais restritiva entre todas.

@@ -273,6 +273,184 @@ def test_project_detail_hides_financials_for_external_roles(client, setup):
     assert external_view["sold_value"] is None
 
 
+def test_task_type_defaults_to_consulting_and_accepts_management(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+
+    default_task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Padrão", "wbs_code": "1"}, headers=admin_headers
+    ).json()
+    assert default_task["task_type"] == "CONSULTING"
+
+    management_task = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Gestão", "wbs_code": "2", "task_type": "MANAGEMENT"},
+        headers=admin_headers,
+    ).json()
+    assert management_task["task_type"] == "MANAGEMENT"
+
+
+def test_project_sold_value_is_computed_from_management_and_consulting(client, setup):
+    """Regressão: sold_value deixou de ser um valor digitado direto e passou
+    a ser horas×taxa de gestão + horas×taxa de consultoria, calculado no
+    backend — o valor de `sold_value` enviado no payload é ignorado."""
+    admin_headers = setup["admin_headers"]
+    payload = {
+        "client_id": setup["client_a"].id,
+        "manager_id": setup["pm"].id,
+        "code": "PRJ-FIN",
+        "name": "Projeto financeiro",
+        "management_hours": "10",
+        "management_rate": "200",
+        "consulting_hours": "5",
+        "consulting_rate": "300",
+        "sold_value": "999999",
+    }
+    created = client.post("/projects", json=payload, headers=admin_headers).json()
+    assert float(created["sold_value"]) == 3500.0
+
+    updated = client.patch(
+        f"/projects/{created['id']}", json={"consulting_rate": "400"}, headers=admin_headers
+    ).json()
+    assert float(updated["sold_value"]) == 4000.0
+
+
+def test_external_role_cannot_change_project_financials(client, setup):
+    project_id = setup["project_a"].id
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    response = client.patch(f"/projects/{project_id}", json={"management_rate": "999"}, headers=external_headers)
+    assert response.status_code == 200
+
+    detail = client.get(f"/projects/{project_id}", headers=setup["admin_headers"]).json()
+    assert float(detail["management_rate"]) == 0.0
+
+
+def test_resource_can_be_linked_to_a_calendar(client, setup):
+    admin_headers = setup["admin_headers"]
+    calendar = client.post("/calendars", json={"name": "Padrão"}, headers=admin_headers).json()
+
+    resource = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+            "calendar_id": calendar["id"],
+        },
+        headers=admin_headers,
+    )
+    assert resource.status_code == 201
+    assert resource.json()["calendar_id"] == calendar["id"]
+
+    other_user = client.post(
+        "/users",
+        json={"name": "Outro", "email": "outro.consultor@example.com", "password": PASSWORD, "role": "CONSULTANT"},
+        headers=admin_headers,
+    ).json()
+    missing_calendar = client.post(
+        "/resources",
+        json={
+            "user_id": other_user["id"],
+            "role_title": "Outro",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+            "calendar_id": "id-inexistente",
+        },
+        headers=admin_headers,
+    )
+    assert missing_calendar.status_code == 404
+
+
+def test_adhoc_timesheet_without_task_or_project(client, setup):
+    """Apontamento avulso (padrão Clockify/Toggl): sem task_id, sem exigir
+    TaskAssignment prévio. project_id é opcional para alocar a hora avulsa
+    a um projeto sem passar pela EAP."""
+    admin_headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+
+    client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    )
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    admin_hours = client.post(
+        "/timesheets", json={"date": "2026-08-24", "hours_spent": "1"}, headers=consultant_headers
+    )
+    assert admin_hours.status_code == 201
+    assert admin_hours.json()["task_id"] is None
+    assert admin_hours.json()["project_id"] is None
+
+    project_hours = client.post(
+        "/timesheets",
+        json={"project_id": project_id, "date": "2026-08-24", "hours_spent": "2"},
+        headers=consultant_headers,
+    )
+    assert project_hours.status_code == 201
+    assert project_hours.json()["project_id"] == project_id
+
+    listed = client.get("/timesheets", params={"project_id": project_id}, headers=admin_headers)
+    assert listed.status_code == 200
+    assert [row["id"] for row in listed.json()] == [project_hours.json()["id"]]
+
+
+def test_task_client_approval_workflow(client, setup):
+    """Fluxo de validação de tarefa pelo lado do cliente: quem tem escrita
+    (interno ou CLIENT_PM) submete; só o cliente (CLIENT_PM/CLIENT_USER,
+    inclusive o último, que no resto da API é somente-leitura) aprova ou
+    rejeita — e só enquanto está PENDING."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    client_user_headers = auth_headers(client, setup["client_user_a"].email)
+
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Entrega", "wbs_code": "1"}, headers=admin_headers
+    ).json()
+    assert task["client_approval_status"] == "NOT_REQUIRED"
+
+    denied_review = client.patch(
+        f"/tasks/{task['id']}/client-approval", json={"status": "APPROVED"}, headers=admin_headers
+    )
+    assert denied_review.status_code == 403
+
+    early_approval = client.patch(
+        f"/tasks/{task['id']}/client-approval", json={"status": "APPROVED"}, headers=client_user_headers
+    )
+    assert early_approval.status_code == 409
+
+    submitted = client.post(f"/tasks/{task['id']}/submit-for-approval", headers=admin_headers)
+    assert submitted.status_code == 200
+    assert submitted.json()["client_approval_status"] == "PENDING"
+
+    resubmit_while_pending = client.post(f"/tasks/{task['id']}/submit-for-approval", headers=admin_headers)
+    assert resubmit_while_pending.status_code == 409
+
+    rejected = client.patch(
+        f"/tasks/{task['id']}/client-approval",
+        json={"status": "REJECTED", "comment": "Falta anexar evidência"},
+        headers=client_user_headers,
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["client_approval_status"] == "REJECTED"
+
+    resubmitted = client.post(f"/tasks/{task['id']}/submit-for-approval", headers=admin_headers)
+    assert resubmitted.status_code == 200
+    assert resubmitted.json()["client_approval_status"] == "PENDING"
+
+    approved = client.patch(
+        f"/tasks/{task['id']}/client-approval", json={"status": "APPROVED"}, headers=client_user_headers
+    )
+    assert approved.status_code == 200
+    assert approved.json()["client_approval_status"] == "APPROVED"
+
+
 def test_reschedule_endpoint_moves_successor(client, setup):
     admin_headers = setup["admin_headers"]
     project_id = setup["project_a"].id
