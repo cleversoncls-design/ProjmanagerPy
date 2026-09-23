@@ -46,10 +46,15 @@ services:
     build:
       context: ./frontend
       args:
-        # Endereço em que o NAVEGADOR (não o container) alcança a API — é
-        # gravado dentro do JS estático no build, então mudar isso exige
+        # Deixe VITE_API_BASE_URL vazia (padrão) — o frontend descobre
+        # sozinho o endereço da API a partir do host que o navegador usou
+        # pra abrir a página (funciona por localhost, IP da rede local ou
+        # IP público ao mesmo tempo, sem escolher um fixo). Só preencha se
+        # a API morar num host diferente do frontend. Qualquer mudança
+        # aqui é gravada dentro do JS estático no build, então exige
         # reconstruir a imagem: docker compose build web && docker compose up -d web
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3035}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_API_PORT: ${API_PORT:-3035}
     container_name: projmanager-web
     restart: unless-stopped
     ports:

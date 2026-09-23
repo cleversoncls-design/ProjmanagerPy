@@ -41,10 +41,11 @@ docker compose ps
 
 A API ficará disponível em `http://localhost:3035` e a documentação interativa em `http://localhost:3035/docs`. A aplicação espera o PostgreSQL passar no healthcheck antes de iniciar. Os dados são persistidos no volume Docker `postgres_data`, portanto a remoção dos containers não remove o banco. O padrão configurado para acesso externo é a porta **3035**; a porta interna do container continua sendo `8000`. A aplicação recebe as credenciais do PostgreSQL em variáveis separadas e monta a URL com SQLAlchemy, permitindo senhas com caracteres como `@`, `:`, `/` e `#`.
 
-O mesmo `docker compose up -d --build` já sobe o frontend junto (serviço `web`), disponível por padrão em `http://localhost:3036` (ou `http://<ip-do-servidor>:3036` quando acessado de outra máquina na rede). Dois pontos importantes antes do primeiro build:
+O mesmo `docker compose up -d --build` já sobe o frontend junto (serviço `web`), disponível por padrão em `http://localhost:3036` (ou `http://<ip-do-servidor>:3036` quando acessado de outra máquina na rede — local ou pela internet, se a porta estiver liberada). Um ponto importante antes do primeiro build:
 
-- **`VITE_API_BASE_URL`** (no `.env`) precisa ser o endereço em que *quem acessa o navegador* alcança a API — não `api:8000` (isso só existe dentro da rede interna do Docker). Se o servidor tem IP fixo na rede, use `http://<esse-ip>:3035`. Esse valor é gravado dentro do JavaScript estático no momento do build, então mudar depois exige `docker compose build web && docker compose up -d web` — reiniciar o container sozinho não é suficiente.
-- **`CORS_ORIGINS`** precisa incluir a origem do frontend (ex.: `http://<esse-ip>:3036`), senão a API rejeita as chamadas do navegador por CORS mesmo com tudo no ar.
+- **`CORS_ORIGINS`** precisa incluir **todas** as origens pelas quais alguém vai acessar o frontend — ex.: `http://192.168.22.20:3036,http://localhost:3036,http://<ip-publico>:3036` — senão a API rejeita por CORS as chamadas vindas dessas origens, mesmo com tudo no ar.
+
+`VITE_API_BASE_URL` (no `.env`) normalmente fica **vazia** — o frontend descobre sozinho o endereço da API a partir do host que o navegador usou pra abrir a página, então o mesmo build funciona acessando por rede local, `localhost` ou IP público, sem precisar escolher um fixo. Só preencha essa variável se a API morar num host diferente do frontend; nesse caso o valor fica gravado dentro do JavaScript estático no momento do build, e mudar depois exige `docker compose build web && docker compose up -d web` — reiniciar o container sozinho não é suficiente.
 
 Para aplicar a configuração automaticamente, tornar o processo repetível e recriar os serviços, execute:
 

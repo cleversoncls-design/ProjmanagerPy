@@ -1,4 +1,18 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
+// VITE_API_BASE_URL (se definida no build) manda sempre — útil quando a API
+// mora num host diferente do frontend. Sem ela, descobrimos o endereço da
+// API a partir de onde o navegador abriu a página (mesmo host, porta
+// VITE_API_PORT — padrão 3035, a mesma do docker-compose): assim o mesmo
+// build funciona acessando por localhost, IP da rede local ou IP público,
+// sem precisar escolher um endereço fixo em tempo de build.
+function resolveApiBaseUrl() {
+  const configured = import.meta.env.VITE_API_BASE_URL
+  if (configured) return configured.replace(/\/$/, '')
+  if (typeof window === 'undefined') return 'http://localhost:8000'
+  const apiPort = import.meta.env.VITE_API_PORT || '3035'
+  return `${window.location.protocol}//${window.location.hostname}:${apiPort}`
+}
+
+const API_BASE_URL = resolveApiBaseUrl()
 
 const TOKEN_KEY = 'pmpy_token'
 
