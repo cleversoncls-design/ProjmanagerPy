@@ -20,6 +20,7 @@ from .routers import (
     expenses,
     intakes,
     projects,
+    reports,
     resources,
     risks,
     tasks,
@@ -97,3 +98,4 @@ app.include_router(risks.router)
 app.include_router(changes.router)
 app.include_router(baselines.router)
 app.include_router(audit.router)
+app.include_router(reports.router)
