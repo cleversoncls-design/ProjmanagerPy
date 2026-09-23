@@ -51,11 +51,36 @@ antes do primeiro build.
 ```
 src/
   api/         # um módulo por domínio da API (fetch wrappers finos)
-  components/  # peças reutilizáveis (Table, Modal, StatTile, CategoryBars, ...)
-  context/     # AuthContext (login/logout/usuário atual)
+  assets/      # logo (resultar-logo.png)
+  components/  # peças reutilizáveis (Sidebar, Header, Table, Modal, StatTile, CategoryBars, ...)
+  context/     # AuthContext (login/logout/usuário atual), ThemeContext (tema claro/escuro)
   pages/       # uma página por rota
   utils/       # formatação (moeda/data/percentual) e labels/cores fixas dos enums
 ```
+
+## Identidade visual (chrome do app)
+
+O menu lateral, o cabeçalho e os cartões de KPI seguem a estrutura e a
+paleta de outro produto do usuário, "Resultar Servicios" (repositório
+`resultarpy`, app React Native/Expo), portados para Tailwind/React puro:
+
+- **`Sidebar.jsx`** — menu lateral escuro fixo (paleta `--nav-*` em
+  `index.css`, independente do tema claro/escuro do conteúdo), com logo,
+  agrupamento "Workspace", recolher/expandir e rodapé com usuário + sair.
+- **`Header.jsx`** — cabeçalho com breadcrumb/título da rota atual, alterna
+  tema, notificações (ainda decorativo, sem backend) e avatar do usuário.
+- **`Layout.jsx`** — faixa de destaque de 4px no topo (`--nav-top-accent`)
+  + Sidebar + Header + conteúdo da rota.
+- **`StatTile.jsx`** — agora no formato "KPI card": valor grande em cima,
+  rótulo pequeno em maiúsculas embaixo, faixa de 3px colorida no topo
+  (tom vindo sempre do conjunto reservado `--status-*`/`--series-1`, nunca
+  uma cor nova).
+- **`icons.jsx`** — ícones em SVG inline (sem biblioteca de ícones externa,
+  mantendo a decisão de "Tailwind + componentes próprios").
+
+A paleta categórica/de status (`--series-*`, `--status-*`) do skill de
+dataviz não foi alterada — só ganhou um mecanismo de alternância manual
+(veja abaixo) no lugar de `prefers-color-scheme`.
 
 `src/api/client.js` centraliza a chamada HTTP: anexa o Bearer token
 (guardado em `localStorage`), decodifica erros da API (`detail` do
@@ -82,6 +107,9 @@ FastAPI) numa mensagem legível, e desloga automaticamente num 401.
   (`GET /projects/{id}/report.burndown`) — é um gráfico de linha com duas
   séries ao longo do tempo, que fica para quando as telas de relatório
   avançado entrarem (junto com velocity, ROI e matriz de riscos).
-- **Sem toggle manual de tema.** O modo escuro segue `prefers-color-scheme`
-  do sistema operacional (os tokens de cor já têm os dois conjuntos de
-  valores); um toggle manual na interface fica para depois, se for pedido.
+- **Toggle manual de tema (claro/escuro).** `ThemeContext.jsx` controla um
+  atributo `data-theme` em `<html>`, persistido em `localStorage`
+  (`pm-theme`), com **claro como padrão** — não segue mais
+  `prefers-color-scheme` automaticamente. O botão fica no `Header`. O menu
+  lateral (`--nav-*`) é sempre escuro e não é afetado por esse toggle,
+  seguindo o mesmo padrão do app de referência.

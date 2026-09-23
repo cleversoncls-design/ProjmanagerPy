@@ -57,14 +57,14 @@ export default function DashboardPage() {
       {data && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <StatTile label="Projetos" value={data.projects_total} />
-            <StatTile label="Tarefas" value={data.tasks_total} />
+            <StatTile label="Projetos" value={data.projects_total} tone="default" />
+            <StatTile label="Tarefas" value={data.tasks_total} tone="primary" />
             <StatTile
               label="Tarefas atrasadas"
               value={data.tasks_overdue}
-              tone={data.tasks_overdue > 0 ? 'critical' : 'default'}
+              tone={data.tasks_overdue > 0 ? 'critical' : 'good'}
             />
-            <StatTile label="Progresso médio" value={formatPercent(data.avg_progress_percentage)} />
+            <StatTile label="Progresso médio" value={formatPercent(data.avg_progress_percentage)} tone="good" />
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

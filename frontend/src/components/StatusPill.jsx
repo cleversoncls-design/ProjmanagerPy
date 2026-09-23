@@ -1,18 +1,23 @@
-const TONE_COLOR = {
-  good: 'var(--status-good)',
-  warning: 'var(--status-warning)',
-  serious: 'var(--status-serious)',
-  critical: 'var(--status-critical)',
-  muted: 'var(--text-muted)',
+const TONE = {
+  good: { bg: 'color-mix(in srgb, var(--status-good) 16%, transparent)', fg: 'var(--status-good)' },
+  warning: { bg: 'color-mix(in srgb, var(--status-warning) 18%, transparent)', fg: 'var(--status-warning)' },
+  serious: { bg: 'color-mix(in srgb, var(--status-serious) 18%, transparent)', fg: 'var(--status-serious)' },
+  critical: { bg: 'color-mix(in srgb, var(--status-critical) 16%, transparent)', fg: 'var(--status-critical)' },
+  muted: { bg: 'var(--page)', fg: 'var(--text-secondary)' },
 }
 
-/** Nunca comunica só por cor: o texto do rótulo sempre acompanha a bolinha
- * de status — ver regra "status color never alone" da paleta de dataviz. */
+/** Selo de status — fundo suave na cor do tom + texto na mesma cor, padrão
+ * portado do app de referência Resultar Servicios (StatusPill em
+ * components/app-ui.tsx). Nunca comunica só por cor: o rótulo do status
+ * sempre acompanha o selo — ver regra "status color never alone" da
+ * paleta de dataviz. */
 export default function StatusPill({ label, tone = 'muted' }) {
-  const color = TONE_COLOR[tone] || TONE_COLOR.muted
+  const { bg, fg } = TONE[tone] || TONE.muted
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
-      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+    <span
+      className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
+      style={{ backgroundColor: bg, color: fg }}
+    >
       {label}
     </span>
   )

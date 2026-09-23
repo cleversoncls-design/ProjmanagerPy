@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { TextInput, FormField } from '../components/FormField'
 import Button from '../components/Button'
 import ErrorBanner from '../components/ErrorBanner'
+import logo from '../assets/resultar-logo.png'
 
 export default function LoginPage() {
   const { user, loading, login } = useAuth()
@@ -35,9 +36,15 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--page)] px-4">
-      <div className="w-full max-w-sm rounded-xl border border-[var(--border)] bg-[var(--surface)] p-6">
-        <p className="text-sm font-semibold text-[var(--text-primary)]">ProjmanagerPy</p>
-        <p className="mt-1 text-xs text-[var(--text-muted)]">Entre com seu e-mail e senha para continuar.</p>
+      <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6">
+        <div className="mb-1 flex items-center gap-2.5">
+          <img src={logo} alt="Resultar Servicios" className="h-8 w-8 rounded-md object-contain" />
+          <div>
+            <p className="text-sm font-extrabold tracking-tight text-[var(--text-primary)]">RESULTAR SERVICIOS</p>
+            <p className="text-[11px] font-medium text-[var(--text-muted)]">Gestión de Proyectos</p>
+          </div>
+        </div>
+        <p className="mt-4 text-xs text-[var(--text-muted)]">Entre com seu e-mail e senha para continuar.</p>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <FormField label="E-mail" required>
