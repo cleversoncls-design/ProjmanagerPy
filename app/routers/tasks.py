@@ -115,6 +115,17 @@ def update_task(
     # campos seguem o setattr genérico de sempre.
     duration_days = changes.pop("duration_days", None)
     estimated_hours = changes.pop("estimated_hours", None)
+    # Se a própria data/duração da tarefa muda, as sucessoras dependentes
+    # dela precisam ser recalculadas em cascata agora — sem isso, o usuário
+    # via uma predecessora nova data mas as sucessoras só se moviam depois
+    # de clicar manualmente em "Recalcular tudo" (mesmo problema de
+    # create_dependency, ver comentário lá).
+    schedule_fields_changed = (
+        duration_days is not None
+        or estimated_hours is not None
+        or "planned_start_date" in changes
+        or "planned_end_date" in changes
+    )
     for field, value in changes.items():
         setattr(task, field, value)
     if duration_days is not None or estimated_hours is not None:
@@ -126,6 +137,13 @@ def update_task(
         )
         changes["duration_days"] = duration_days if duration_days is not None else task.duration_days
         changes["estimated_hours"] = task.estimated_hours
+    if schedule_fields_changed:
+        db.flush()
+        try:
+            cal = calendar_for_project(db, task.project)
+            reschedule_cascade(db, task.id, cal)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     if changes:
         record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.UPDATE, user_id=user.id, details={"fields": sorted(changes.keys())})
     db.commit()
@@ -216,6 +234,19 @@ def create_dependency(
         raise HTTPException(status_code=409, detail="Essa dependência já existe")
     dependency = TaskDependency(**data.model_dump())
     db.add(dependency)
+    # Sem o flush, reschedule_cascade (que faz sua própria query em
+    # TaskDependency logo abaixo) não enxergaria essa dependência recém-
+    # criada — a sessão tem autoflush=False (app/database.py).
+    db.flush()
+    # A sucessora precisa herdar a data da predecessora imediatamente: antes
+    # desta chamada, criar a dependência só gravava o vínculo e a sucessora
+    # continuava com a data antiga até o usuário clicar manualmente em
+    # "Recalcular tudo".
+    try:
+        cal = calendar_for_project(db, predecessor.project)
+        reschedule_cascade(db, predecessor.id, cal)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     db.commit()
     db.refresh(dependency)
     return dependency
