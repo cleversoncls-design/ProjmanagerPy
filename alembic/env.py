@@ -14,7 +14,16 @@ config = context.config
 # Sobrescreve a URL do .ini com a mesma lógica usada pela API (DATABASE_URL >
 # POSTGRES_* > fallback SQLite), para nunca haver duas fontes de verdade
 # divergentes sobre a conexão do banco.
-config.set_main_option("sqlalchemy.url", build_database_url())
+#
+# "%" precisa virar "%%" aqui: o Config do Alembic guarda os valores num
+# ConfigParser comum, que trata "%" como início de interpolação de variável
+# ("%(name)s"). Uma senha com caractere especial URL-encoded (ex.: "@" vira
+# "%40") quebra na hora de gravar, com "ValueError: invalid interpolation
+# syntax" — mesmo funcionando perfeitamente como URL de conexão de verdade.
+# Escapar para "%%" na escrita faz o ConfigParser devolver o "%" original
+# quando o valor é lido de volta (ex.: em run_migrations_online via
+# engine_from_config), documentado na FAQ do próprio Alembic.
+config.set_main_option("sqlalchemy.url", build_database_url().replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
