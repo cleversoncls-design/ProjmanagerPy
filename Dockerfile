@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY scripts ./scripts
+COPY alembic ./alembic
+COPY alembic.ini .
 COPY README.md .
 
 # A imagem de produção não roda como root: cria um usuário dedicado e
