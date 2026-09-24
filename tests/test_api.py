@@ -690,3 +690,194 @@ def test_gantt_endpoint_bundles_tasks_and_dependencies(client, setup):
     external_headers = auth_headers(client, setup["client_pm_a"].email)
     cross_client = client.get(f"/projects/{setup['project_b'].id}/gantt", headers=external_headers)
     assert cross_client.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Fase 4: motor de agendamento (effort-driven, WBS, mover tarefa, calendário
+# de projeto/status date, estatísticas, bloqueio de usuário)
+# ---------------------------------------------------------------------------
+
+
+def test_create_task_defaults_to_one_day_and_effort_driven_duration_sets_work(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+
+    # Nem duration_days nem estimated_hours informados -> assume 1 dia (8h,
+    # FTE genérica sem recurso alocado ainda).
+    default_task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Padrão", "wbs_code": "1"}, headers=admin_headers
+    ).json()
+    assert float(default_task["duration_days"]) == 1.0
+    assert float(default_task["estimated_hours"]) == 8.0
+
+    # Informar duration_days deriva o Trabalho (2 dias * 8h/dia = 16h).
+    by_duration = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Por duração", "wbs_code": "2", "duration_days": "2"},
+        headers=admin_headers,
+    ).json()
+    assert float(by_duration["duration_days"]) == 2.0
+    assert float(by_duration["estimated_hours"]) == 16.0
+
+    # Informar só estimated_hours deriva a Duração pelo caminho inverso.
+    by_hours = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Por trabalho", "wbs_code": "3", "estimated_hours": "20"},
+        headers=admin_headers,
+    ).json()
+    assert float(by_hours["estimated_hours"]) == 20.0
+    assert float(by_hours["duration_days"]) == 2.5
+
+
+def test_update_task_duration_recomputes_work_via_api(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "T", "wbs_code": "1", "duration_days": "1"}, headers=admin_headers
+    ).json()
+    assert float(task["estimated_hours"]) == 8.0
+
+    updated = client.patch(f"/tasks/{task['id']}", json={"duration_days": "3"}, headers=admin_headers)
+    assert updated.status_code == 200
+    assert float(updated.json()["estimated_hours"]) == 24.0
+
+
+def test_recalculate_wbs_endpoint_renumbers_tasks(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    parent = client.post(f"/projects/{project_id}/tasks", json={"name": "Fase", "wbs_code": "9"}, headers=admin_headers).json()
+    child = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Atividade", "wbs_code": "9.1", "parent_task_id": parent["id"]},
+        headers=admin_headers,
+    ).json()
+
+    result = client.post(f"/projects/{project_id}/tasks/recalculate-wbs", headers=admin_headers)
+    assert result.status_code == 200
+    tasks_by_id = {t["id"]: t for t in result.json()["tasks"]}
+    assert tasks_by_id[parent["id"]]["wbs_code"] == "1"
+    assert tasks_by_id[child["id"]]["wbs_code"] == "1.1"
+
+
+def test_move_task_endpoint_reparents(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    parent_a = client.post(f"/projects/{project_id}/tasks", json={"name": "Pai A", "wbs_code": "1"}, headers=admin_headers).json()
+    parent_b = client.post(f"/projects/{project_id}/tasks", json={"name": "Pai B", "wbs_code": "2"}, headers=admin_headers).json()
+    child = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Filho", "wbs_code": "1.1", "parent_task_id": parent_a["id"]},
+        headers=admin_headers,
+    ).json()
+
+    moved = client.post(
+        f"/tasks/{child['id']}/move", json={"new_parent_id": parent_b["id"]}, headers=admin_headers
+    )
+    assert moved.status_code == 200
+    assert moved.json()["parent_task_id"] == parent_b["id"]
+
+
+def test_project_reschedule_endpoint_recalculates_all_dependent_tasks(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    pred = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "A", "wbs_code": "1", "planned_start_date": "2026-08-24", "planned_end_date": "2026-08-24"},
+        headers=admin_headers,
+    ).json()
+    succ = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "B", "wbs_code": "2", "planned_start_date": "2026-09-15", "planned_end_date": "2026-09-16"},
+        headers=admin_headers,
+    ).json()
+    client.post(
+        "/task-dependencies",
+        json={"predecessor_task_id": pred["id"], "successor_task_id": succ["id"]},
+        headers=admin_headers,
+    )
+
+    result = client.post(f"/projects/{project_id}/reschedule", json={}, headers=admin_headers)
+    assert result.status_code == 200
+    updated = {t["id"]: t for t in result.json()}
+    assert succ["id"] in updated
+    assert updated[succ["id"]]["planned_start_date"] == "2026-08-25"
+
+
+def test_project_schedule_endpoint_returns_status_dots(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    client.patch(f"/projects/{project_id}", json={"status_date": "2026-09-01"}, headers=admin_headers)
+    task = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Atrasada", "wbs_code": "1", "planned_end_date": "2026-08-01"},
+        headers=admin_headers,
+    ).json()
+    # Bolinha branca (por iniciar) é a regra pra status NOT_STARTED
+    # independente da data; marcar em andamento é o que expõe o atraso.
+    client.patch(f"/tasks/{task['id']}", json={"status": "IN_PROGRESS"}, headers=admin_headers)
+
+    result = client.get(f"/projects/{project_id}/schedule", headers=admin_headers)
+    assert result.status_code == 200
+    body = result.json()
+    assert body["status_date"] == "2026-09-01"
+    assert body["tasks"][0]["status_dot"] == "red"
+
+
+def test_project_statistics_endpoint_hides_cost_for_external_role(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    client.post(f"/projects/{project_id}/tasks", json={"name": "T", "wbs_code": "1"}, headers=admin_headers)
+
+    internal = client.get(f"/projects/{project_id}/statistics", headers=admin_headers)
+    assert internal.status_code == 200
+
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    external = client.get(f"/projects/{project_id}/statistics", headers=external_headers)
+    assert external.status_code == 200
+    assert external.json()["actual"]["cost"] is None
+
+
+def test_project_calendar_can_be_assigned_and_invalid_id_is_rejected(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    calendar = client.post("/calendars", json={"name": "Padrão"}, headers=admin_headers).json()
+
+    ok = client.patch(f"/projects/{project_id}", json={"calendar_id": calendar["id"]}, headers=admin_headers)
+    assert ok.status_code == 200
+    assert ok.json()["calendar_id"] == calendar["id"]
+
+    bad = client.patch(f"/projects/{project_id}", json={"calendar_id": "nao-existe"}, headers=admin_headers)
+    assert bad.status_code == 404
+
+
+def test_admin_can_update_user_and_block_login(client, setup, db_session):
+    admin_headers = setup["admin_headers"]
+    consultant = setup["consultant"]
+
+    update = client.patch(f"/users/{consultant.id}", json={"status": "BLOCKED"}, headers=admin_headers)
+    assert update.status_code == 200
+    assert update.json()["status"] == "BLOCKED"
+
+    login = client.post("/auth/login", data={"username": consultant.email, "password": PASSWORD})
+    assert login.status_code == 401
+
+
+def test_non_admin_cannot_update_users(client, setup):
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    response = client.patch(f"/users/{setup['consultant'].id}", json={"status": "BLOCKED"}, headers=external_headers)
+    assert response.status_code == 403
+
+
+def test_admin_can_reset_user_password(client, setup):
+    admin_headers = setup["admin_headers"]
+    consultant = setup["consultant"]
+
+    reset = client.post(
+        f"/users/{consultant.id}/reset-password", json={"new_password": "nova-senha-123"}, headers=admin_headers
+    )
+    assert reset.status_code == 204
+
+    old_login = client.post("/auth/login", data={"username": consultant.email, "password": PASSWORD})
+    assert old_login.status_code == 401
+    new_login = client.post("/auth/login", data={"username": consultant.email, "password": "nova-senha-123"})
+    assert new_login.status_code == 200

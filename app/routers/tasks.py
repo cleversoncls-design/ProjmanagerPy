@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
@@ -16,10 +18,22 @@ from ..schemas import (
     TaskCreate,
     TaskDependencyCreate,
     TaskDependencyRead,
+    TaskMoveRequest,
     TaskRead,
     TaskUpdate,
+    WbsRecalculateResponse,
 )
-from ..services import calendar_from_db, reschedule_cascade
+from ..services import (
+    DEFAULT_CAPACITY_HOURS_PER_DAY,
+    capacity_hours_per_day_for_task,
+    apply_effort_driven,
+    calendar_for_project,
+    calendar_from_db,
+    move_task,
+    recalculate_schedule,
+    recalculate_wbs,
+    reschedule_cascade,
+)
 
 router = APIRouter(tags=["tasks"])
 
@@ -48,7 +62,19 @@ def create_task(
             raise HTTPException(status_code=422, detail="parent_task_id precisa ser uma tarefa do mesmo projeto")
     if db.scalar(select(Task).where(Task.project_id == project_id, Task.wbs_code == data.wbs_code)):
         raise HTTPException(status_code=409, detail="Já existe uma tarefa com este código WBS neste projeto")
-    task = Task(project_id=project_id, **data.model_dump())
+    fields = data.model_dump(exclude={"duration_days", "estimated_hours"})
+    task = Task(project_id=project_id, **fields)
+    # Sem nenhum recurso alocado ainda nesta hora (a tarefa acabou de ser
+    # criada), então o effort-driven usa a FTE genérica de 8h/dia — ver
+    # capacity_hours_per_day_for_task para quando já há alocação. Sem
+    # duration_days NEM estimated_hours informados, assume 1 dia (mesmo
+    # default do modelo) como ponto de partida.
+    apply_effort_driven(
+        task,
+        duration_days=data.duration_days if data.duration_days is not None else (None if data.estimated_hours is not None else Decimal("1")),
+        estimated_hours=data.estimated_hours if data.duration_days is None else None,
+        capacity_hours_per_day=DEFAULT_CAPACITY_HOURS_PER_DAY,
+    )
     db.add(task)
     db.flush()
     record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.CREATE, user_id=user.id)
@@ -83,8 +109,23 @@ def update_task(
     task = _get_task_or_404(db, task_id)
     require_project_access(task.project, user, write=True)
     changes = data.model_dump(exclude_unset=True)
+    # Duração/Trabalho passam pelo motor effort-driven (mesma regra de
+    # create_task): informar um recalcula o outro; informar os dois, quem
+    # manda é a Duração (ver docstring de apply_effort_driven). Os demais
+    # campos seguem o setattr genérico de sempre.
+    duration_days = changes.pop("duration_days", None)
+    estimated_hours = changes.pop("estimated_hours", None)
     for field, value in changes.items():
         setattr(task, field, value)
+    if duration_days is not None or estimated_hours is not None:
+        apply_effort_driven(
+            task,
+            duration_days=duration_days,
+            estimated_hours=estimated_hours if duration_days is None else None,
+            capacity_hours_per_day=capacity_hours_per_day_for_task(db, task.id),
+        )
+        changes["duration_days"] = duration_days if duration_days is not None else task.duration_days
+        changes["estimated_hours"] = task.estimated_hours
     if changes:
         record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.UPDATE, user_id=user.id, details={"fields": sorted(changes.keys())})
     db.commit()
@@ -207,7 +248,7 @@ def reschedule_task(
     task = _get_task_or_404(db, task_id)
     require_project_access(task.project, user, write=True)
     try:
-        cal = calendar_from_db(db, data.calendar_id)
+        cal = calendar_from_db(db, data.calendar_id) if data.calendar_id else calendar_for_project(db, task.project)
         updated = reschedule_cascade(db, task_id, cal)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -235,6 +276,16 @@ def assign_resource(
         raise HTTPException(status_code=409, detail="Recurso já alocado nesta tarefa")
     assignment = TaskAssignment(task_id=task_id, **data.model_dump())
     db.add(assignment)
+    db.flush()
+    # Fixed Units: aloca mais um recurso mantém a Duração e recalcula só o
+    # Trabalho (capacidade diária total dos recursos agora alocados) — ver
+    # docstring de apply_effort_driven.
+    apply_effort_driven(
+        task,
+        duration_days=None,
+        estimated_hours=None,
+        capacity_hours_per_day=capacity_hours_per_day_for_task(db, task_id),
+    )
     db.commit()
     db.refresh(assignment)
     return assignment
@@ -245,3 +296,106 @@ def list_assignments(task_id: str, user: User = Depends(get_current_user), db: S
     task = _get_task_or_404(db, task_id)
     require_project_access(task.project, user)
     return list(db.scalars(select(TaskAssignment).where(TaskAssignment.task_id == task_id)).all())
+
+
+@router.delete("/tasks/{task_id}/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_assignment(
+    task_id: str,
+    assignment_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    task = _get_task_or_404(db, task_id)
+    require_project_access(task.project, user, write=True)
+    assignment = db.get(TaskAssignment, assignment_id)
+    if not assignment or assignment.task_id != task_id:
+        raise HTTPException(status_code=404, detail="Alocação não encontrada")
+    db.delete(assignment)
+    db.flush()
+    # Um recurso a menos: mesma regra Fixed Units, na direção oposta —
+    # Duração fica igual, Trabalho cai para a nova capacidade total (ou
+    # volta pra FTE genérica se este era o último recurso alocado).
+    apply_effort_driven(
+        task,
+        duration_days=None,
+        estimated_hours=None,
+        capacity_hours_per_day=capacity_hours_per_day_for_task(db, task_id),
+    )
+    record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.UPDATE, user_id=user.id, details={"assignment_removed": assignment_id})
+    db.commit()
+    return None
+
+
+@router.post("/projects/{project_id}/tasks/recalculate-wbs", response_model=WbsRecalculateResponse)
+def recalculate_project_wbs(
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Botão "recalcular WBS/EAP" — renumera todas as tarefas do projeto a
+    partir da hierarquia e da ordem manual (sort_order). Ver
+    services.recalculate_wbs."""
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+    require_project_access(project, user, write=True)
+    updated = recalculate_wbs(db, project_id)
+    record_audit(db, entity_type="project", entity_id=project_id, action=AuditAction.UPDATE, user_id=user.id, details={"action": "recalculate_wbs"})
+    db.commit()
+    for item in updated:
+        db.refresh(item)
+    return {"tasks": updated}
+
+
+@router.post("/tasks/{task_id}/move", response_model=TaskRead)
+def move_task_endpoint(
+    task_id: str,
+    data: TaskMoveRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Task:
+    """Move a tarefa para outro pai e/ou reordena entre as irmãs — ver
+    services.move_task. Não recalcula WBS nem datas automaticamente:
+    chame recalculate-wbs / reschedule depois, se necessário."""
+    task = _get_task_or_404(db, task_id)
+    require_project_access(task.project, user, write=True)
+    try:
+        moved = move_task(db, task_id, new_parent_id=data.new_parent_id, before_task_id=data.before_task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    record_audit(
+        db,
+        entity_type="task",
+        entity_id=task.id,
+        action=AuditAction.UPDATE,
+        user_id=user.id,
+        details={"moved_to_parent": data.new_parent_id, "before_task_id": data.before_task_id},
+    )
+    db.commit()
+    db.refresh(moved)
+    return moved
+
+
+@router.post("/projects/{project_id}/reschedule", response_model=list[TaskRead])
+def reschedule_project(
+    project_id: str,
+    data: RescheduleRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[Task]:
+    """Botão "recalcular tudo" — refaz as datas de todas as tarefas do
+    projeto que têm predecessora, de uma vez só (ver
+    services.recalculate_schedule), em vez de precisar acionar
+    reschedule_cascade tarefa por tarefa depois de uma edição em lote
+    (mover tarefas, trocar predecessoras, mudar durações)."""
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+    require_project_access(project, user, write=True)
+    cal = calendar_from_db(db, data.calendar_id) if data.calendar_id else calendar_for_project(db, project)
+    updated = recalculate_schedule(db, project_id, cal)
+    record_audit(db, entity_type="project", entity_id=project_id, action=AuditAction.UPDATE, user_id=user.id, details={"action": "reschedule_all"})
+    db.commit()
+    for item in updated:
+        db.refresh(item)
+    return updated

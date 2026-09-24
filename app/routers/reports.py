@@ -12,9 +12,12 @@ from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access, req
 from ..models import Project, Task, TaskDependency, TaskStatus, User, UserRole
 from ..schemas import (
     DashboardResponse,
+    EvmMetrics,
     GanttResponse,
     ProjectPortfolioRow,
     ProjectReportResponse,
+    ProjectScheduleResponse,
+    ProjectStatisticsResponse,
     ResourceUtilizationRow,
     RiskMatrixResponse,
     RoiRow,
@@ -24,11 +27,14 @@ from ..services import (
     financials_by_task_type,
     portfolio_rows,
     project_burndown,
+    project_evm,
     project_financials,
     project_progress,
+    project_statistics,
     project_roi,
     resource_utilization,
     risk_matrix,
+    task_schedule_rows,
     velocity_series,
 )
 
@@ -196,6 +202,65 @@ def roi(
         return [project_roi(db, project_id)]
     projects = list(db.scalars(select(Project)).all())
     return [project_roi(db, project.id) for project in projects]
+
+
+@router.get("/projects/{project_id}/schedule", response_model=ProjectScheduleResponse)
+def project_schedule(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """Grade de cronograma enriquecida (bolinha de status, linha base, %
+    previsto por tarefa) — igual a GET /gantt em conteúdo de tarefas, mas
+    com os campos calculados que a tela de tarefas/Gantt do frontend
+    precisa para pintar o status sem recalcular nada no cliente."""
+    project = _get_project_or_404(db, project_id)
+    require_project_access(project, user)
+    schedule = task_schedule_rows(db, project)
+    tasks_payload = []
+    for row in schedule["rows"]:
+        t = row["task"]
+        tasks_payload.append(
+            {
+                **{c.name: getattr(t, c.name) for c in t.__table__.columns},
+                "status_dot": row["status_dot"],
+                "baseline_start_date": row["baseline_start_date"],
+                "baseline_end_date": row["baseline_end_date"],
+                "baseline_estimated_hours": row["baseline_estimated_hours"],
+                "planned_percent_complete": row["planned_percent_complete"],
+            }
+        )
+    task_ids = [row["task"].id for row in schedule["rows"]]
+    dependencies = (
+        list(
+            db.scalars(
+                select(TaskDependency).where(
+                    or_(TaskDependency.predecessor_task_id.in_(task_ids), TaskDependency.successor_task_id.in_(task_ids))
+                )
+            ).all()
+        )
+        if task_ids
+        else []
+    )
+    return {"status_date": schedule["status_date"], "tasks": tasks_payload, "dependencies": dependencies}
+
+
+@router.get("/projects/{project_id}/report.evm", response_model=EvmMetrics)
+def project_evm_report(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """SPI/CPI e % previsto (Earned Value em base de horas — ver docstring
+    de services.project_evm)."""
+    project = _get_project_or_404(db, project_id)
+    require_project_access(project, user)
+    return project_evm(db, project_id)
+
+
+@router.get("/projects/{project_id}/statistics", response_model=ProjectStatisticsResponse)
+def project_statistics_report(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """Equivalente a "Project Statistics" do MS Project (ver tela de
+    referência do usuário). O custo de `actual` é ocultado para perfis
+    externos, no mesmo padrão de ProjectDetail/financials."""
+    project = _get_project_or_404(db, project_id)
+    require_project_access(project, user)
+    stats = project_statistics(db, project_id)
+    if user.role in EXTERNAL_ROLES:
+        stats["actual"]["cost"] = None
+    return stats
 
 
 @router.get("/projects/{project_id}/gantt", response_model=GanttResponse)

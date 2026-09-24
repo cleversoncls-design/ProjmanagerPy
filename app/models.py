@@ -169,9 +169,22 @@ class Project(Base):
     consulting_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
+    # Calendário aplicado ao projeto (dias úteis/feriados usados para
+    # calcular datas finais e o motor de reagendamento). Opcional: sem ele,
+    # o recálculo cai no calendário padrão (segunda a sexta, sem feriados) —
+    # ver `services.calendar_for_project`. Pode ser comparado/validado
+    # contra o calendário pessoal do consultor (Resource.calendar_id) na
+    # tela de recursos.
+    calendar_id: Mapped[str | None] = mapped_column(ForeignKey("calendars.id", ondelete="SET NULL"))
+    # "Data de status"/data-base: a partir dela, o sistema calcula o %
+    # previsto e o status (no prazo/atrasada) de cada tarefa — ver
+    # `services.project_evm` e `services.task_dot_color`. None = usa a data
+    # de hoje como data-base (comportamento antes de existir este campo).
+    status_date: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     client: Mapped[Client] = relationship(back_populates="projects")
+    calendar: Mapped[Calendar | None] = relationship()
     tasks: Mapped[list[Task]] = relationship(back_populates="project", cascade="all, delete-orphan")
     expenses: Mapped[list[ProjectExpense]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
@@ -193,8 +206,20 @@ class Task(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     wbs_code: Mapped[str] = mapped_column(String(50), nullable=False)
     task_type: Mapped[TaskType] = mapped_column(nullable=False, default=TaskType.CONSULTING)
+    # "Duração" (dias) — campo primário do agendamento effort-driven (estilo
+    # MS Project): estimated_hours ("Trabalho") é derivado dela × a
+    # capacidade diária dos recursos alocados (ou 8h/dia sem nenhum recurso
+    # alocado ainda). Editar estimated_hours diretamente faz o cálculo
+    # inverso. Ver `services.apply_effort_driven`.
+    duration_days: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=1)
     estimated_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     actual_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
+    # Posição manual entre as tarefas-irmãs (mesmo parent_task_id) — usada
+    # por "mover tarefa" (reordenar/reparentar) e por `recalculate_wbs` para
+    # decidir a ordem final do WBS, já que a ordenação alfabética de
+    # wbs_code não reflete mais a ordem depois de um recálculo. Não é único
+    # nem denso (gaps são normais); só a ordem relativa importa.
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     planned_start_date: Mapped[date | None] = mapped_column(Date)
     planned_end_date: Mapped[date | None] = mapped_column(Date)
     actual_start_date: Mapped[date | None] = mapped_column(Date)

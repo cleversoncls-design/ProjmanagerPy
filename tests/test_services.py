@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     Base,
+    Baseline,
     Calendar,
     Client,
     DependencyType,
@@ -28,15 +29,22 @@ from app.models import (
 )
 from app.services import (
     BusinessCalendar,
+    apply_effort_driven,
     financials_by_task_type,
+    move_task,
     portfolio_rows,
     project_burndown,
+    project_evm,
     project_financials,
     project_progress,
     project_roi,
+    project_statistics,
+    recalculate_schedule,
+    recalculate_wbs,
     reschedule_cascade,
     resource_utilization,
     risk_matrix,
+    task_dot_colors,
     velocity_series,
 )
 
@@ -450,3 +458,270 @@ def test_risk_matrix_counts_by_cell_and_flags_high_priority_open_risks():
     # Só o risco HIGH/HIGH ainda aberto (não CLOSED) entra na priorização.
     assert len(result["high_priority"]) == 1
     assert result["high_priority"][0].description == "Alto/alto aberto"
+
+
+# ---------------------------------------------------------------------------
+# Fase 4: motor de agendamento effort-driven, WBS, mover tarefa, status dot,
+# EVM (SPI/CPI) e Project Statistics.
+# ---------------------------------------------------------------------------
+
+
+def test_apply_effort_driven_duration_drives_work():
+    task = Task(project_id="p", name="T", wbs_code="1")
+    apply_effort_driven(task, duration_days=Decimal("2"), estimated_hours=None, capacity_hours_per_day=Decimal("8"))
+    assert task.duration_days == Decimal("2")
+    assert task.estimated_hours == Decimal("16")
+
+
+def test_apply_effort_driven_work_drives_duration():
+    task = Task(project_id="p", name="T", wbs_code="1")
+    apply_effort_driven(task, duration_days=None, estimated_hours=Decimal("20"), capacity_hours_per_day=Decimal("8"))
+    assert task.estimated_hours == Decimal("20")
+    assert task.duration_days == Decimal("2.5")
+
+
+def test_apply_effort_driven_no_field_recomputes_work_from_existing_duration():
+    """Caminho usado por assign_resource/remove assignment: Duração fica
+    fixa (Fixed Units), só o Trabalho muda com a nova capacidade total."""
+    task = Task(project_id="p", name="T", wbs_code="1", duration_days=Decimal("3"))
+    apply_effort_driven(task, duration_days=None, estimated_hours=None, capacity_hours_per_day=Decimal("16"))
+    assert task.duration_days == Decimal("3")
+    assert task.estimated_hours == Decimal("48")
+
+
+def test_recalculate_wbs_renumbers_by_hierarchy_and_sort_order():
+    db = session()
+    project = _make_project(db, code="PRJ-WBS")
+    parent = Task(project_id=project.id, name="Fase 1", wbs_code="9", sort_order=0)
+    db.add(parent)
+    db.flush()
+    # Filhos cadastrados fora de ordem, mas com sort_order já refletindo a
+    # ordem manual desejada (2º antes do 1º).
+    child_a = Task(project_id=project.id, name="A", wbs_code="9.9", parent_task_id=parent.id, sort_order=10)
+    child_b = Task(project_id=project.id, name="B", wbs_code="9.1", parent_task_id=parent.id, sort_order=0)
+    other_root = Task(project_id=project.id, name="Fase 2", wbs_code="1", sort_order=10)
+    db.add_all([child_a, child_b, other_root])
+    db.commit()
+
+    updated = recalculate_wbs(db, project.id)
+
+    assert parent.wbs_code == "1"
+    assert child_b.wbs_code == "1.1"  # sort_order=0, vem antes
+    assert child_a.wbs_code == "1.2"  # sort_order=10, vem depois
+    assert other_root.wbs_code == "2"
+    # Todas as 4 tarefas tiveram o código alterado em relação ao original.
+    assert {t.id for t in updated} == {parent.id, child_a.id, child_b.id, other_root.id}
+
+
+def test_recalculate_wbs_is_idempotent_second_call_reports_no_changes():
+    db = session()
+    project = _make_project(db, code="PRJ-WBS-2")
+    t1 = Task(project_id=project.id, name="A", wbs_code="5", sort_order=0)
+    t2 = Task(project_id=project.id, name="B", wbs_code="6", sort_order=10)
+    db.add_all([t1, t2])
+    db.commit()
+
+    first_pass = recalculate_wbs(db, project.id)
+    assert {t.id for t in first_pass} == {t1.id, t2.id}
+    second_pass = recalculate_wbs(db, project.id)
+    assert second_pass == []
+
+
+def test_move_task_reparents_and_reorders_siblings():
+    db = session()
+    project = _make_project(db, code="PRJ-MOVE")
+    parent_a = Task(project_id=project.id, name="Pai A", wbs_code="1")
+    parent_b = Task(project_id=project.id, name="Pai B", wbs_code="2")
+    db.add_all([parent_a, parent_b])
+    db.flush()
+    child = Task(project_id=project.id, name="Filho", wbs_code="1.1", parent_task_id=parent_a.id, sort_order=0)
+    existing_in_b = Task(project_id=project.id, name="Já em B", wbs_code="2.1", parent_task_id=parent_b.id, sort_order=0)
+    db.add_all([child, existing_in_b])
+    db.commit()
+
+    moved = move_task(db, child.id, new_parent_id=parent_b.id, before_task_id=existing_in_b.id)
+
+    assert moved.parent_task_id == parent_b.id
+    # Movida para antes de "Já em B": sort_order menor que o dela.
+    assert moved.sort_order < existing_in_b.sort_order
+
+
+def test_move_task_rejects_moving_into_own_descendant():
+    db = session()
+    project = _make_project(db, code="PRJ-MOVE-CYCLE")
+    parent = Task(project_id=project.id, name="Pai", wbs_code="1")
+    db.add(parent)
+    db.flush()
+    child = Task(project_id=project.id, name="Filho", wbs_code="1.1", parent_task_id=parent.id)
+    db.add(child)
+    db.commit()
+
+    with pytest.raises(ValueError, match="dentro dela mesma"):
+        move_task(db, parent.id, new_parent_id=child.id, before_task_id=None)
+
+
+def test_task_dot_colors_leaf_rules_and_parent_aggregation():
+    db = session()
+    project = _make_project(db, code="PRJ-DOT")
+    status_date = date(2026, 9, 1)
+    parent = Task(project_id=project.id, name="Fase", wbs_code="1")
+    db.add(parent)
+    db.flush()
+    not_started = Task(project_id=project.id, name="Não iniciada", wbs_code="1.1", parent_task_id=parent.id, status=TaskStatus.NOT_STARTED)
+    on_time = Task(
+        project_id=project.id, name="No prazo", wbs_code="1.2", parent_task_id=parent.id,
+        status=TaskStatus.IN_PROGRESS, planned_end_date=date(2026, 9, 10),
+    )
+    late = Task(
+        project_id=project.id, name="Atrasada", wbs_code="1.3", parent_task_id=parent.id,
+        status=TaskStatus.IN_PROGRESS, planned_end_date=date(2026, 8, 20),
+    )
+    db.add_all([not_started, on_time, late])
+    db.commit()
+
+    dots = task_dot_colors([parent, not_started, on_time, late], status_date)
+    assert dots[not_started.id] == "white"
+    assert dots[on_time.id] == "green"
+    assert dots[late.id] == "red"
+    # Pai com filhos de cores diferentes (branco/verde/vermelho): amarelo.
+    assert dots[parent.id] == "yellow"
+
+
+def test_task_dot_colors_parent_inherits_single_common_color():
+    db = session()
+    project = _make_project(db, code="PRJ-DOT-2")
+    parent = Task(project_id=project.id, name="Fase", wbs_code="1")
+    db.add(parent)
+    db.flush()
+    child_1 = Task(
+        project_id=project.id, name="C1", wbs_code="1.1", parent_task_id=parent.id,
+        status=TaskStatus.COMPLETED, planned_end_date=date(2026, 8, 1),
+    )
+    child_2 = Task(
+        project_id=project.id, name="C2", wbs_code="1.2", parent_task_id=parent.id,
+        status=TaskStatus.IN_PROGRESS, planned_end_date=date(2026, 9, 10),
+    )
+    db.add_all([child_1, child_2])
+    db.commit()
+
+    dots = task_dot_colors([parent, child_1, child_2], date(2026, 9, 1))
+    # Ambos os filhos ficam "green" (concluída e no prazo) -> pai herda verde.
+    assert dots[child_1.id] == "green"
+    assert dots[child_2.id] == "green"
+    assert dots[parent.id] == "green"
+
+
+def test_recalculate_schedule_updates_only_tasks_with_predecessors():
+    db = session()
+    project = _make_project(db, code="PRJ-RECALC")
+    pred = Task(project_id=project.id, name="A", wbs_code="1", planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 25), duration_days=Decimal("2"))
+    succ = Task(project_id=project.id, name="B", wbs_code="2", planned_start_date=date(2026, 9, 1), planned_end_date=date(2026, 9, 2), duration_days=Decimal("2"))
+    manual = Task(project_id=project.id, name="C sem predecessora", wbs_code="3", planned_start_date=date(2026, 9, 15), planned_end_date=date(2026, 9, 16))
+    db.add_all([pred, succ, manual])
+    db.flush()
+    db.add(TaskDependency(predecessor_task_id=pred.id, successor_task_id=succ.id))
+    db.commit()
+
+    updated = recalculate_schedule(db, project.id, BusinessCalendar())
+
+    assert {t.id for t in updated} == {succ.id}
+    assert succ.planned_start_date == date(2026, 8, 26)
+    # Tarefa sem predecessora nunca é tocada: início continua manual.
+    assert manual.planned_start_date == date(2026, 9, 15)
+
+
+def test_project_evm_uses_baseline_hours_when_available():
+    db = session()
+    project = _make_project(db, code="PRJ-EVM")
+    project.status_date = date(2026, 9, 1)
+    task = Task(
+        project_id=project.id, name="T", wbs_code="1",
+        estimated_hours=Decimal("20"), progress_percentage=Decimal("50"),
+        actual_hours=Decimal("8"), planned_end_date=date(2026, 8, 20),
+    )
+    db.add(task)
+    db.flush()
+    # Baseline "congela" um plano diferente do atual (10h em vez de 20h) —
+    # PV/EV precisam usar o baseline, não o estimated_hours corrente.
+    db.add(
+        Baseline(
+            project_id=project.id,
+            version_name="v1",
+            snapshot_data={
+                "tasks": [
+                    {
+                        "id": task.id,
+                        "wbs_code": "1",
+                        "name": "T",
+                        "planned_start_date": None,
+                        "planned_end_date": "2026-08-20",
+                        "estimated_hours": "10",
+                        "status": "IN_PROGRESS",
+                    }
+                ]
+            },
+        )
+    )
+    db.commit()
+
+    result = project_evm(db, project.id)
+    assert result["planned_value_hours"] == Decimal("10.00")  # baseline, não os 20h atuais
+    assert result["earned_value_hours"] == Decimal("5.00")  # 10h baseline * 50%
+    assert result["actual_hours"] == Decimal("8.00")
+    assert result["spi"] == Decimal("0.50")  # 5/10
+    assert result["cpi"] == Decimal("0.62")  # 5/8 arredondado
+
+
+def test_project_evm_indices_none_when_denominator_zero():
+    db = session()
+    project = _make_project(db, code="PRJ-EVM-0")
+    task = Task(project_id=project.id, name="T", wbs_code="1", estimated_hours=Decimal("10"))
+    db.add(task)
+    db.commit()
+
+    result = project_evm(db, project.id, status_date=date(2026, 1, 1))
+    assert result["spi"] is None  # nenhuma tarefa com fim <= status_date -> PV=0
+    assert result["cpi"] is None  # nenhuma hora apontada ainda -> AC=0
+
+
+def test_project_statistics_current_baseline_actual_and_variance():
+    db = session()
+    project = _make_project(db, code="PRJ-STATS")
+    task = Task(
+        project_id=project.id, name="T", wbs_code="1",
+        estimated_hours=Decimal("16"),
+        planned_start_date=date(2026, 8, 3), planned_end_date=date(2026, 8, 4),
+        actual_start_date=date(2026, 8, 3), actual_end_date=date(2026, 8, 5),
+        actual_hours=Decimal("20"), status=TaskStatus.COMPLETED,
+    )
+    db.add(task)
+    db.flush()
+    db.add(
+        Baseline(
+            project_id=project.id,
+            version_name="v1",
+            snapshot_data={
+                "tasks": [
+                    {
+                        "id": task.id,
+                        "wbs_code": "1",
+                        "name": "T",
+                        "planned_start_date": "2026-08-03",
+                        "planned_end_date": "2026-08-03",
+                        "estimated_hours": "16",
+                        "status": "NOT_STARTED",
+                    }
+                ]
+            },
+        )
+    )
+    db.commit()
+
+    stats = project_statistics(db, project.id)
+    assert stats["current"]["finish_date"] == date(2026, 8, 4)
+    assert stats["baseline"]["finish_date"] == date(2026, 8, 3)
+    assert stats["actual"]["finish_date"] == date(2026, 8, 5)
+    assert stats["actual"]["work_hours"] == Decimal("20")
+    # current terminou 1 dia útil depois do baseline -> variância positiva.
+    assert stats["variance_finish_days"] > 0
+    assert stats["percent_complete_work"] == Decimal("125.00")  # 20 real / 16 atual

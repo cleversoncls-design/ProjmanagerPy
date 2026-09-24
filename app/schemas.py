@@ -56,6 +56,23 @@ class UserRead(ORMModel):
     created_at: datetime
 
 
+class UserUpdate(BaseModel):
+    """Edição de usuário (só ADMIN — ver require_roles no router). Trocar
+    `status` para BLOCKED impede login imediatamente (checado em
+    `POST /auth/login`); a senha não é editável por aqui — ver
+    `POST /users/{id}/reset-password`, que gera um hash novo sem expor a
+    senha atual."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    role: UserRole | None = None
+    client_id: str | None = None
+    status: UserStatus | None = None
+
+
+class UserPasswordReset(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 # ---------------------------------------------------------------------------
 # Clients
 # ---------------------------------------------------------------------------
@@ -135,6 +152,7 @@ class ProjectCreate(BaseModel):
     consulting_rate: Decimal = Field(default=Decimal("0"), ge=0)
     start_date: date | None = None
     end_date: date | None = None
+    calendar_id: str | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -147,6 +165,11 @@ class ProjectUpdate(BaseModel):
     consulting_rate: Decimal | None = Field(default=None, ge=0)
     start_date: date | None = None
     end_date: date | None = None
+    calendar_id: str | None = None
+    # "Data de status" do projeto — ver Project.status_date em app/models.py
+    # e services.project_evm/task_dot_color. Enviar null explicitamente
+    # volta a usar a data de hoje como data-base.
+    status_date: date | None = None
 
 
 class ProjectSummary(ORMModel):
@@ -158,6 +181,8 @@ class ProjectSummary(ORMModel):
     status: ProjectStatus
     start_date: date | None
     end_date: date | None
+    calendar_id: str | None
+    status_date: date | None
 
 
 class ProjectDetail(ProjectSummary):
@@ -179,7 +204,14 @@ class TaskCreate(BaseModel):
     wbs_code: str = Field(min_length=1, max_length=50)
     task_type: TaskType = TaskType.CONSULTING
     parent_task_id: str | None = None
-    estimated_hours: Decimal = Field(default=Decimal("0"), ge=0)
+    # Effort-driven (estilo MS Project) — ver services.apply_effort_driven:
+    # "Duração" é o campo primário; "Trabalho" (estimated_hours) é derivado
+    # dela (duração × capacidade diária dos recursos alocados, ou 8h/dia
+    # sem nenhum recurso ainda). Informar estimated_hours explicitamente
+    # (sem informar duration_days) faz o cálculo inverso — deriva a duração
+    # a partir do trabalho informado.
+    duration_days: Decimal | None = Field(default=None, gt=0)
+    estimated_hours: Decimal | None = Field(default=None, ge=0)
     planned_start_date: date | None = None
     planned_end_date: date | None = None
     is_milestone: bool = False
@@ -192,6 +224,7 @@ class TaskUpdate(BaseModel):
     planned_end_date: date | None = None
     actual_start_date: date | None = None
     actual_end_date: date | None = None
+    duration_days: Decimal | None = Field(default=None, gt=0)
     estimated_hours: Decimal | None = Field(default=None, ge=0)
     progress_percentage: Decimal | None = Field(default=None, ge=0, le=100)
     status: TaskStatus | None = None
@@ -211,8 +244,10 @@ class TaskRead(ORMModel):
     name: str
     wbs_code: str
     task_type: TaskType
+    duration_days: Decimal
     estimated_hours: Decimal
     actual_hours: Decimal
+    sort_order: int
     planned_start_date: date | None
     planned_end_date: date | None
     actual_start_date: date | None
@@ -222,6 +257,34 @@ class TaskRead(ORMModel):
     progress_percentage: Decimal
     status: TaskStatus
     client_approval_status: TaskApprovalStatus
+
+
+class TaskMoveRequest(BaseModel):
+    """Move uma tarefa para outro pai e/ou outra posição entre as irmãs —
+    ver services.move_task. `new_parent_id=None` explícito move para a raiz
+    do projeto (mesmo nível das fases de topo). `before_task_id=None`
+    (padrão) coloca a tarefa no final da lista de irmãs; para "colocar
+    antes de uma tarefa já existente", informe o id dela (precisa já ser
+    irmã no `new_parent_id` de destino)."""
+
+    new_parent_id: str | None = None
+    before_task_id: str | None = None
+
+
+class WbsRecalculateResponse(BaseModel):
+    tasks: list[TaskRead]
+
+
+class TaskScheduleRow(TaskRead):
+    """Linha enriquecida para a grade de cronograma/Gantt — os campos que
+    dependem da `status_date` do projeto ou do último baseline, calculados
+    sob demanda (nunca armazenados) por `services.task_schedule_rows`."""
+
+    status_dot: str
+    baseline_start_date: date | None = None
+    baseline_end_date: date | None = None
+    baseline_estimated_hours: Decimal | None = None
+    planned_percent_complete: Decimal
 
 
 class TaskDependencyCreate(BaseModel):
@@ -240,7 +303,10 @@ class TaskDependencyRead(ORMModel):
 
 
 class RescheduleRequest(BaseModel):
-    calendar_id: str
+    # Opcional agora que o projeto pode ter seu próprio calendário
+    # (Project.calendar_id): sem informar, usa o calendário do projeto (ou
+    # o padrão segunda-sexta, se o projeto também não tiver um definido).
+    calendar_id: str | None = None
 
 
 class TaskAssignmentCreate(BaseModel):
@@ -532,3 +598,52 @@ class RoiRow(BaseModel):
 class GanttResponse(BaseModel):
     tasks: list[TaskRead]
     dependencies: list[TaskDependencyRead]
+
+
+class ProjectScheduleResponse(BaseModel):
+    """Cronograma enriquecido para a grade de tarefas (bolinha de status,
+    linha base, % previsto) — usado pela tela de tarefas/Gantt do
+    frontend. Separado de GanttResponse (que fica só com os campos "crus"
+    de Task/TaskDependency, sem depender de status_date/baseline)."""
+
+    status_date: date
+    tasks: list[TaskScheduleRow]
+    dependencies: list[TaskDependencyRead]
+
+
+class EvmMetrics(BaseModel):
+    """Earned Value em base de HORAS (estimated_hours), não monetária — ver
+    decisão registrada em services.project_evm. planned_value/earned_value/
+    actual_hours são somas de horas de tarefa; os índices SPI/CPI ficam
+    None quando o denominador é zero (projeto sem horas planejadas até a
+    status_date, ou sem nenhuma hora ainda apontada)."""
+
+    status_date: date
+    planned_value_hours: Decimal
+    earned_value_hours: Decimal
+    actual_hours: Decimal
+    spi: Decimal | None
+    cpi: Decimal | None
+    planned_percent_complete: Decimal
+    percent_complete: Decimal
+
+
+class ProjectStatisticsRange(BaseModel):
+    start_date: date | None
+    finish_date: date | None
+    duration_days: Decimal
+    work_hours: Decimal
+    cost: Decimal | None
+
+
+class ProjectStatisticsResponse(BaseModel):
+    """Espelha a caixa "Project Statistics" do MS Project (Current/Baseline/
+    Actual/Variance × Start/Finish/Duration/Work/Cost + % complete) — ver
+    services.project_statistics."""
+
+    current: ProjectStatisticsRange
+    baseline: ProjectStatisticsRange | None
+    actual: ProjectStatisticsRange
+    variance_finish_days: Decimal | None
+    percent_complete_duration: Decimal
+    percent_complete_work: Decimal
