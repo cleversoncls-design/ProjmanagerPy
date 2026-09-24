@@ -141,7 +141,7 @@ def test_cascade_uses_most_restrictive_predecessor():
 
     task_a = Task(project_id=project.id, name="A", wbs_code="1", planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 26))
     task_b = Task(project_id=project.id, name="B", wbs_code="2", planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 24))
-    task_c = Task(project_id=project.id, name="C", wbs_code="3", planned_start_date=date(2026, 9, 1), planned_end_date=date(2026, 9, 2))
+    task_c = Task(project_id=project.id, name="C", wbs_code="3", planned_start_date=date(2026, 9, 1), planned_end_date=date(2026, 9, 2), duration_days=Decimal("2"))
     db.add_all([task_a, task_b, task_c]); db.flush()
     db.add_all([
         TaskDependency(predecessor_task_id=task_a.id, successor_task_id=task_c.id),
@@ -169,7 +169,7 @@ def test_ss_cascade_starts_successor_together_with_predecessor():
     project = _make_project(db, code="PRJ-SS")
 
     pred = Task(project_id=project.id, name="A", wbs_code="1", planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 26))
-    succ = Task(project_id=project.id, name="B", wbs_code="2", planned_start_date=date(2026, 9, 1), planned_end_date=date(2026, 9, 2))
+    succ = Task(project_id=project.id, name="B", wbs_code="2", planned_start_date=date(2026, 9, 1), planned_end_date=date(2026, 9, 2), duration_days=Decimal("2"))
     db.add_all([pred, succ])
     db.flush()
     db.add(TaskDependency(predecessor_task_id=pred.id, successor_task_id=succ.id, dependency_type=DependencyType.SS))
@@ -193,7 +193,7 @@ def test_ff_cascade_finishes_successor_together_with_predecessor():
     project = _make_project(db, code="PRJ-FF")
 
     pred = Task(project_id=project.id, name="A", wbs_code="1", planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 26))
-    succ = Task(project_id=project.id, name="B", wbs_code="2", planned_start_date=date(2026, 8, 20), planned_end_date=date(2026, 8, 21))
+    succ = Task(project_id=project.id, name="B", wbs_code="2", planned_start_date=date(2026, 8, 20), planned_end_date=date(2026, 8, 21), duration_days=Decimal("2"))
     db.add_all([pred, succ])
     db.flush()
     db.add(TaskDependency(predecessor_task_id=pred.id, successor_task_id=succ.id, dependency_type=DependencyType.FF))
@@ -217,7 +217,7 @@ def test_sf_cascade_finishes_successor_when_predecessor_starts():
     project = _make_project(db, code="PRJ-SF")
 
     pred = Task(project_id=project.id, name="A", wbs_code="1", planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 26))
-    succ = Task(project_id=project.id, name="B", wbs_code="2", planned_start_date=date(2026, 8, 17), planned_end_date=date(2026, 8, 19))
+    succ = Task(project_id=project.id, name="B", wbs_code="2", planned_start_date=date(2026, 8, 17), planned_end_date=date(2026, 8, 19), duration_days=Decimal("3"))
     db.add_all([pred, succ])
     db.flush()
     db.add(TaskDependency(predecessor_task_id=pred.id, successor_task_id=succ.id, dependency_type=DependencyType.SF))

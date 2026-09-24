@@ -18,7 +18,6 @@ from ..schemas import (
     ProjectReportResponse,
     ProjectScheduleResponse,
     ProjectStatisticsResponse,
-    ResourceUtilizationRow,
     RiskMatrixResponse,
     RoiRow,
     VelocityPoint,
@@ -32,7 +31,6 @@ from ..services import (
     project_progress,
     project_statistics,
     project_roi,
-    resource_utilization,
     risk_matrix,
     task_schedule_rows,
     velocity_series,
@@ -130,29 +128,6 @@ def project_report(project_id: str, user: User = Depends(get_current_user), db: 
         "financials_by_task_type": financials_by_type,
         "burndown": project_burndown(db, project_id),
     }
-
-
-@router.get("/resources/utilization", response_model=list[ResourceUtilizationRow])
-def utilization(
-    start: date | None = Query(default=None),
-    end: date | None = Query(default=None),
-    resource_id: str | None = None,
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.CONSULTANT)),
-    db: Session = Depends(get_db),
-) -> list[dict]:
-    """Workload/capacidade × demanda por recurso — sem `start`/`end`, usa o
-    mês corrente. Restrito a perfis internos, no mesmo padrão de GET
-    /resources/{id} (dado sensível de custo/capacidade da equipe)."""
-    today = date.today()
-    period_start = start or today.replace(day=1)
-    if end:
-        period_end = end
-    else:
-        next_month = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
-        period_end = next_month - timedelta(days=1)
-    if period_start > period_end:
-        raise HTTPException(status_code=422, detail="start precisa ser anterior ou igual a end")
-    return resource_utilization(db, start=period_start, end=period_end, resource_id=resource_id)
 
 
 @router.get("/projects/{project_id}/risks/matrix", response_model=RiskMatrixResponse)

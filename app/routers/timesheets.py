@@ -45,6 +45,12 @@ def _recalculate_actual_hours(db: Session, task_id: str | None) -> None:
     task = db.get(Task, task_id)
     if not task:
         return
+    # A sessão é criada com autoflush=False (app/database.py) — sem o flush
+    # explícito aqui, a mudança de status pendente em `entry` (feita pelo
+    # chamador logo antes) ainda não teria ido para o banco, e esta consulta
+    # enxergaria o status antigo (ex.: PENDING), somando 0 horas mesmo depois
+    # de aprovar o apontamento.
+    db.flush()
     hours = db.scalars(
         select(Timesheet.hours_spent).where(
             Timesheet.task_id == task_id, Timesheet.status == TimesheetStatus.APPROVED

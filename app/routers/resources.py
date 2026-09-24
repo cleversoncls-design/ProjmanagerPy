@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import date, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import require_roles
 from ..models import Calendar, Resource, User, UserRole
-from ..schemas import ResourceCreate, ResourceRead
+from ..schemas import ResourceCreate, ResourceRead, ResourceUtilizationRow
+from ..services import resource_utilization
 
 router = APIRouter(prefix="/resources", tags=["resources"])
 
@@ -46,6 +49,38 @@ def list_resources(
     if user_id:
         stmt = stmt.where(Resource.user_id == user_id)
     return list(db.scalars(stmt.order_by(Resource.role_title)).all())
+
+
+@router.get("/utilization", response_model=list[ResourceUtilizationRow])
+def utilization(
+    start: date | None = Query(default=None),
+    end: date | None = Query(default=None),
+    resource_id: str | None = None,
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.CONSULTANT)),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Workload/capacidade × demanda por recurso — sem `start`/`end`, usa o
+    mês corrente. Restrito a perfis internos, no mesmo padrão de GET
+    /resources/{id} (dado sensível de custo/capacidade da equipe).
+
+    Precisa vir ANTES de "/{resource_id}" nesta mesma rota: como as duas
+    convivem sob o prefixo "/resources" e o FastAPI casa rotas na ordem em
+    que foram declaradas, "/{resource_id}" (path param) casaria primeiro com
+    "/resources/utilization" — tratando "utilization" como um resource_id e
+    devolvendo 404. Esta rota já existiu em reports.py sem esse problema
+    (routers diferentes, mas resources.router era incluído antes de
+    reports.router em app/main.py), então movida pra cá junto com o path
+    param que ela precisa evitar."""
+    today = date.today()
+    period_start = start or today.replace(day=1)
+    if end:
+        period_end = end
+    else:
+        next_month = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        period_end = next_month - timedelta(days=1)
+    if period_start > period_end:
+        raise HTTPException(status_code=422, detail="start precisa ser anterior ou igual a end")
+    return resource_utilization(db, start=period_start, end=period_end, resource_id=resource_id)
 
 
 @router.get("/{resource_id}", response_model=ResourceRead)
