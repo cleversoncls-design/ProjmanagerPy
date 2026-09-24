@@ -1,7 +1,7 @@
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
-import { BellIcon, MoonIcon, SunIcon } from './icons'
+import { BellIcon, LogoutIcon, MoonIcon, SunIcon } from './icons'
 
 const HEADING_BY_PREFIX = [
   { prefix: '/projects/', crumb: 'Projetos', title: 'Detalhe do projeto' },
@@ -29,7 +29,7 @@ function initialsOf(name) {
  * Servicios (components/app-header.tsx): breadcrumb + título à esquerda,
  * botões de ação (tema, notificações) e avatar do usuário à direita. */
 export default function Header() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const { crumb, title } = usePageHeading()
 
@@ -68,6 +68,15 @@ export default function Header() {
             <p className="max-w-[160px] truncate text-[11px] text-[var(--text-muted)]">{user?.email || ''}</p>
           </div>
         </div>
+        <div className="h-7 w-px bg-[var(--border)]" />
+        <button
+          type="button"
+          onClick={logout}
+          className="flex items-center gap-1.5 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[12.5px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--page)] hover:text-[var(--text-primary)]"
+        >
+          <LogoutIcon size={15} />
+          Sair
+        </button>
       </div>
     </header>
   )
