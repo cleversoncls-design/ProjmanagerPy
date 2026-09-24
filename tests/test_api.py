@@ -868,6 +868,24 @@ def test_non_admin_cannot_update_users(client, setup):
     assert response.status_code == 403
 
 
+def test_delete_dependency_removes_predecessor_link(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    pred = client.post(f"/projects/{project_id}/tasks", json={"name": "A", "wbs_code": "1"}, headers=admin_headers).json()
+    succ = client.post(f"/projects/{project_id}/tasks", json={"name": "B", "wbs_code": "2"}, headers=admin_headers).json()
+    dep = client.post(
+        "/task-dependencies",
+        json={"predecessor_task_id": pred["id"], "successor_task_id": succ["id"]},
+        headers=admin_headers,
+    ).json()
+
+    delete = client.delete(f"/task-dependencies/{dep['id']}", headers=admin_headers)
+    assert delete.status_code == 204
+
+    remaining = client.get(f"/tasks/{succ['id']}/dependencies", headers=admin_headers)
+    assert remaining.json() == []
+
+
 def test_admin_can_reset_user_password(client, setup):
     admin_headers = setup["admin_headers"]
     consultant = setup["consultant"]

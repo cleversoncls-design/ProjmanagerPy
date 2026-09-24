@@ -502,14 +502,33 @@ def task_schedule_rows(session: Session, project: Project) -> dict:
             total_span = max((t.planned_end_date - t.planned_start_date).days, 1)
             elapsed = (status_date - t.planned_start_date).days
             planned_percent = _q(Decimal(max(elapsed, 0)) / Decimal(total_span) * 100)
+
+        # SPI/CPI POR TAREFA — mesma lógica de project_evm (base de horas,
+        # usando o baseline mais recente quando existe), só que aplicada a
+        # uma única tarefa em vez de somada no projeto inteiro.
+        baseline_hours = Decimal(baseline_row["estimated_hours"]) if baseline_row and baseline_row.get("estimated_hours") else None
+        task_planned_hours = baseline_hours if baseline_hours is not None else Decimal(t.estimated_hours or 0)
+        task_planned_end = (
+            date.fromisoformat(baseline_row["planned_end_date"])
+            if baseline_row and baseline_row.get("planned_end_date")
+            else t.planned_end_date
+        )
+        task_pv = task_planned_hours if (task_planned_end and task_planned_end <= status_date) else Decimal("0")
+        task_ev = task_planned_hours * Decimal(t.progress_percentage or 0) / 100
+        task_ac = Decimal(t.actual_hours or 0)
+        task_spi = _q(task_ev / task_pv) if task_pv > 0 else None
+        task_cpi = _q(task_ev / task_ac) if task_ac > 0 else None
+
         rows.append(
             {
                 "task": t,
                 "status_dot": dots.get(t.id, "white"),
                 "baseline_start_date": date.fromisoformat(baseline_row["planned_start_date"]) if baseline_row and baseline_row.get("planned_start_date") else None,
                 "baseline_end_date": date.fromisoformat(baseline_row["planned_end_date"]) if baseline_row and baseline_row.get("planned_end_date") else None,
-                "baseline_estimated_hours": Decimal(baseline_row["estimated_hours"]) if baseline_row and baseline_row.get("estimated_hours") else None,
+                "baseline_estimated_hours": baseline_hours,
                 "planned_percent_complete": planned_percent,
+                "spi": task_spi,
+                "cpi": task_cpi,
             }
         )
     return {"status_date": status_date, "rows": rows}

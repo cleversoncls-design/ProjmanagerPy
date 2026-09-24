@@ -231,6 +231,9 @@ class Task(Base):
     progress_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
     status: Mapped[TaskStatus] = mapped_column(nullable=False, default=TaskStatus.NOT_STARTED)
     client_approval_status: Mapped[TaskApprovalStatus] = mapped_column(nullable=False, default=TaskApprovalStatus.NOT_REQUIRED)
+    # Campo de observações livre (item 16 do pedido de revisão da tela de
+    # tarefas) — texto sem estrutura, nunca usado em cálculo nenhum.
+    notes: Mapped[str | None] = mapped_column(Text)
     __table_args__ = (UniqueConstraint("project_id", "wbs_code", name="uq_task_project_wbs"),)
     project: Mapped[Project] = relationship(back_populates="tasks")
     parent: Mapped[Task | None] = relationship(remote_side=[id], back_populates="children")

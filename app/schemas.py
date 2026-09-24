@@ -215,6 +215,7 @@ class TaskCreate(BaseModel):
     planned_start_date: date | None = None
     planned_end_date: date | None = None
     is_milestone: bool = False
+    notes: str | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -230,6 +231,7 @@ class TaskUpdate(BaseModel):
     status: TaskStatus | None = None
     is_critical_path: bool | None = None
     is_milestone: bool | None = None
+    notes: str | None = None
 
 
 class TaskClientApprovalUpdate(BaseModel):
@@ -257,6 +259,7 @@ class TaskRead(ORMModel):
     progress_percentage: Decimal
     status: TaskStatus
     client_approval_status: TaskApprovalStatus
+    notes: str | None = None
 
 
 class TaskMoveRequest(BaseModel):
@@ -285,6 +288,11 @@ class TaskScheduleRow(TaskRead):
     baseline_end_date: date | None = None
     baseline_estimated_hours: Decimal | None = None
     planned_percent_complete: Decimal
+    # SPI/CPI calculados por TAREFA (mesma base de horas de EvmMetrics,
+    # nunca monetária) — None quando o denominador é zero, mesma regra do
+    # cálculo em nível de projeto. Ver services.task_schedule_rows.
+    spi: Decimal | None = None
+    cpi: Decimal | None = None
 
 
 class TaskDependencyCreate(BaseModel):

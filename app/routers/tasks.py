@@ -221,6 +221,30 @@ def create_dependency(
     return dependency
 
 
+@router.delete("/task-dependencies/{dependency_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_dependency(
+    dependency_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    dependency = db.get(TaskDependency, dependency_id)
+    if not dependency:
+        raise HTTPException(status_code=404, detail="Dependência não encontrada")
+    successor = _get_task_or_404(db, dependency.successor_task_id)
+    require_project_access(successor.project, user, write=True)
+    db.delete(dependency)
+    record_audit(
+        db,
+        entity_type="task",
+        entity_id=successor.id,
+        action=AuditAction.UPDATE,
+        user_id=user.id,
+        details={"dependency_removed": dependency_id, "predecessor_task_id": dependency.predecessor_task_id},
+    )
+    db.commit()
+    return None
+
+
 @router.get("/tasks/{task_id}/dependencies", response_model=list[TaskDependencyRead])
 def list_dependencies(task_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[TaskDependency]:
     task = _get_task_or_404(db, task_id)

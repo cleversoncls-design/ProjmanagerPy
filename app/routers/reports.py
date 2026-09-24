@@ -224,6 +224,8 @@ def project_schedule(project_id: str, user: User = Depends(get_current_user), db
                 "baseline_end_date": row["baseline_end_date"],
                 "baseline_estimated_hours": row["baseline_estimated_hours"],
                 "planned_percent_complete": row["planned_percent_complete"],
+                "spi": row["spi"],
+                "cpi": row["cpi"],
             }
         )
     task_ids = [row["task"].id for row in schedule["rows"]]

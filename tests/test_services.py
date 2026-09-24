@@ -45,6 +45,7 @@ from app.services import (
     resource_utilization,
     risk_matrix,
     task_dot_colors,
+    task_schedule_rows,
     velocity_series,
 )
 
@@ -725,3 +726,24 @@ def test_project_statistics_current_baseline_actual_and_variance():
     # current terminou 1 dia útil depois do baseline -> variância positiva.
     assert stats["variance_finish_days"] > 0
     assert stats["percent_complete_work"] == Decimal("125.00")  # 20 real / 16 atual
+
+
+def test_task_schedule_rows_computes_per_task_spi_cpi():
+    """SPI/CPI por tarefa (não só o agregado do projeto) — mesma fórmula de
+    project_evm, aplicada a uma tarefa isolada."""
+    db = session()
+    project = _make_project(db, code="PRJ-ROW-EVM")
+    project.status_date = date(2026, 9, 1)
+    task = Task(
+        project_id=project.id, name="T", wbs_code="1",
+        estimated_hours=Decimal("10"), progress_percentage=Decimal("50"),
+        actual_hours=Decimal("4"), planned_end_date=date(2026, 8, 1),
+    )
+    db.add(task)
+    db.commit()
+
+    result = task_schedule_rows(db, project)
+    row = result["rows"][0]
+    # PV = 10h (fim planejado já passou da status_date); EV = 10*50% = 5h.
+    assert row["spi"] == Decimal("0.50")  # 5/10
+    assert row["cpi"] == Decimal("1.25")  # 5/4
