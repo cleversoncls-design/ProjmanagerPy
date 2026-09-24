@@ -80,3 +80,47 @@ export const APPROVAL_STATUS_TONE = {
 }
 
 export const WEEKDAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
+
+export const USER_STATUS_LABELS = {
+  ACTIVE: 'Ativo',
+  INACTIVE: 'Inativo',
+  BLOCKED: 'Bloqueado',
+}
+
+export const USER_STATUS_TONE = {
+  ACTIVE: 'good',
+  INACTIVE: 'muted',
+  BLOCKED: 'critical',
+}
+
+export const DEPENDENCY_TYPE_LABELS = {
+  FS: 'Término → Início',
+  SS: 'Início → Início',
+  FF: 'Término → Término',
+  SF: 'Início → Término',
+}
+
+export const DEPENDENCY_TYPE_SHORT = {
+  FS: 'TI',
+  SS: 'II',
+  FF: 'TT',
+  SF: 'IT',
+}
+
+// Bolinha de status da tarefa (ver services.task_dot_colors no backend):
+// branca = por iniciar, verde = no prazo, amarela = mistura (tarefa-pai com
+// filhas em status diferentes), vermelha = atrasada. Nunca comunica só por
+// cor — o rótulo sempre acompanha a bolinha nos lugares em que aparece.
+export const STATUS_DOT_COLORS = {
+  white: '#ffffff',
+  green: 'var(--status-good)',
+  yellow: 'var(--status-warning)',
+  red: 'var(--status-critical)',
+}
+
+export const STATUS_DOT_LABELS = {
+  white: 'Por iniciar',
+  green: 'No prazo',
+  yellow: 'Mistura de status',
+  red: 'Atrasada',
+}

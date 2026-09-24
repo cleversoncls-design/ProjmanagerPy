@@ -31,6 +31,13 @@ export function formatDate(value) {
   return dateFormatter.format(date)
 }
 
+/** SPI/CPI (índices de Earned Value) — sempre 2 casas, sem separador de
+ * milhar; "—" quando o backend não conseguiu calcular (denominador zero). */
+export function formatIndex(value) {
+  if (value === null || value === undefined) return '—'
+  return Number(value).toFixed(2)
+}
+
 export function daysBetween(startValue, endValue) {
   const start = parseApiDate(startValue)
   const end = parseApiDate(endValue)

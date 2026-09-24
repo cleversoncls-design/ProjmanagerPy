@@ -101,5 +101,6 @@ export const api = {
   get: (path, params) => request(withQuery(path, params)),
   post: (path, json) => request(path, { method: 'POST', json }),
   patch: (path, json) => request(path, { method: 'PATCH', json }),
+  del: (path) => request(path, { method: 'DELETE' }),
   postForm: (path, form) => request(path, { method: 'POST', form }),
 }

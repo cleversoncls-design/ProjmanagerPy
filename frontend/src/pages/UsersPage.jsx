@@ -13,7 +13,7 @@ import ErrorBanner from '../components/ErrorBanner'
 import StatusPill from '../components/StatusPill'
 import { FormField, TextInput, Select } from '../components/FormField'
 import { formatCurrency } from '../utils/format'
-import { ROLE_LABELS } from '../utils/labels'
+import { ROLE_LABELS, USER_STATUS_LABELS, USER_STATUS_TONE } from '../utils/labels'
 
 const EXTERNAL_ROLES = ['CLIENT_PM', 'CLIENT_USER']
 
@@ -37,6 +37,16 @@ export default function UsersPage() {
   const [resourceForm, setResourceForm] = useState(EMPTY_RESOURCE_FORM)
   const [resourceFormError, setResourceFormError] = useState('')
   const [savingResource, setSavingResource] = useState(false)
+
+  const [editTarget, setEditTarget] = useState(null)
+  const [editForm, setEditForm] = useState(null)
+  const [editFormError, setEditFormError] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  const [passwordTarget, setPasswordTarget] = useState(null)
+  const [newPassword, setNewPassword] = useState('')
+  const [passwordFormError, setPasswordFormError] = useState('')
+  const [savingPassword, setSavingPassword] = useState(false)
 
   function loadAll() {
     setLoading(true)
@@ -108,6 +118,49 @@ export default function UsersPage() {
     }
   }
 
+  function openEditModal(row) {
+    setEditTarget(row)
+    setEditForm({ name: row.name, role: row.role, client_id: row.client_id || '', status: row.status })
+    setEditFormError('')
+  }
+
+  function updateEditField(field) {
+    return (event) => setEditForm((prev) => ({ ...prev, [field]: event.target.value }))
+  }
+
+  async function handleSaveEdit(event) {
+    event.preventDefault()
+    setEditFormError('')
+    setSavingEdit(true)
+    try {
+      const payload = { name: editForm.name, role: editForm.role, status: editForm.status }
+      payload.client_id = EXTERNAL_ROLES.includes(editForm.role) ? editForm.client_id : null
+      await usersApi.updateUser(editTarget.id, payload)
+      setEditTarget(null)
+      setEditForm(null)
+      loadAll()
+    } catch (err) {
+      setEditFormError(err.message)
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  async function handleResetPassword(event) {
+    event.preventDefault()
+    setPasswordFormError('')
+    setSavingPassword(true)
+    try {
+      await usersApi.resetPassword(passwordTarget.id, { new_password: newPassword })
+      setPasswordTarget(null)
+      setNewPassword('')
+    } catch (err) {
+      setPasswordFormError(err.message)
+    } finally {
+      setSavingPassword(false)
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -126,6 +179,11 @@ export default function UsersPage() {
               { key: 'name', header: 'Nome' },
               { key: 'email', header: 'E-mail' },
               { key: 'role', header: 'Perfil', render: (row) => <StatusPill label={ROLE_LABELS[row.role] || row.role} tone="muted" /> },
+              {
+                key: 'status',
+                header: 'Situação',
+                render: (row) => <StatusPill label={USER_STATUS_LABELS[row.status] || row.status} tone={USER_STATUS_TONE[row.status] || 'muted'} />,
+              },
               { key: 'client', header: 'Cliente', render: (row) => (row.client_id ? clientById[row.client_id]?.legal_name || '—' : '—') },
               {
                 key: 'resource',
@@ -140,16 +198,29 @@ export default function UsersPage() {
                 key: 'actions',
                 header: '',
                 align: 'right',
-                render: (row) =>
-                  resourceByUserId[row.id] ? null : (
+                render: (row) => (
+                  <div className="flex justify-end gap-3">
+                    <button type="button" onClick={() => openEditModal(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
+                      Editar
+                    </button>
                     <button
                       type="button"
-                      onClick={() => setResourceTarget(row)}
+                      onClick={() => {
+                        setPasswordTarget(row)
+                        setNewPassword('')
+                        setPasswordFormError('')
+                      }}
                       className="text-xs font-medium text-[var(--series-1)] hover:underline"
                     >
-                      Vincular como recurso
+                      Redefinir senha
                     </button>
-                  ),
+                    {!resourceByUserId[row.id] && (
+                      <button type="button" onClick={() => setResourceTarget(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
+                        Vincular como recurso
+                      </button>
+                    )}
+                  </div>
+                ),
               },
             ]}
             rows={users}
@@ -245,6 +316,78 @@ export default function UsersPage() {
               </Button>
               <Button type="submit" disabled={savingResource}>
                 {savingResource ? 'Salvando…' : 'Salvar'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {editTarget && editForm && (
+        <Modal title={`Editar usuário — ${editTarget.name}`} onClose={() => setEditTarget(null)}>
+          <form onSubmit={handleSaveEdit} className="space-y-4">
+            <FormField label="Nome" required>
+              <TextInput required value={editForm.name} onChange={updateEditField('name')} />
+            </FormField>
+            <FormField label="Perfil" required>
+              <Select required value={editForm.role} onChange={updateEditField('role')}>
+                {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            {EXTERNAL_ROLES.includes(editForm.role) && (
+              <FormField label="Cliente" required hint="Obrigatório para perfis do cliente.">
+                <Select required value={editForm.client_id} onChange={updateEditField('client_id')}>
+                  <option value="">Selecione…</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.legal_name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            )}
+            <FormField label="Situação" required hint="Bloqueado impede login imediatamente.">
+              <Select required value={editForm.status} onChange={updateEditField('status')}>
+                {Object.entries(USER_STATUS_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+
+            <ErrorBanner message={editFormError} />
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="secondary" onClick={() => setEditTarget(null)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={savingEdit}>
+                {savingEdit ? 'Salvando…' : 'Salvar'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {passwordTarget && (
+        <Modal title={`Redefinir senha — ${passwordTarget.name}`} onClose={() => setPasswordTarget(null)}>
+          <form onSubmit={handleResetPassword} className="space-y-4">
+            <FormField label="Nova senha" required hint="Mínimo de 8 caracteres.">
+              <TextInput type="password" required minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+            </FormField>
+
+            <ErrorBanner message={passwordFormError} />
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="secondary" onClick={() => setPasswordTarget(null)}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={savingPassword}>
+                {savingPassword ? 'Salvando…' : 'Salvar'}
               </Button>
             </div>
           </form>

@@ -15,3 +15,15 @@ export function getProjectReport(projectId) {
 export function getGantt(projectId) {
   return api.get(`/projects/${projectId}/gantt`)
 }
+
+export function getSchedule(projectId) {
+  return api.get(`/projects/${projectId}/schedule`)
+}
+
+export function getEvm(projectId) {
+  return api.get(`/projects/${projectId}/report.evm`)
+}
+
+export function getStatistics(projectId) {
+  return api.get(`/projects/${projectId}/statistics`)
+}
