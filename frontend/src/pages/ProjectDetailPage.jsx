@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import * as projectsApi from '../api/projects'
 import * as reportsApi from '../api/reports'
 import * as tasksApi from '../api/tasks'
+import * as baselinesApi from '../api/baselines'
 import * as clientsApi from '../api/clients'
 import * as usersApi from '../api/users'
 import * as resourcesApi from '../api/resources'
@@ -379,20 +380,58 @@ function StatisticsRow({ label, field, stats }) {
 
 function ProjectStatisticsModal({ projectId, projectLabel, onClose }) {
   const [stats, setStats] = useState(null)
+  const [baselines, setBaselines] = useState([])
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [showBaselineForm, setShowBaselineForm] = useState(false)
+  const [versionName, setVersionName] = useState('')
+  const [savingBaseline, setSavingBaseline] = useState(false)
+  const [baselineError, setBaselineError] = useState('')
+
+  // Estatísticas e linhas de base são recarregadas juntas: salvar uma
+  // linha de base nova muda imediatamente a coluna "Linha de base" das
+  // estatísticas (project_statistics usa sempre a mais recente — ver
+  // services._latest_baseline_task_map), então as duas telas precisam
+  // ficar sincronizadas.
+  function reload() {
+    return Promise.all([reportsApi.getStatistics(projectId), baselinesApi.listBaselines(projectId)]).then(
+      ([statsResult, baselinesResult]) => {
+        setStats(statsResult)
+        setBaselines(baselinesResult)
+      },
+    )
+  }
 
   useEffect(() => {
     let active = true
-    reportsApi
-      .getStatistics(projectId)
-      .then((result) => active && setStats(result))
+    setLoading(true)
+    reload()
       .catch((err) => active && setError(err.message))
       .finally(() => active && setLoading(false))
     return () => {
       active = false
     }
   }, [projectId])
+
+  async function handleSaveBaseline(event) {
+    event.preventDefault()
+    const name = versionName.trim()
+    if (!name) return
+    setSavingBaseline(true)
+    setBaselineError('')
+    try {
+      await baselinesApi.createBaseline(projectId, name)
+      await reload()
+      setVersionName('')
+      setShowBaselineForm(false)
+    } catch (err) {
+      setBaselineError(err.message)
+    } finally {
+      setSavingBaseline(false)
+    }
+  }
+
+  const latestBaseline = baselines[baselines.length - 1]
 
   return (
     <Modal title={`Estatísticas do projeto — ${projectLabel}`} onClose={onClose} wide>
@@ -419,7 +458,55 @@ function ProjectStatisticsModal({ projectId, projectLabel, onClose }) {
               </tbody>
             </table>
           </div>
-          {!stats.baseline && <p className="text-xs text-[var(--text-muted)]">Nenhuma linha de base salva ainda para este projeto.</p>}
+
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] px-3 py-2">
+            <p className="text-xs text-[var(--text-muted)]">
+              {latestBaseline ? (
+                <>
+                  Linha de base atual: <span className="font-medium text-[var(--text-primary)]">{latestBaseline.version_name}</span> (salva em{' '}
+                  {formatDate(latestBaseline.created_at)})
+                </>
+              ) : (
+                'Nenhuma linha de base salva ainda para este projeto.'
+              )}
+            </p>
+            {!showBaselineForm && (
+              <Button type="button" variant="secondary" onClick={() => setShowBaselineForm(true)}>
+                Salvar linha de base
+              </Button>
+            )}
+          </div>
+
+          {showBaselineForm && (
+            <form onSubmit={handleSaveBaseline} className="flex items-end gap-2 rounded-lg border border-[var(--border)] p-3">
+              <div className="flex-1">
+                <FormField label="Nome da versão" hint="Ex.: Baseline inicial, Revisão de escopo #2.">
+                  <TextInput
+                    value={versionName}
+                    onChange={(event) => setVersionName(event.target.value)}
+                    placeholder="Ex.: Baseline inicial"
+                    autoFocus
+                  />
+                </FormField>
+              </div>
+              <Button type="submit" disabled={savingBaseline || !versionName.trim()}>
+                {savingBaseline ? 'Salvando…' : 'Salvar'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setShowBaselineForm(false)
+                  setVersionName('')
+                  setBaselineError('')
+                }}
+              >
+                Cancelar
+              </Button>
+            </form>
+          )}
+          <ErrorBanner message={baselineError} />
+
           <div className="grid grid-cols-3 gap-4">
             <StatTile
               label="Variância de término"
@@ -935,10 +1022,15 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
         </div>
         <div className="grid grid-cols-2 gap-4">
           <FormField label="Duração (dias)" hint="Editar recalcula o Trabalho.">
-            <TextInput type="number" min="0.01" step="0.5" value={form.duration_days} onChange={updateField('duration_days')} placeholder="Ex.: 2" />
+            {/* step="0.5" rejeitava qualquer valor com centavos que não caísse
+                na grade min + n*0.5 (ex.: 2.00 ou 1.75) — o navegador acusava
+                "valor inválido" mesmo sendo um número perfeitamente válido
+                para o campo. step="0.01" aceita duas casas decimais, que é a
+                precisão que Duração/Trabalho já usam no backend (Decimal). */}
+            <TextInput type="number" min="0.01" step="0.01" value={form.duration_days} onChange={updateField('duration_days')} placeholder="Ex.: 2" />
           </FormField>
           <FormField label="Trabalho (horas)" hint="Editar recalcula a Duração.">
-            <TextInput type="number" min="0" step="0.5" value={form.estimated_hours} onChange={updateField('estimated_hours')} placeholder="Ex.: 16" />
+            <TextInput type="number" min="0" step="0.01" value={form.estimated_hours} onChange={updateField('estimated_hours')} placeholder="Ex.: 16" />
           </FormField>
         </div>
         <div className="grid grid-cols-2 gap-4">

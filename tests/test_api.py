@@ -532,16 +532,71 @@ def test_reschedule_endpoint_moves_successor(client, setup):
     )
     assert dep.status_code == 201
 
+    # Criar a dependência já dispara reschedule_cascade sozinha (ver
+    # create_dependency em app/routers/tasks.py) — a sucessora não fica mais
+    # esperando uma chamada manual a /reschedule para herdar a data certa.
+    successor_after_dependency = client.get(f"/tasks/{successor['id']}", headers=admin_headers).json()
+    assert successor_after_dependency["planned_start_date"] == "2026-08-25"
+
+    # /tasks/{id}/reschedule continua exposto para forçar o recálculo
+    # manualmente (ex.: depois de editar várias tarefas em lote) — chamado
+    # de novo aqui, sem nenhuma mudança pendente desde a cascata automática
+    # acima, não há mais nada para a sucessora atualizar.
     result = client.post(
         f"/tasks/{predecessor['id']}/reschedule",
         json={"calendar_id": calendar["id"]},
         headers=admin_headers,
     )
     assert result.status_code == 200
-    updated = result.json()
-    assert len(updated) == 1
-    assert updated[0]["id"] == successor["id"]
-    assert updated[0]["planned_start_date"] == "2026-08-25"
+    assert result.json() == []
+
+
+def test_update_task_dates_cascades_to_successor(client, setup):
+    """PATCH /tasks/{id} muda a data/duração da própria tarefa; se ela tiver
+    sucessoras dependentes, elas precisam se mover junto, sem esperar uma
+    chamada manual a /reschedule (mesma razão de create_dependency logo
+    acima)."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+
+    predecessor = client.post(
+        f"/projects/{project_id}/tasks",
+        json={
+            "name": "Predecessora",
+            "wbs_code": "1",
+            "planned_start_date": "2026-08-24",
+            "planned_end_date": "2026-08-24",
+        },
+        headers=admin_headers,
+    ).json()
+    successor = client.post(
+        f"/projects/{project_id}/tasks",
+        json={
+            "name": "Sucessora",
+            "wbs_code": "2",
+            "planned_start_date": "2026-08-25",
+            "planned_end_date": "2026-08-25",
+        },
+        headers=admin_headers,
+    ).json()
+    dep = client.post(
+        "/task-dependencies",
+        json={"predecessor_task_id": predecessor["id"], "successor_task_id": successor["id"]},
+        headers=admin_headers,
+    )
+    assert dep.status_code == 201
+
+    # Empurra a predecessora pra uma semana à frente — a sucessora (FS, sem
+    # lag) precisa acompanhar, sem precisar de um /reschedule manual depois.
+    moved = client.patch(
+        f"/tasks/{predecessor['id']}",
+        json={"planned_start_date": "2026-08-31", "planned_end_date": "2026-08-31"},
+        headers=admin_headers,
+    )
+    assert moved.status_code == 200
+
+    successor_after_patch = client.get(f"/tasks/{successor['id']}", headers=admin_headers).json()
+    assert successor_after_patch["planned_start_date"] == "2026-09-01"
 
 
 # ---------------------------------------------------------------------------
@@ -796,11 +851,18 @@ def test_project_reschedule_endpoint_recalculates_all_dependent_tasks(client, se
         headers=admin_headers,
     )
 
+    # create_dependency já dispara reschedule_cascade sozinha (ver
+    # app/routers/tasks.py), então a sucessora já nasce corrigida antes de
+    # qualquer chamada a /reschedule.
+    succ_after_dependency = client.get(f"/tasks/{succ['id']}", headers=admin_headers).json()
+    assert succ_after_dependency["planned_start_date"] == "2026-08-25"
+
+    # "Recalcular tudo" continua disponível para reconciliar o projeto
+    # inteiro depois de uma edição em lote — chamado aqui sem nenhuma
+    # mudança pendente, não há mais nada para atualizar.
     result = client.post(f"/projects/{project_id}/reschedule", json={}, headers=admin_headers)
     assert result.status_code == 200
-    updated = {t["id"]: t for t in result.json()}
-    assert succ["id"] in updated
-    assert updated[succ["id"]]["planned_start_date"] == "2026-08-25"
+    assert result.json() == []
 
 
 def test_project_schedule_endpoint_returns_status_dots(client, setup):
