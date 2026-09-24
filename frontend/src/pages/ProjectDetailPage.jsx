@@ -525,6 +525,58 @@ function ProjectStatisticsModal({ projectId, projectLabel, onClose }) {
   )
 }
 
+/** Modal "Salvar linha de base" — grava um snapshot das datas/horas
+ * planejadas ATUAIS de todas as tarefas do projeto (POST /projects/{id}/
+ * baselines; ver app/routers/baselines.py) para comparação futura (colunas
+ * "Linha base" da grade de Tarefas, variância de término nas Estatísticas).
+ * Fica disponível direto na tela de Tarefas — onde o usuário está olhando o
+ * cronograma — em vez de escondida só dentro do modal de Estatísticas. */
+function BaselineModal({ projectId, onClose, onSaved }) {
+  const [versionName, setVersionName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    const name = versionName.trim()
+    if (!name) return
+    setSaving(true)
+    setError('')
+    try {
+      await baselinesApi.createBaseline(projectId, name)
+      onSaved()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title="Salvar linha de base" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <p className="text-sm text-[var(--text-secondary)]">
+          Grava a Duração, o Trabalho e as datas planejadas de hoje de todas as tarefas como a nova linha de base do
+          projeto — usada para comparar com o realizado depois (colunas "Linha base" na grade e variância de término
+          nas Estatísticas).
+        </p>
+        <FormField label="Nome da versão" required hint='Ex.: "Baseline inicial", "Revisão de escopo #2".'>
+          <TextInput value={versionName} onChange={(event) => setVersionName(event.target.value)} placeholder="Ex.: Baseline inicial" autoFocus />
+        </FormField>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button type="submit" disabled={saving || !versionName.trim()}>
+            {saving ? 'Salvando…' : 'Salvar linha de base'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 /** Achata a árvore de tarefas (parent_task_id) em ordem de exibição —
  * mesma regra de desempate de services.recalculate_wbs (sort_order, com
  * wbs_code como critério estável), pra grade e os seletores de
@@ -563,6 +615,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
   const [movingTask, setMovingTask] = useState(null)
+  const [showBaselineModal, setShowBaselineModal] = useState(false)
 
   function loadSchedule() {
     setLoading(true)
@@ -628,6 +681,23 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
   function handleApplyStatusDate(event) {
     event.preventDefault()
     withBusy('Atualizando data de status…', () => projectsApi.updateProject(projectId, { status_date: statusDateInput || null }))
+  }
+
+  async function handleExport() {
+    setBusyMessage('Gerando planilha…')
+    setError('')
+    try {
+      await reportsApi.downloadTasksXlsx(projectId, `${projectId}_tarefas.xlsx`)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusyMessage('')
+    }
+  }
+
+  function handleBaselineSaved() {
+    setShowBaselineModal(false)
+    loadSchedule()
   }
 
   function closeModal() {
@@ -745,7 +815,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <form onSubmit={handleApplyStatusDate} className="flex items-end gap-2">
           <FormField label="Data de status" hint="Data-base para % previsto e status das tarefas.">
             <TextInput type="date" value={statusDateInput} onChange={(event) => setStatusDateInput(event.target.value)} disabled={!canWrite} />
@@ -756,24 +826,34 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
             </Button>
           )}
         </form>
-        {canWrite && (
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" disabled={Boolean(busyMessage)} onClick={() => withBusy('Recalculando WBS/EAP…', () => tasksApi.recalculateWbs(projectId))}>
-              Recalcular WBS/EAP
-            </Button>
-            <Button variant="secondary" disabled={Boolean(busyMessage)} onClick={() => withBusy('Recalculando datas do projeto…', () => tasksApi.rescheduleProject(projectId))}>
-              Recalcular tudo
-            </Button>
-            <Button
-              onClick={() => {
-                setEditingTask(null)
-                setShowModal(true)
-              }}
-            >
-              Nova tarefa
-            </Button>
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {/* Exportar não depende de canWrite: é leitura, então também fica
+              disponível para perfis externos (CLIENT_PM/CLIENT_USER). */}
+          <Button variant="secondary" disabled={Boolean(busyMessage)} onClick={handleExport}>
+            Exportar (Excel)
+          </Button>
+          {canWrite && (
+            <>
+              <Button variant="secondary" disabled={Boolean(busyMessage)} onClick={() => setShowBaselineModal(true)}>
+                Salvar linha de base
+              </Button>
+              <Button variant="secondary" disabled={Boolean(busyMessage)} onClick={() => withBusy('Recalculando WBS/EAP…', () => tasksApi.recalculateWbs(projectId))}>
+                Recalcular WBS/EAP
+              </Button>
+              <Button variant="secondary" disabled={Boolean(busyMessage)} onClick={() => withBusy('Recalculando datas do projeto…', () => tasksApi.rescheduleProject(projectId))}>
+                Recalcular tudo
+              </Button>
+              <Button
+                onClick={() => {
+                  setEditingTask(null)
+                  setShowModal(true)
+                }}
+              >
+                Nova tarefa
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {busyMessage && <p className="mb-3 text-xs text-[var(--text-muted)]">{busyMessage}</p>}
@@ -781,10 +861,12 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
       <ErrorBanner message={error} />
 
       {!loading && !error && (
-        <Card>
+        <Card dense>
           <Table columns={columns} rows={orderedTasks} getRowKey={(row) => row.id} emptyMessage="Nenhuma tarefa cadastrada ainda." dense />
         </Card>
       )}
+
+      {showBaselineModal && <BaselineModal projectId={projectId} onClose={() => setShowBaselineModal(false)} onSaved={handleBaselineSaved} />}
 
       {showModal && (
         <TaskFormModal
@@ -1255,6 +1337,43 @@ function MoveTaskModal({ task, allTasks, onClose, onSaved }) {
   )
 }
 
+/** Data efetiva de uma linha do Gantt: tarefa-folha usa a própria
+ * planned_start_date/end_date; tarefa-pai (WBS) não tem essas colunas
+ * preenchidas de forma útil — usa o agregado das descendentes que o
+ * backend já manda em rollup_start_date/rollup_end_date (mesma regra da
+ * grade de Tarefas, ver services._task_rollups). Sem isso, toda
+ * tarefa-pai aparecia como "sem datas" no Gantt mesmo tendo filhas
+ * totalmente agendadas. */
+function ganttStart(task) {
+  return task.rollup_start_date ?? task.planned_start_date
+}
+function ganttEnd(task) {
+  return task.rollup_end_date ?? task.planned_end_date
+}
+
+/** Marcações de data pro grid do fundo do Gantt — o passo (dia/semana/
+ * quinzena/mês) se ajusta ao intervalo total pra não virar uma parede de
+ * rótulos quando o projeto passa de poucas semanas. */
+function buildDateTicks(rangeStartDate, rangeEndDate, totalDays) {
+  let stepDays
+  if (totalDays <= 14) stepDays = 1
+  else if (totalDays <= 45) stepDays = 7
+  else if (totalDays <= 120) stepDays = 14
+  else if (totalDays <= 400) stepDays = 30
+  else stepDays = 60
+
+  const ticks = []
+  const stepMs = stepDays * 86_400_000
+  for (let time = rangeStartDate.getTime(); time <= rangeEndDate.getTime(); time += stepMs) {
+    const leftPercent = Math.min(100, Math.max(0, ((time - rangeStartDate.getTime()) / 86_400_000 / totalDays) * 100))
+    ticks.push({ dateStr: new Date(time).toISOString().slice(0, 10), leftPercent })
+  }
+  if (!ticks.length || ticks[ticks.length - 1].leftPercent < 99) {
+    ticks.push({ dateStr: rangeEndDate.toISOString().slice(0, 10), leftPercent: 100 })
+  }
+  return ticks
+}
+
 function GanttTab({ projectId }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -1262,8 +1381,10 @@ function GanttTab({ projectId }) {
 
   useEffect(() => {
     let active = true
+    // /schedule (não /gantt) porque já vem com rollup_start_date/
+    // rollup_end_date agregados nas tarefas-pai — ver ganttStart/ganttEnd.
     reportsApi
-      .getGantt(projectId)
+      .getSchedule(projectId)
       .then((result) => active && setData(result))
       .catch((err) => active && setError(err.message))
       .finally(() => active && setLoading(false))
@@ -1278,7 +1399,7 @@ function GanttTab({ projectId }) {
     return <p className="text-sm text-[var(--text-muted)]">Nenhuma tarefa cadastrada ainda.</p>
   }
 
-  const scheduled = data.tasks.filter((task) => task.planned_start_date && task.planned_end_date)
+  const scheduled = data.tasks.filter((task) => ganttStart(task) && ganttEnd(task))
   if (scheduled.length === 0) {
     return (
       <p className="text-sm text-[var(--text-muted)]">
@@ -1287,8 +1408,8 @@ function GanttTab({ projectId }) {
     )
   }
 
-  const rangeStartStr = scheduled.reduce((min, t) => (t.planned_start_date < min ? t.planned_start_date : min), scheduled[0].planned_start_date)
-  const rangeEndStr = scheduled.reduce((max, t) => (t.planned_end_date > max ? t.planned_end_date : max), scheduled[0].planned_end_date)
+  const rangeStartStr = scheduled.reduce((min, t) => (ganttStart(t) < min ? ganttStart(t) : min), ganttStart(scheduled[0]))
+  const rangeEndStr = scheduled.reduce((max, t) => (ganttEnd(t) > max ? ganttEnd(t) : max), ganttEnd(scheduled[0]))
   const rangeStartDate = parseApiDate(rangeStartStr)
   const rangeEndDate = parseApiDate(rangeEndStr)
   const totalDays = Math.max(1, (rangeEndDate.getTime() - rangeStartDate.getTime()) / 86_400_000)
@@ -1305,6 +1426,8 @@ function GanttTab({ projectId }) {
     return Math.max(1.5, (days / totalDays) * 100)
   }
 
+  const ticks = buildDateTicks(rangeStartDate, rangeEndDate, totalDays)
+
   const predecessorCount = {}
   for (const dependency of data.dependencies) {
     predecessorCount[dependency.successor_task_id] = (predecessorCount[dependency.successor_task_id] || 0) + 1
@@ -1312,13 +1435,25 @@ function GanttTab({ projectId }) {
 
   return (
     <Card>
-      <div className="mb-4 flex items-center justify-between text-xs text-[var(--text-muted)]">
-        <span>{formatDate(rangeStartStr)}</span>
-        <span>{formatDate(rangeEndStr)}</span>
+      <div className="flex items-center gap-3">
+        <span className="w-56 shrink-0" />
+        <div className="relative h-4 flex-1 text-xs text-[var(--text-muted)]">
+          {ticks.map((tick) => (
+            <span
+              key={tick.dateStr}
+              className="absolute -translate-x-1/2 whitespace-nowrap"
+              style={{ left: `${tick.leftPercent}%` }}
+            >
+              {formatDate(tick.dateStr)}
+            </span>
+          ))}
+        </div>
       </div>
       <div className="space-y-2.5">
         {data.tasks.map((task) => {
-          const hasDates = Boolean(task.planned_start_date && task.planned_end_date)
+          const start = ganttStart(task)
+          const end = ganttEnd(task)
+          const hasDates = Boolean(start && end)
           const color = TASK_TYPE_COLORS[task.task_type] || 'var(--text-muted)'
           const preds = predecessorCount[task.id] || 0
           return (
@@ -1333,22 +1468,29 @@ function GanttTab({ projectId }) {
                 )}
               </span>
               <div className="relative h-6 flex-1 rounded-md bg-[var(--grid)]/50">
+                {ticks.map((tick) => (
+                  <span
+                    key={tick.dateStr}
+                    className="absolute inset-y-0 w-px bg-[var(--border)]"
+                    style={{ left: `${tick.leftPercent}%` }}
+                  />
+                ))}
                 {hasDates ? (
                   task.is_milestone ? (
                     <span
                       className="absolute top-1/2 h-3 w-3 -translate-y-1/2 -translate-x-1/2 rotate-45"
-                      style={{ left: `${leftPercent(task.planned_start_date)}%`, backgroundColor: color }}
-                      title={`Marco: ${formatDate(task.planned_start_date)}`}
+                      style={{ left: `${leftPercent(start)}%`, backgroundColor: color }}
+                      title={`Marco: ${formatDate(start)}`}
                     />
                   ) : (
                     <span
                       className="absolute top-1/2 h-4 -translate-y-1/2 rounded"
                       style={{
-                        left: `${leftPercent(task.planned_start_date)}%`,
-                        width: `${widthPercent(task.planned_start_date, task.planned_end_date)}%`,
+                        left: `${leftPercent(start)}%`,
+                        width: `${widthPercent(start, end)}%`,
                         backgroundColor: color,
                       }}
-                      title={`${formatDate(task.planned_start_date)} – ${formatDate(task.planned_end_date)}`}
+                      title={`${formatDate(start)} – ${formatDate(end)}`}
                     />
                   )
                 ) : (

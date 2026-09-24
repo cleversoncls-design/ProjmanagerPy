@@ -12,7 +12,7 @@ function resolveApiBaseUrl() {
   return `${window.location.protocol}//${window.location.hostname}:${apiPort}`
 }
 
-const API_BASE_URL = resolveApiBaseUrl()
+export const API_BASE_URL = resolveApiBaseUrl()
 
 const TOKEN_KEY = 'pmpy_token'
 
