@@ -483,6 +483,63 @@ def _latest_baseline_task_map(session: Session, project_id: str) -> dict[str, di
     return {row["id"]: row for row in baseline.snapshot_data.get("tasks", [])}
 
 
+def _task_rollups(tasks: list[Task], cal: BusinessCalendar) -> dict[str, dict]:
+    """Agrega Duração/Trabalho/Início/Fim para tarefas-pai (WBS) a partir das
+    descendentes — mesmo padrão de agregação recursiva de `task_dot_colors`
+    (memoização por id, uma passada), só que para os campos de cronograma em
+    vez da bolinha de status.
+
+    Uma tarefa-pai nunca teve essas colunas próprias preenchidas de forma
+    útil (o próprio motor de agendamento nunca escreve nelas: cascata e
+    recálculo de EAP só mexem em tarefas-folha) — daí aparecerem em branco/
+    0h na grade sem isto. O valor "de verdade" mora nas folhas; o pai só
+    reflete o agregado, calculado sob demanda (nunca gravado em coluna,
+    mesmo espírito de status_dot/planned_percent_complete).
+
+    Início = menor planned_start_date entre as folhas descendentes.
+    Fim = maior planned_end_date entre as folhas descendentes.
+    Trabalho = soma de estimated_hours das folhas descendentes.
+    Duração = dias úteis (calendário do projeto) entre Início e Fim — não é
+    soma das durações das filhas (que podem rodar em paralelo).
+
+    Retorna só as entradas com pelo menos uma filha; o chamador usa os
+    campos próprios da tarefa para as demais (folhas)."""
+    children_by_parent: dict[str | None, list[Task]] = defaultdict(list)
+    for t in tasks:
+        children_by_parent[t.parent_task_id].append(t)
+
+    memo: dict[str, tuple[date | None, date | None, Decimal]] = {}
+
+    def resolve(task: Task) -> tuple[date | None, date | None, Decimal]:
+        if task.id in memo:
+            return memo[task.id]
+        children = children_by_parent.get(task.id, [])
+        if not children:
+            result = (task.planned_start_date, task.planned_end_date, Decimal(task.estimated_hours or 0))
+        else:
+            starts: list[date] = []
+            ends: list[date] = []
+            hours = Decimal("0")
+            for child in children:
+                c_start, c_end, c_hours = resolve(child)
+                if c_start:
+                    starts.append(c_start)
+                if c_end:
+                    ends.append(c_end)
+                hours += c_hours
+            result = (min(starts) if starts else None, max(ends) if ends else None, hours)
+        memo[task.id] = result
+        return result
+
+    rollups: dict[str, dict] = {}
+    for t in tasks:
+        start, end, hours = resolve(t)
+        if children_by_parent.get(t.id):
+            duration = Decimal(_duration_days(cal, start, end)) if start and end else None
+            rollups[t.id] = {"start": start, "end": end, "hours": hours, "duration": duration}
+    return rollups
+
+
 def task_schedule_rows(session: Session, project: Project) -> dict:
     """Monta a grade de cronograma (bolinha de status + linha base + %
     previsto por tarefa) usada por GET /projects/{id}/schedule — junta o
@@ -493,14 +550,22 @@ def task_schedule_rows(session: Session, project: Project) -> dict:
     tasks = list(session.scalars(select(Task).where(Task.project_id == project.id)).all())
     dots = task_dot_colors(tasks, status_date)
     baseline_map = _latest_baseline_task_map(session, project.id)
+    cal = calendar_for_project(session, project)
+    rollups = _task_rollups(tasks, cal)
 
     rows = []
     for t in tasks:
         baseline_row = baseline_map.get(t.id) if baseline_map else None
-        planned_percent = Decimal("100") if (t.planned_end_date and t.planned_end_date <= status_date) else Decimal("0")
-        if t.planned_start_date and t.planned_end_date and t.planned_start_date <= status_date < t.planned_end_date:
-            total_span = max((t.planned_end_date - t.planned_start_date).days, 1)
-            elapsed = (status_date - t.planned_start_date).days
+        rollup = rollups.get(t.id)
+        # Pra % previsto, uma tarefa-pai usa o intervalo agregado das
+        # descendentes (rollup) — sem isso, ficaria sempre em 0% porque
+        # planned_start_date/end_date da própria linha-pai são nulos.
+        effective_start = rollup["start"] if rollup else t.planned_start_date
+        effective_end = rollup["end"] if rollup else t.planned_end_date
+        planned_percent = Decimal("100") if (effective_end and effective_end <= status_date) else Decimal("0")
+        if effective_start and effective_end and effective_start <= status_date < effective_end:
+            total_span = max((effective_end - effective_start).days, 1)
+            elapsed = (status_date - effective_start).days
             planned_percent = _q(Decimal(max(elapsed, 0)) / Decimal(total_span) * 100)
 
         # SPI/CPI POR TAREFA — mesma lógica de project_evm (base de horas,
@@ -523,6 +588,10 @@ def task_schedule_rows(session: Session, project: Project) -> dict:
             {
                 "task": t,
                 "status_dot": dots.get(t.id, "white"),
+                "rollup_start_date": rollup["start"] if rollup else None,
+                "rollup_end_date": rollup["end"] if rollup else None,
+                "rollup_duration_days": rollup["duration"] if rollup else None,
+                "rollup_estimated_hours": rollup["hours"] if rollup else None,
                 "baseline_start_date": date.fromisoformat(baseline_row["planned_start_date"]) if baseline_row and baseline_row.get("planned_start_date") else None,
                 "baseline_end_date": date.fromisoformat(baseline_row["planned_end_date"]) if baseline_row and baseline_row.get("planned_end_date") else None,
                 "baseline_estimated_hours": baseline_hours,

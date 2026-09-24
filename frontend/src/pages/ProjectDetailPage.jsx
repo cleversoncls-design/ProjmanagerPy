@@ -562,6 +562,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     {
       key: 'name',
       header: 'Nome da tarefa',
+      nowrap: true,
       render: (row) => (
         <span style={{ paddingLeft: row.depth * 18 }} className="flex items-center gap-1.5">
           {row.is_milestone && <span className="inline-block h-2 w-2 shrink-0 rotate-45" style={{ backgroundColor: 'var(--text-muted)' }} />}
@@ -569,10 +570,15 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
         </span>
       ),
     },
-    { key: 'duration_days', header: 'Duração', align: 'right', render: (row) => `${formatNumber(row.duration_days)} d` },
-    { key: 'estimated_hours', header: 'Trabalho', align: 'right', render: (row) => `${formatNumber(row.estimated_hours)} h` },
-    { key: 'planned_start_date', header: 'Início', render: (row) => formatDate(row.planned_start_date) },
-    { key: 'planned_end_date', header: 'Fim', render: (row) => formatDate(row.planned_end_date) },
+    // Tarefa-pai (tem filhas) não tem Duração/Trabalho/Início/Fim próprios
+    // úteis — o motor de agendamento só escreve nesses campos em
+    // tarefas-folha. O backend manda o agregado das descendentes em
+    // rollup_* (services._task_rollups); aqui é só preferir esse valor
+    // quando ele vier preenchido, caindo pro campo cru da tarefa (folha) senão.
+    { key: 'duration_days', header: 'Duração', align: 'right', render: (row) => `${formatNumber(row.rollup_duration_days ?? row.duration_days)} d` },
+    { key: 'estimated_hours', header: 'Trabalho', align: 'right', render: (row) => `${formatNumber(row.rollup_estimated_hours ?? row.estimated_hours)} h` },
+    { key: 'planned_start_date', header: 'Início', render: (row) => formatDate(row.rollup_start_date ?? row.planned_start_date) },
+    { key: 'planned_end_date', header: 'Fim', render: (row) => formatDate(row.rollup_end_date ?? row.planned_end_date) },
     {
       key: 'resources',
       header: 'Recursos',
@@ -689,7 +695,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
 
       {!loading && !error && (
         <Card>
-          <Table columns={columns} rows={orderedTasks} getRowKey={(row) => row.id} emptyMessage="Nenhuma tarefa cadastrada ainda." />
+          <Table columns={columns} rows={orderedTasks} getRowKey={(row) => row.id} emptyMessage="Nenhuma tarefa cadastrada ainda." dense />
         </Card>
       )}
 

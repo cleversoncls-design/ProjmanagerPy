@@ -195,6 +195,10 @@ def project_schedule(project_id: str, user: User = Depends(get_current_user), db
             {
                 **{c.name: getattr(t, c.name) for c in t.__table__.columns},
                 "status_dot": row["status_dot"],
+                "rollup_start_date": row["rollup_start_date"],
+                "rollup_end_date": row["rollup_end_date"],
+                "rollup_duration_days": row["rollup_duration_days"],
+                "rollup_estimated_hours": row["rollup_estimated_hours"],
                 "baseline_start_date": row["baseline_start_date"],
                 "baseline_end_date": row["baseline_end_date"],
                 "baseline_estimated_hours": row["baseline_estimated_hours"],

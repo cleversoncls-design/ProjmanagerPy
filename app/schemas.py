@@ -284,6 +284,17 @@ class TaskScheduleRow(TaskRead):
     sob demanda (nunca armazenados) por `services.task_schedule_rows`."""
 
     status_dot: str
+    # Duração/Trabalho/Início/Fim agregados a partir das descendentes, só
+    # para tarefas-pai (WBS) — None numa tarefa-folha, que já usa os campos
+    # próprios (duration_days/estimated_hours/planned_start_date/
+    # planned_end_date acima, herdados de TaskRead) para tudo. Ver
+    # services._task_rollups: o pai nunca teve essas colunas próprias
+    # preenchidas de forma útil, então o frontend prefere estes campos
+    # quando presentes.
+    rollup_start_date: date | None = None
+    rollup_end_date: date | None = None
+    rollup_duration_days: Decimal | None = None
+    rollup_estimated_hours: Decimal | None = None
     baseline_start_date: date | None = None
     baseline_end_date: date | None = None
     baseline_estimated_hours: Decimal | None = None

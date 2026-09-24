@@ -747,3 +747,51 @@ def test_task_schedule_rows_computes_per_task_spi_cpi():
     # PV = 10h (fim planejado já passou da status_date); EV = 10*50% = 5h.
     assert row["spi"] == Decimal("0.50")  # 5/10
     assert row["cpi"] == Decimal("1.25")  # 5/4
+
+
+def test_task_schedule_rows_rolls_up_parent_from_children():
+    """Tarefa-pai (tem filhas) nunca teve Duração/Trabalho/Início/Fim
+    próprios úteis — o motor de agendamento só escreve nesses campos em
+    tarefas-folha. A grade precisa agregar isso a partir das descendentes:
+    Início = menor entre as folhas, Fim = maior, Trabalho = soma,
+    Duração = dias úteis entre Início e Fim (não soma das durações, que
+    podem rodar em paralelo)."""
+    db = session()
+    project = _make_project(db, code="PRJ-ROLLUP")
+    parent = Task(project_id=project.id, name="Pai", wbs_code="1")
+    db.add(parent)
+    db.flush()
+    child_a = Task(
+        project_id=project.id,
+        parent_task_id=parent.id,
+        name="Filha A",
+        wbs_code="1.1",
+        planned_start_date=date(2026, 8, 24),
+        planned_end_date=date(2026, 8, 25),
+        estimated_hours=Decimal("8"),
+    )
+    child_b = Task(
+        project_id=project.id,
+        parent_task_id=parent.id,
+        name="Filha B",
+        wbs_code="1.2",
+        planned_start_date=date(2026, 8, 26),
+        planned_end_date=date(2026, 8, 28),
+        estimated_hours=Decimal("16"),
+    )
+    db.add_all([child_a, child_b])
+    db.commit()
+
+    result = task_schedule_rows(db, project)
+    rows_by_id = {row["task"].id: row for row in result["rows"]}
+    parent_row = rows_by_id[parent.id]
+
+    assert parent_row["rollup_start_date"] == date(2026, 8, 24)
+    assert parent_row["rollup_end_date"] == date(2026, 8, 28)
+    assert parent_row["rollup_estimated_hours"] == Decimal("24")
+    # Dias úteis entre 24/08 (segunda) e 28/08 (sexta) = 5.
+    assert parent_row["rollup_duration_days"] == Decimal("5")
+
+    # Uma folha não tem rollup — os campos próprios (herdados de TaskRead
+    # na resposta real da API) é que valem.
+    assert rows_by_id[child_a.id]["rollup_start_date"] is None

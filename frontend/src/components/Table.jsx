@@ -1,11 +1,21 @@
 /**
- * Tabela genérica: columns = [{ key, header, align?, render? }], rows = [obj].
+ * Tabela genérica: columns = [{ key, header, align?, render?, nowrap? }], rows = [obj].
  * `render` recebe a linha inteira; sem `render`, usa `row[key]` cru.
+ * `nowrap` numa coluna impede quebra de linha na célula (útil pra nomes
+ * longos que, quebrando em várias linhas, inflam a altura da linha inteira
+ * — com `nowrap` a coluna só fica mais larga e o scroll horizontal do
+ * container, que já existe, resolve).
+ * `dense` (na tabela) reduz o padding vertical das linhas — usado em
+ * grades longas (ex.: tarefas) onde ver mais linhas por tela importa mais
+ * que o respiro extra das tabelas comuns; o padrão continua confortável.
  */
-export default function Table({ columns, rows, getRowKey, emptyMessage = 'Nenhum registro encontrado.' }) {
+export default function Table({ columns, rows, getRowKey, emptyMessage = 'Nenhum registro encontrado.', dense = false }) {
   if (!rows || rows.length === 0) {
     return <p className="py-8 text-center text-sm text-[var(--text-muted)]">{emptyMessage}</p>
   }
+
+  const headerPadding = dense ? 'px-3 py-1.5' : 'px-3 py-2'
+  const cellPadding = dense ? 'px-3 py-1' : 'px-3 py-2.5'
 
   return (
     <div className="overflow-x-auto">
@@ -15,7 +25,7 @@ export default function Table({ columns, rows, getRowKey, emptyMessage = 'Nenhum
             {columns.map((column) => (
               <th
                 key={column.key}
-                className={`px-3 py-2 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)] ${
+                className={`${headerPadding} text-xs font-medium uppercase tracking-wide text-[var(--text-muted)] ${
                   column.align === 'right' ? 'text-right' : 'text-left'
                 }`}
               >
@@ -30,7 +40,9 @@ export default function Table({ columns, rows, getRowKey, emptyMessage = 'Nenhum
               {columns.map((column) => (
                 <td
                   key={column.key}
-                  className={`px-3 py-2.5 text-[var(--text-primary)] ${column.align === 'right' ? 'text-right tabular' : 'text-left'}`}
+                  className={`${cellPadding} text-[var(--text-primary)] ${column.align === 'right' ? 'text-right tabular' : 'text-left'} ${
+                    column.nowrap ? 'whitespace-nowrap' : ''
+                  }`}
                 >
                   {column.render ? column.render(row) : (row[column.key] ?? '—')}
                 </td>
