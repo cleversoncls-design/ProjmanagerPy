@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 from .database import init_db
+from .i18n import request_language, t as translate
 from .rate_limit import RateLimitMiddleware, rate_limit_settings
 from .routers import (
     audit,
@@ -83,7 +84,11 @@ async def integrity_error_handler(request: Request, exc: IntegrityError) -> JSON
     """Converte violações de integridade do banco (unicidade, FK, etc.) em uma
     resposta 409 previsível, em vez do 500 genérico que o SQLAlchemy/psycopg
     levantava antes."""
-    return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": "Conflito de integridade de dados (registro duplicado ou referência inválida)."})
+    # Handler global, fora do fluxo normal de dependências — sem um
+    # `user` já resolvido aqui, usa o mesmo fallback de idioma via header
+    # que deps.py/auth.py usam antes de autenticar (ver i18n.request_language).
+    detail = translate("Conflito de integridade de dados (registro duplicado ou referência inválida).", request_language(request))
+    return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": detail})
 
 
 @app.get("/health", tags=["health"])

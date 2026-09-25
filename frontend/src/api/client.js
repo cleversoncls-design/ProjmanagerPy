@@ -1,3 +1,8 @@
+// Import direto (não via hook) porque este arquivo roda fora da árvore de
+// componentes React — client.js é chamado antes de qualquer contexto (ex.:
+// LanguageContext) existir. Ver i18n/translations.js.
+import { getStoredLanguage, translate } from '../i18n/translations'
+
 // VITE_API_BASE_URL (se definida no build) manda sempre — útil quando a API
 // mora num host diferente do frontend. Sem ela, descobrimos o endereço da
 // API a partir de onde o navegador abriu a página (mesmo host, porta
@@ -55,13 +60,23 @@ async function request(path, { method = 'GET', json, form, signal } = {}) {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
   }
+  // Idioma da interface, pra API traduzir mensagens de erro emitidas ANTES
+  // de resolver um usuário autenticado (token ausente/inválido, login com
+  // e-mail desconhecido) — quando já existe um usuário logado, o backend
+  // usa o idioma salvo no cadastro dele (User.language) em vez deste
+  // header; ver app/i18n.py (request_language) no backend.
+  headers['X-App-Language'] = getStoredLanguage()
 
   let response
   try {
     response = await fetch(`${API_BASE_URL}${path}`, { method, headers, body, signal })
   } catch {
     throw new ApiError(
-      `Não foi possível conectar à API em ${API_BASE_URL}. Verifique se ela está rodando e se VITE_API_BASE_URL aponta para o lugar certo.`,
+      translate(
+        getStoredLanguage(),
+        'Não foi possível conectar à API em {url}. Verifique se ela está rodando e se VITE_API_BASE_URL aponta para o lugar certo.',
+        { url: API_BASE_URL },
+      ),
       0,
     )
   }

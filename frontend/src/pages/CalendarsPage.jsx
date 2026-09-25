@@ -8,12 +8,13 @@ import Modal from '../components/Modal'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
 import { FormField, TextInput } from '../components/FormField'
-import { WEEKDAY_LABELS } from '../utils/labels'
 import { formatDate } from '../utils/format'
+import { useLanguage } from '../context/LanguageContext'
 
 const DEFAULT_WORKING_DAYS = [0, 1, 2, 3, 4]
 
 export default function CalendarsPage() {
+  const { labels } = useLanguage()
   const [calendars, setCalendars] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -77,7 +78,7 @@ export default function CalendarsPage() {
                 {
                   key: 'working_days',
                   header: 'Dias úteis',
-                  render: (row) => row.working_days.map((day) => WEEKDAY_LABELS[day]).join(', '),
+                  render: (row) => row.working_days.map((day) => labels.WEEKDAY_LABELS[day]).join(', '),
                 },
                 {
                   key: 'actions',
@@ -118,7 +119,7 @@ export default function CalendarsPage() {
             </FormField>
             <FormField label="Dias úteis" required>
               <div className="flex flex-wrap gap-2">
-                {WEEKDAY_LABELS.map((label, day) => (
+                {labels.WEEKDAY_LABELS.map((label, day) => (
                   <label
                     key={label}
                     className={`cursor-pointer rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${

@@ -1,4 +1,5 @@
-import { STATUS_DOT_COLORS, STATUS_DOT_LABELS } from '../utils/labels'
+import { STATUS_DOT_COLORS } from '../utils/labels'
+import { useLanguage } from '../context/LanguageContext'
 
 /** Bolinha de status da tarefa — branca (contorno preto, "por iniciar"),
  * verde (no prazo), amarela (mistura, só em tarefas-pai) ou vermelha
@@ -6,8 +7,9 @@ import { STATUS_DOT_COLORS, STATUS_DOT_LABELS } from '../utils/labels'
  * usada com `title` (tooltip) e, nas telas de detalhe, ao lado do rótulo
  * por extenso. */
 export default function StatusDot({ color, size = 10 }) {
+  const { labels } = useLanguage()
   const fill = STATUS_DOT_COLORS[color] || STATUS_DOT_COLORS.white
-  const label = STATUS_DOT_LABELS[color] || color
+  const label = labels.STATUS_DOT_LABELS[color] || color
   return (
     <span
       role="img"

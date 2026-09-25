@@ -1,4 +1,8 @@
-const currencyFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
+// Moeda tratada no sistema inteiro é dólar americano (US$), independente
+// do idioma da interface — decisão do usuário, não é conversão de câmbio:
+// os valores já cadastrados (custo/hora, faturamento etc.) são tratados
+// como se já estivessem em USD, só muda o símbolo/formatação exibida.
+const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
 const numberFormatter = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 })
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC' })
 

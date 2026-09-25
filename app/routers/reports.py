@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access, require_roles
 from ..exports import build_tasks_workbook
+from ..i18n import t as translate
 from ..models import Project, Task, TaskDependency, TaskStatus, User, UserRole
 from ..schemas import (
     DashboardResponse,
@@ -40,10 +41,10 @@ from ..services import (
 router = APIRouter(tags=["reports"])
 
 
-def _get_project_or_404(db: Session, project_id: str) -> Project:
+def _get_project_or_404(db: Session, project_id: str, lang: str) -> Project:
     project = db.get(Project, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", lang))
     return project
 
 
@@ -111,7 +112,7 @@ def project_report(project_id: str, user: User = Depends(get_current_user), db: 
     """Relatório consolidado do projeto: progresso, tarefas restantes,
     financeiro (Budget vs Actual, com quebra por task_type quando o perfil
     tem acesso a dado financeiro) e burndown."""
-    project = _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id, user.language)
     require_project_access(project, user)
     progress = project_progress(db, project_id)
     financials = None
@@ -133,7 +134,7 @@ def project_report(project_id: str, user: User = Depends(get_current_user), db: 
 
 @router.get("/projects/{project_id}/risks/matrix", response_model=RiskMatrixResponse)
 def project_risk_matrix(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
-    project = _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id, user.language)
     require_project_access(project, user)
     return risk_matrix(db, project_id)
 
@@ -153,28 +154,28 @@ def velocity(
     portfólio — só perfis internos podem pedir nesse escopo; perfis
     externos precisam informar um `project_id` do próprio cliente."""
     if project_id:
-        project = _get_project_or_404(db, project_id)
+        project = _get_project_or_404(db, project_id, user.language)
         require_project_access(project, user)
     elif user.role in EXTERNAL_ROLES:
-        raise HTTPException(status_code=422, detail="Cliente precisa informar project_id")
+        raise HTTPException(status_code=422, detail=translate("Cliente precisa informar project_id", user.language))
     period_end = end or date.today()
     period_start = start or (period_end - timedelta(days=90))
     if period_start > period_end:
-        raise HTTPException(status_code=422, detail="start precisa ser anterior ou igual a end")
+        raise HTTPException(status_code=422, detail=translate("start precisa ser anterior ou igual a end", user.language))
     return velocity_series(db, start=period_start, end=period_end, granularity=granularity, project_id=project_id, resource_id=resource_id)
 
 
 @router.get("/reports/roi", response_model=list[RoiRow])
 def roi(
     project_id: str | None = None,
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """ROI (margem ÷ custo real — ver docstring de project_roi) por
     projeto. Dado financeiro: restrito a ADMIN/INTERNAL_PM, como o resto
     dos campos financeiros da API."""
     if project_id:
-        _get_project_or_404(db, project_id)
+        _get_project_or_404(db, project_id, user.language)
         return [project_roi(db, project_id)]
     projects = list(db.scalars(select(Project)).all())
     return [project_roi(db, project.id) for project in projects]
@@ -186,7 +187,7 @@ def project_schedule(project_id: str, user: User = Depends(get_current_user), db
     previsto por tarefa) — igual a GET /gantt em conteúdo de tarefas, mas
     com os campos calculados que a tela de tarefas/Gantt do frontend
     precisa para pintar o status sem recalcular nada no cliente."""
-    project = _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id, user.language)
     require_project_access(project, user)
     schedule = task_schedule_rows(db, project)
     tasks_payload = []
@@ -228,7 +229,7 @@ def export_tasks_xlsx(project_id: str, user: User = Depends(get_current_user), d
     """Exporta a grade de tarefas pra .xlsx (Excel/LibreOffice/OpenOffice) —
     mesmos dados calculados de GET /schedule (rollup, linha de base, SPI/CPI
     por tarefa), ver app/exports.build_tasks_workbook."""
-    project = _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id, user.language)
     require_project_access(project, user)
     content = build_tasks_workbook(db, project)
     filename = f"{project.code}_tarefas.xlsx"
@@ -243,7 +244,7 @@ def export_tasks_xlsx(project_id: str, user: User = Depends(get_current_user), d
 def project_evm_report(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
     """SPI/CPI e % previsto (Earned Value em base de horas — ver docstring
     de services.project_evm)."""
-    project = _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id, user.language)
     require_project_access(project, user)
     return project_evm(db, project_id)
 
@@ -253,7 +254,7 @@ def project_statistics_report(project_id: str, user: User = Depends(get_current_
     """Equivalente a "Project Statistics" do MS Project (ver tela de
     referência do usuário). O custo de `actual` é ocultado para perfis
     externos, no mesmo padrão de ProjectDetail/financials."""
-    project = _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id, user.language)
     require_project_access(project, user)
     stats = project_statistics(db, project_id)
     if user.role in EXTERNAL_ROLES:
@@ -266,7 +267,7 @@ def gantt(project_id: str, user: User = Depends(get_current_user), db: Session =
     """Tarefas (ordenadas por WBS) + dependências do projeto num único
     payload, no formato que um Gantt (estilo MS Project) espera para
     desenhar barras e setas sem N chamadas separadas."""
-    project = _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id, user.language)
     require_project_access(project, user)
     tasks = list(db.scalars(select(Task).where(Task.project_id == project_id).order_by(Task.wbs_code)).all())
     task_ids = [t.id for t in tasks]

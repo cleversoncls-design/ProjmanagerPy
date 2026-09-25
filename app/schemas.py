@@ -10,6 +10,7 @@ from .models import (
     ChangeStatus,
     DependencyType,
     IntakeStatus,
+    Language,
     ProjectStatus,
     RiskLevel,
     RiskStatus,
@@ -53,6 +54,7 @@ class UserRead(ORMModel):
     email: str
     role: UserRole
     status: UserStatus
+    language: Language
     created_at: datetime
 
 
@@ -67,6 +69,17 @@ class UserUpdate(BaseModel):
     role: UserRole | None = None
     client_id: str | None = None
     status: UserStatus | None = None
+    language: Language | None = None
+
+
+class UserSelfUpdate(BaseModel):
+    """Autoatendimento — qualquer usuário autenticado pode trocar o próprio
+    idioma (ver PATCH /users/me), sem precisar de permissão de ADMIN
+    (diferente de PATCH /users/{id}, que edita QUALQUER usuário e é
+    restrito). De propósito só tem este campo: evita abrir uma porta pra
+    autopromoção de role/status por essa rota."""
+
+    language: Language
 
 
 class UserPasswordReset(BaseModel):

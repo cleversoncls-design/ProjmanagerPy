@@ -1,3 +1,5 @@
+import { translate } from '../i18n/translations'
+
 export const ROLE_LABELS = {
   ADMIN: 'Administrador',
   INTERNAL_PM: 'Gerente de projetos',
@@ -123,4 +125,34 @@ export const STATUS_DOT_LABELS = {
   green: 'No prazo',
   yellow: 'Mistura de status',
   red: 'Atrasada',
+}
+
+// --- Versões traduzidas dos rótulos acima (para o idioma da interface) ----
+// As constantes exportadas acima continuam sendo o texto em Português
+// (usado como chave de tradução em toda a base — ver i18n/translations.js).
+// `getLabels(lang)` devolve cópias com os MESMOS valores traduzidos, prontas
+// pra uso direto em `labels.TASK_STATUS_LABELS[status]` etc.; em pt-BR
+// (padrão) o resultado é idêntico às constantes originais.
+
+function translateMap(map, lang) {
+  const out = {}
+  for (const [key, value] of Object.entries(map)) {
+    out[key] = translate(lang, value)
+  }
+  return out
+}
+
+export function getLabels(lang) {
+  return {
+    ROLE_LABELS: translateMap(ROLE_LABELS, lang),
+    PROJECT_STATUS_LABELS: translateMap(PROJECT_STATUS_LABELS, lang),
+    TASK_STATUS_LABELS: translateMap(TASK_STATUS_LABELS, lang),
+    TASK_TYPE_LABELS: translateMap(TASK_TYPE_LABELS, lang),
+    APPROVAL_STATUS_LABELS: translateMap(APPROVAL_STATUS_LABELS, lang),
+    USER_STATUS_LABELS: translateMap(USER_STATUS_LABELS, lang),
+    DEPENDENCY_TYPE_LABELS: translateMap(DEPENDENCY_TYPE_LABELS, lang),
+    DEPENDENCY_TYPE_SHORT: translateMap(DEPENDENCY_TYPE_SHORT, lang),
+    STATUS_DOT_LABELS: translateMap(STATUS_DOT_LABELS, lang),
+    WEEKDAY_LABELS: WEEKDAY_LABELS.map((day) => translate(lang, day)),
+  }
 }

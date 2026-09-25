@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import EXTERNAL_ROLES, get_current_user, require_roles
+from ..i18n import t as translate
 from ..models import Client, User, UserRole
 from ..schemas import ClientCreate, ClientRead
 
@@ -15,11 +16,11 @@ router = APIRouter(prefix="/clients", tags=["clients"])
 @router.post("", response_model=ClientRead, status_code=status.HTTP_201_CREATED)
 def create_client(
     data: ClientCreate,
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
     db: Session = Depends(get_db),
 ) -> Client:
     if db.scalar(select(Client).where(Client.code == data.code)):
-        raise HTTPException(status_code=409, detail="Já existe um cliente com este código")
+        raise HTTPException(status_code=409, detail=translate("Já existe um cliente com este código", user.language))
     client = Client(**data.model_dump())
     db.add(client)
     db.commit()
@@ -39,7 +40,7 @@ def list_clients(
 def read_client(client_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Client:
     client = db.get(Client, client_id)
     if not client:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        raise HTTPException(status_code=404, detail=translate("Cliente não encontrado", user.language))
     if user.role in EXTERNAL_ROLES and client.id != user.client_id:
-        raise HTTPException(status_code=403, detail="Fora do escopo do cliente")
+        raise HTTPException(status_code=403, detail=translate("Fora do escopo do cliente", user.language))
     return client

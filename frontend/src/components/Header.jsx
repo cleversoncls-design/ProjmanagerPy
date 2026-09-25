@@ -1,6 +1,7 @@
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
+import { useLanguage } from '../context/LanguageContext'
 import { BellIcon, LogoutIcon, MoonIcon, SunIcon } from './icons'
 
 const HEADING_BY_PREFIX = [
@@ -31,6 +32,7 @@ function initialsOf(name) {
 export default function Header() {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  const { language, setLanguage, t } = useLanguage()
   const { crumb, title } = usePageHeading()
 
   return (
@@ -39,13 +41,22 @@ export default function Header() {
       style={{ backgroundColor: 'var(--surface)', borderColor: 'var(--border)' }}
     >
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)]">{crumb}</p>
-        <p className="mt-0.5 text-base font-extrabold text-[var(--text-primary)]">{title}</p>
+        <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)]">{t(crumb)}</p>
+        <p className="mt-0.5 text-base font-extrabold text-[var(--text-primary)]">{t(title)}</p>
       </div>
       <div className="flex items-center gap-3.5">
         <button
           type="button"
-          aria-label={theme === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}
+          aria-label={t('Idioma')}
+          title={t('Idioma')}
+          onClick={() => setLanguage(language === 'es' ? 'pt-BR' : 'es')}
+          className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[var(--border)] bg-[var(--surface)] text-[11px] font-extrabold text-[var(--text-muted)] transition-colors hover:bg-[var(--page)]"
+        >
+          {language === 'es' ? 'ES' : 'PT'}
+        </button>
+        <button
+          type="button"
+          aria-label={theme === 'dark' ? t('Usar tema claro') : t('Usar tema escuro')}
           onClick={toggleTheme}
           className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] transition-colors hover:bg-[var(--page)]"
         >
@@ -53,7 +64,7 @@ export default function Header() {
         </button>
         <button
           type="button"
-          aria-label="Notificações"
+          aria-label={t('Notificações')}
           className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] transition-colors hover:bg-[var(--page)]"
         >
           <BellIcon size={17} />
@@ -64,7 +75,7 @@ export default function Header() {
             <span className="text-xs font-extrabold text-[var(--page)]">{initialsOf(user?.name)}</span>
           </div>
           <div className="hidden sm:block">
-            <p className="max-w-[160px] truncate text-[12.5px] font-bold text-[var(--text-primary)]">{user?.name || 'Usuário autenticado'}</p>
+            <p className="max-w-[160px] truncate text-[12.5px] font-bold text-[var(--text-primary)]">{user?.name || t('Usuário autenticado')}</p>
             <p className="max-w-[160px] truncate text-[11px] text-[var(--text-muted)]">{user?.email || ''}</p>
           </div>
         </div>
@@ -75,7 +86,7 @@ export default function Header() {
           className="flex items-center gap-1.5 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[12.5px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--page)] hover:text-[var(--text-primary)]"
         >
           <LogoutIcon size={15} />
-          Sair
+          {t('Sair')}
         </button>
       </div>
     </header>
