@@ -11,12 +11,16 @@ const TONE = {
  * components/app-ui.tsx). Nunca comunica só por cor: o rótulo do status
  * sempre acompanha o selo — ver regra "status color never alone" da
  * paleta de dataviz. */
-export default function StatusPill({ label, tone = 'muted' }) {
+// `title` é opcional — só usado onde `label` vem abreviado (ex.: "N/I" na
+// grade de tarefas) pra mostrar o texto por extenso ao passar o mouse; sem
+// ele, cai no próprio `label`.
+export default function StatusPill({ label, tone = 'muted', title }) {
   const { bg, fg } = TONE[tone] || TONE.muted
   return (
     <span
       className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
       style={{ backgroundColor: bg, color: fg }}
+      title={title || label}
     >
       {label}
     </span>

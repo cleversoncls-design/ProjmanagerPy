@@ -1007,12 +1007,24 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     status: {
       key: 'status',
       header: t('Status'),
-      render: (row) => <StatusPill label={labels.TASK_STATUS_LABELS[row.status] || row.status} tone={TASK_STATUS_TONE[row.status]} />,
+      render: (row) => (
+        <StatusPill
+          label={labels.TASK_STATUS_LABELS_SHORT[row.status] || row.status}
+          title={labels.TASK_STATUS_LABELS[row.status]}
+          tone={TASK_STATUS_TONE[row.status]}
+        />
+      ),
     },
     client_approval_status: {
       key: 'client_approval_status',
       header: t('Aprovação do cliente'),
-      render: (row) => <StatusPill label={labels.APPROVAL_STATUS_LABELS[row.client_approval_status]} tone={APPROVAL_STATUS_TONE[row.client_approval_status]} />,
+      render: (row) => (
+        <StatusPill
+          label={labels.APPROVAL_STATUS_LABELS_SHORT[row.client_approval_status]}
+          title={labels.APPROVAL_STATUS_LABELS[row.client_approval_status]}
+          tone={APPROVAL_STATUS_TONE[row.client_approval_status]}
+        />
+      ),
     },
   }
 
