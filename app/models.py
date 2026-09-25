@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Enum as SqlEnum, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -140,7 +140,19 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(nullable=False)
     status: Mapped[UserStatus] = mapped_column(nullable=False, default=UserStatus.ACTIVE)
-    language: Mapped[Language] = mapped_column(nullable=False, default=Language.PT_BR)
+    # `values_callable` é necessário aqui: por padrão o SQLAlchemy grava/lê
+    # colunas Enum pelo NOME do membro Python (ex.: "PT_BR"), não pelo
+    # `.value` — passa despercebido em todo outro enum deste arquivo porque
+    # neles nome e valor são iguais (ex.: UserStatus.ACTIVE = "ACTIVE").
+    # Language é o único onde divergem (Language.PT_BR = "pt-BR"), e o tipo
+    # nativo do Postgres criado pela migração 0005 usa os VALORES
+    # ("pt-BR"/"es") como rótulo — sem isso, todo SELECT em User quebra com
+    # "'pt-BR' is not among the defined enum values".
+    language: Mapped[Language] = mapped_column(
+        SqlEnum(Language, name="language", values_callable=lambda enum_cls: [member.value for member in enum_cls]),
+        nullable=False,
+        default=Language.PT_BR,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     client: Mapped[Client | None] = relationship(back_populates="users")
