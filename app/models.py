@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Enum as SqlEnum, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -29,6 +29,16 @@ class UserStatus(StrEnum):
     ACTIVE = "ACTIVE"
     INACTIVE = "INACTIVE"
     BLOCKED = "BLOCKED"
+
+
+class Language(StrEnum):
+    """Idioma da interface e das mensagens de erro da API — hoje só
+    Português (padrão) e Espanhol. Fica no cadastro do usuário (não no
+    navegador) pra seguir o usuário entre dispositivos, ver
+    routers/users.py PATCH /users/me."""
+
+    PT_BR = "pt-BR"
+    ES = "es"
 
 
 class IntakeStatus(StrEnum):
@@ -58,6 +68,23 @@ class TaskStatus(StrEnum):
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     DELAYED = "DELAYED"
+
+
+class TaskType(StrEnum):
+    MANAGEMENT = "MANAGEMENT"
+    CONSULTING = "CONSULTING"
+
+
+class TaskApprovalStatus(StrEnum):
+    """Aprovação da tarefa pelo lado do cliente (gerente de projeto do
+    cliente ou usuário-chave), independente do TaskStatus de execução —
+    uma tarefa pode estar COMPLETED e ainda não ter sido validada pelo
+    cliente."""
+
+    NOT_REQUIRED = "NOT_REQUIRED"
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
 
 
 class TimesheetStatus(StrEnum):
@@ -113,6 +140,19 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(nullable=False)
     status: Mapped[UserStatus] = mapped_column(nullable=False, default=UserStatus.ACTIVE)
+    # `values_callable` é necessário aqui: por padrão o SQLAlchemy grava/lê
+    # colunas Enum pelo NOME do membro Python (ex.: "PT_BR"), não pelo
+    # `.value` — passa despercebido em todo outro enum deste arquivo porque
+    # neles nome e valor são iguais (ex.: UserStatus.ACTIVE = "ACTIVE").
+    # Language é o único onde divergem (Language.PT_BR = "pt-BR"), e o tipo
+    # nativo do Postgres criado pela migração 0005 usa os VALORES
+    # ("pt-BR"/"es") como rótulo — sem isso, todo SELECT em User quebra com
+    # "'pt-BR' is not among the defined enum values".
+    language: Mapped[Language] = mapped_column(
+        SqlEnum(Language, name="language", values_callable=lambda enum_cls: [member.value for member in enum_cls]),
+        nullable=False,
+        default=Language.PT_BR,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     client: Mapped[Client | None] = relationship(back_populates="users")
@@ -140,11 +180,34 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[ProjectStatus] = mapped_column(nullable=False, default=ProjectStatus.PLANNING)
     sold_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    # Quebra do valor vendido entre horas de gestão e de consultoria — cada
+    # bolsa tem sua própria quantidade de horas contratadas e seu próprio
+    # valor/hora. `sold_value` continua existindo como coluna (usado direto
+    # por project_financials), mas passa a ser CALCULADO a partir destes 4
+    # campos no momento de criar/atualizar o projeto (ver app/routers/projects.py),
+    # em vez de ser digitado diretamente.
+    management_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    management_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    consulting_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    consulting_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
+    # Calendário aplicado ao projeto (dias úteis/feriados usados para
+    # calcular datas finais e o motor de reagendamento). Opcional: sem ele,
+    # o recálculo cai no calendário padrão (segunda a sexta, sem feriados) —
+    # ver `services.calendar_for_project`. Pode ser comparado/validado
+    # contra o calendário pessoal do consultor (Resource.calendar_id) na
+    # tela de recursos.
+    calendar_id: Mapped[str | None] = mapped_column(ForeignKey("calendars.id", ondelete="SET NULL"))
+    # "Data de status"/data-base: a partir dela, o sistema calcula o %
+    # previsto e o status (no prazo/atrasada) de cada tarefa — ver
+    # `services.project_evm` e `services.task_dot_color`. None = usa a data
+    # de hoje como data-base (comportamento antes de existir este campo).
+    status_date: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     client: Mapped[Client] = relationship(back_populates="projects")
+    calendar: Mapped[Calendar | None] = relationship()
     tasks: Mapped[list[Task]] = relationship(back_populates="project", cascade="all, delete-orphan")
     expenses: Mapped[list[ProjectExpense]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
@@ -165,8 +228,21 @@ class Task(Base):
     parent_task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     wbs_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    task_type: Mapped[TaskType] = mapped_column(nullable=False, default=TaskType.CONSULTING)
+    # "Duração" (dias) — campo primário do agendamento effort-driven (estilo
+    # MS Project): estimated_hours ("Trabalho") é derivado dela × a
+    # capacidade diária dos recursos alocados (ou 8h/dia sem nenhum recurso
+    # alocado ainda). Editar estimated_hours diretamente faz o cálculo
+    # inverso. Ver `services.apply_effort_driven`.
+    duration_days: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=1)
     estimated_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     actual_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
+    # Posição manual entre as tarefas-irmãs (mesmo parent_task_id) — usada
+    # por "mover tarefa" (reordenar/reparentar) e por `recalculate_wbs` para
+    # decidir a ordem final do WBS, já que a ordenação alfabética de
+    # wbs_code não reflete mais a ordem depois de um recálculo. Não é único
+    # nem denso (gaps são normais); só a ordem relativa importa.
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     planned_start_date: Mapped[date | None] = mapped_column(Date)
     planned_end_date: Mapped[date | None] = mapped_column(Date)
     actual_start_date: Mapped[date | None] = mapped_column(Date)
@@ -177,6 +253,11 @@ class Task(Base):
     is_milestone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     progress_percentage: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=0)
     status: Mapped[TaskStatus] = mapped_column(nullable=False, default=TaskStatus.NOT_STARTED)
+    client_approval_status: Mapped[TaskApprovalStatus] = mapped_column(nullable=False, default=TaskApprovalStatus.NOT_REQUIRED)
+    # Campo de observações livre (item 16 do pedido de revisão da tela de
+    # tarefas) — texto sem estrutura, nunca usado em cálculo nenhum.
+    notes: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (UniqueConstraint("project_id", "wbs_code", name="uq_task_project_wbs"),)
     project: Mapped[Project] = relationship(back_populates="tasks")
     parent: Mapped[Task | None] = relationship(remote_side=[id], back_populates="children")
     children: Mapped[list[Task]] = relationship(back_populates="parent")
@@ -192,7 +273,12 @@ class Resource(Base):
     internal_cost_per_hour: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     billing_rate_per_hour: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     daily_capacity_hours: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=8)
+    # Calendário pessoal (dias úteis/feriados) usado para nivelar a agenda
+    # deste recurso — opcional; sem ele, o recálculo de cronograma usa o
+    # calendário do projeto/calendar_id informado explicitamente na chamada.
+    calendar_id: Mapped[str | None] = mapped_column(ForeignKey("calendars.id", ondelete="SET NULL"))
     user: Mapped[User] = relationship(back_populates="resource")
+    calendar: Mapped[Calendar | None] = relationship()
 
 
 class TaskAssignment(Base):
@@ -208,13 +294,19 @@ class TaskAssignment(Base):
 class Timesheet(Base):
     __tablename__ = "timesheets"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    # Apontamento "avulso" (sem tarefa pré-definida na EAP, padrão
+    # Clockify/Toggl): task_id fica nulo e project_id opcionalmente aloca o
+    # custo a um projeto sem exigir WBS. Os dois nulos = hora administrativa
+    # interna, sem alocação a nenhum projeto.
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     resource_id: Mapped[str] = mapped_column(ForeignKey("resources.id", ondelete="CASCADE"), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     hours_spent: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[TimesheetStatus] = mapped_column(nullable=False, default=TimesheetStatus.PENDING)
-    task: Mapped[Task] = relationship(back_populates="timesheets")
+    task: Mapped[Task | None] = relationship(back_populates="timesheets")
+    project: Mapped[Project | None] = relationship()
 
 
 class ProjectExpense(Base):
@@ -255,6 +347,7 @@ class Risk(Base):
     impact: Mapped[RiskLevel] = mapped_column(nullable=False)
     mitigation_plan: Mapped[str | None] = mapped_column(Text)
     status: Mapped[RiskStatus] = mapped_column(nullable=False, default=RiskStatus.OPEN)
+    project: Mapped[Project] = relationship()
 
 
 class ChangeRequest(Base):
@@ -265,6 +358,7 @@ class ChangeRequest(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     cost_impact: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     schedule_impact_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    project: Mapped[Project] = relationship()
     status: Mapped[ChangeStatus] = mapped_column(nullable=False, default=ChangeStatus.PENDING)
 
 
@@ -276,3 +370,26 @@ class TaskDependency(Base):
     dependency_type: Mapped[DependencyType] = mapped_column(nullable=False, default=DependencyType.FS)
     lag_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     __table_args__ = (UniqueConstraint("predecessor_task_id", "successor_task_id", name="uq_dependency_pair"),)
+
+
+class AuditAction(StrEnum):
+    CREATE = "CREATE"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+
+
+class AuditLog(Base):
+    """Registro mínimo de auditoria: quem criou/alterou qual registro e
+    quando. Não é um log de todas as leituras nem um diff campo-a-campo
+    completo — apenas o suficiente para responder "quem mexeu nisso e
+    quando" nas entidades de negócio mais sensíveis (projetos, tarefas,
+    timesheets, mudanças)."""
+
+    __tablename__ = "audit_logs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    action: Mapped[AuditAction] = mapped_column(nullable=False)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    details: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)

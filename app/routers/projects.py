@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..audit import record_audit
+from ..database import get_db
+from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access, require_roles
+from ..i18n import t as translate
+from ..models import AuditAction, Baseline, Calendar, ChangeRequest, Client, Project, ProjectExpense, Risk, Task, Timesheet, User, UserRole
+from ..schemas import ProjectCreate, ProjectDetail, ProjectSummary, ProjectUpdate
+from ..services import project_financials
+
+router = APIRouter(prefix="/projects", tags=["projects"])
+
+_FINANCIAL_FIELDS = ("management_hours", "management_rate", "consulting_hours", "consulting_rate")
+
+
+def _recompute_sold_value(project: Project) -> None:
+    """`sold_value` nunca é digitado diretamente: é sempre horas × taxa de
+    cada bolsa (gestão + consultoria), recalculado aqui sempre que qualquer
+    um dos quatro campos muda — para nunca ficar dessincronizado do pacote
+    realmente vendido."""
+    project.sold_value = (project.management_hours * project.management_rate) + (
+        project.consulting_hours * project.consulting_rate
+    )
+
+
+@router.post("", response_model=ProjectDetail, status_code=status.HTTP_201_CREATED)
+def create_project(
+    data: ProjectCreate,
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    db: Session = Depends(get_db),
+) -> Project:
+    if not db.get(Client, data.client_id):
+        raise HTTPException(status_code=404, detail=translate("Cliente não encontrado", user.language))
+    manager = db.get(User, data.manager_id)
+    if not manager or manager.role not in {UserRole.ADMIN, UserRole.INTERNAL_PM}:
+        raise HTTPException(status_code=422, detail=translate("manager_id precisa ser um usuário interno (ADMIN ou INTERNAL_PM)", user.language))
+    if db.scalar(select(Project).where(Project.code == data.code)):
+        raise HTTPException(status_code=409, detail=translate("Já existe um projeto com este código", user.language))
+    if data.calendar_id and not db.get(Calendar, data.calendar_id):
+        raise HTTPException(status_code=404, detail=translate("Calendário não encontrado", user.language))
+    project = Project(**data.model_dump())
+    _recompute_sold_value(project)
+    db.add(project)
+    db.flush()
+    record_audit(db, entity_type="project", entity_id=project.id, action=AuditAction.CREATE, user_id=user.id)
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.get("", response_model=list[ProjectSummary])
+def list_projects(
+    client_id: str | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[Project]:
+    stmt = select(Project)
+    if user.role in EXTERNAL_ROLES:
+        stmt = stmt.where(Project.client_id == user.client_id)
+    elif client_id:
+        stmt = stmt.where(Project.client_id == client_id)
+    return list(db.scalars(stmt.order_by(Project.created_at.desc())).all())
+
+
+@router.get("/{project_id}", response_model=ProjectDetail)
+def read_project(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
+    require_project_access(project, user)
+    payload = ProjectDetail.model_validate(project).model_dump()
+    if user.role in EXTERNAL_ROLES:
+        payload["sold_value"] = None
+        payload["financials"] = None
+        for field in _FINANCIAL_FIELDS:
+            payload[field] = None
+    else:
+        payload["financials"] = project_financials(db, project.id)
+    return payload
+
+
+@router.patch("/{project_id}", response_model=ProjectDetail)
+def update_project(
+    project_id: str,
+    data: ProjectUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Project:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
+    require_project_access(project, user, write=True)
+    changes = data.model_dump(exclude_unset=True)
+    if "manager_id" in changes:
+        manager = db.get(User, changes["manager_id"])
+        if not manager or manager.role not in {UserRole.ADMIN, UserRole.INTERNAL_PM}:
+            raise HTTPException(status_code=422, detail=translate("manager_id precisa ser um usuário interno (ADMIN ou INTERNAL_PM)", user.language))
+    if changes.get("calendar_id") and not db.get(Calendar, changes["calendar_id"]):
+        raise HTTPException(status_code=404, detail=translate("Calendário não encontrado", user.language))
+    if user.role in EXTERNAL_ROLES:
+        for field in _FINANCIAL_FIELDS:
+            changes.pop(field, None)
+    for field, value in changes.items():
+        setattr(project, field, value)
+    if any(field in changes for field in _FINANCIAL_FIELDS):
+        _recompute_sold_value(project)
+    if changes:
+        record_audit(db, entity_type="project", entity_id=project.id, action=AuditAction.UPDATE, user_id=user.id, details={"fields": sorted(changes.keys())})
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project(
+    project_id: str,
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    db: Session = Depends(get_db),
+) -> None:
+    """Cobre o caso de um projeto cadastrado por engano: só permite apagar
+    enquanto ele ainda não tem nenhuma tarefa (a regra que foi pedida — o
+    projeto "recém-criado" típico não tem mais nada além disso). Mas
+    Task.project_id não é a única FK que aponta pra cá (todas
+    ondelete="CASCADE" — ver app/models.py): Baseline, ProjectExpense,
+    Risk, ChangeRequest e Timesheet avulso (sem task_id, só project_id)
+    também apontam direto pro projeto e podiam existir mesmo sem nenhuma
+    tarefa ainda (ex.: uma despesa ou um risco lançado antes de montar o
+    cronograma, ou uma linha de base tirada de um cronograma ainda vazio).
+    Sem checar esses também, o DELETE apagaria esse dado em cascata
+    silenciosamente — então cada um vira uma mensagem 409 específica em
+    vez de só travar em "tem tarefa"."""
+    # Sem require_project_access aqui: já é restrito a ADMIN/INTERNAL_PM
+    # (require_roles acima), que sempre têm acesso de escrita a qualquer
+    # projeto — perfil externo nunca chega neste endpoint.
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
+    if db.scalar(select(Task).where(Task.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem tarefas cadastradas — não pode ser excluído", user.language),
+        )
+    if db.scalar(select(Baseline).where(Baseline.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem linha(s) de base salva(s) — não pode ser excluído", user.language),
+        )
+    if db.scalar(select(ProjectExpense).where(ProjectExpense.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem despesas lançadas — não pode ser excluído", user.language),
+        )
+    if db.scalar(select(Risk).where(Risk.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem riscos cadastrados — não pode ser excluído", user.language),
+        )
+    if db.scalar(select(ChangeRequest).where(ChangeRequest.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem solicitações de mudança — não pode ser excluído", user.language),
+        )
+    if db.scalar(select(Timesheet).where(Timesheet.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem apontamento de horas avulso — não pode ser excluído", user.language),
+        )
+    record_audit(db, entity_type="project", entity_id=project.id, action=AuditAction.DELETE, user_id=user.id, details={"code": project.code})
+    db.delete(project)  # passou por todas as checagens acima — não sobra filho nenhum pra cascata apagar
+    db.commit()
