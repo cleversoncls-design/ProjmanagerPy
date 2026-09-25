@@ -81,6 +81,27 @@ export const APPROVAL_STATUS_TONE = {
   REJECTED: 'critical',
 }
 
+// Versões abreviadas de TASK_STATUS_LABELS/APPROVAL_STATUS_LABELS — só pra
+// caber melhor nas colunas Status/Aprovação do cliente da grade de tarefas
+// (ver Table na aba Tarefas em ProjectDetailPage.jsx), que é bem apertada
+// com várias colunas. Só o valor "não iniciado/não exigida" (o mais comum
+// e o mais longo relativo ao espaço) é abreviado; os outros valores (Em
+// andamento, Concluída, Atrasada, Aguardando cliente, Aprovada, Rejeitada)
+// continuam por extenso, como pedido. Em outros lugares (dropdown de editar
+// tarefa, gráfico "Tarefas por status" da Visão geral) continua usando
+// TASK_STATUS_LABELS/APPROVAL_STATUS_LABELS por extenso normalmente.
+// "Iniciada"/"exigida" se escrevem igual em Espanhol, então a mesma sigla
+// serve pros dois idiomas sem precisar de tradução em separado.
+export const TASK_STATUS_LABELS_SHORT = {
+  ...TASK_STATUS_LABELS,
+  NOT_STARTED: 'N/I',
+}
+
+export const APPROVAL_STATUS_LABELS_SHORT = {
+  ...APPROVAL_STATUS_LABELS,
+  NOT_REQUIRED: 'N/E',
+}
+
 export const WEEKDAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 
 export const USER_STATUS_LABELS = {
@@ -147,8 +168,10 @@ export function getLabels(lang) {
     ROLE_LABELS: translateMap(ROLE_LABELS, lang),
     PROJECT_STATUS_LABELS: translateMap(PROJECT_STATUS_LABELS, lang),
     TASK_STATUS_LABELS: translateMap(TASK_STATUS_LABELS, lang),
+    TASK_STATUS_LABELS_SHORT: translateMap(TASK_STATUS_LABELS_SHORT, lang),
     TASK_TYPE_LABELS: translateMap(TASK_TYPE_LABELS, lang),
     APPROVAL_STATUS_LABELS: translateMap(APPROVAL_STATUS_LABELS, lang),
+    APPROVAL_STATUS_LABELS_SHORT: translateMap(APPROVAL_STATUS_LABELS_SHORT, lang),
     USER_STATUS_LABELS: translateMap(USER_STATUS_LABELS, lang),
     DEPENDENCY_TYPE_LABELS: translateMap(DEPENDENCY_TYPE_LABELS, lang),
     DEPENDENCY_TYPE_SHORT: translateMap(DEPENDENCY_TYPE_SHORT, lang),
