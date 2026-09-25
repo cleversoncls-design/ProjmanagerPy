@@ -136,6 +136,13 @@ def delete_resource(
     resource = db.get(Resource, resource_id)
     if not resource:
         raise HTTPException(status_code=404, detail=translate("Recurso não encontrado", user.language))
+    # O recurso do Administrador nunca pode ser excluído por aqui — regra de
+    # negócio própria, além (não em vez) da checagem de alocação abaixo. O
+    # frontend já esconde o botão pra esse caso; checa de novo aqui porque
+    # uma regra de negócio nunca deve depender só do que a tela esconde.
+    owner = db.get(User, resource.user_id)
+    if owner and owner.role == UserRole.ADMIN:
+        raise HTTPException(status_code=409, detail=translate("O recurso do Administrador não pode ser excluído", user.language))
     if db.scalar(select(TaskAssignment).where(TaskAssignment.resource_id == resource_id)):
         raise HTTPException(
             status_code=409,
