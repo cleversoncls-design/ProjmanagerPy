@@ -57,6 +57,13 @@ _ES: dict[str, str] = {
     "Recurso está alocado em uma ou mais tarefas — remova as alocações antes de excluir": "El recurso está asignado a una o más tareas — quite las asignaciones antes de eliminarlo",
     "Recurso tem apontamento de horas em projetos/tarefas — não pode ser excluído": "El recurso tiene horas registradas en proyectos/tareas — no se puede eliminar",
     "O recurso do Administrador não pode ser excluído": "El recurso del Administrador no se puede eliminar",
+    "O recurso deste usuário está alocado em uma ou mais tarefas — remova as alocações antes de excluir": (
+        "El recurso de este usuario está asignado a una o más tareas — quite las asignaciones antes de eliminarlo"
+    ),
+    "O recurso deste usuário tem apontamento de horas em projetos/tarefas — não pode ser excluído": (
+        "El recurso de este usuario tiene horas registradas en proyectos/tareas — no se puede eliminar"
+    ),
+    "O usuário Administrador não pode ser excluído": "El usuario Administrador no se puede eliminar",
     "Risco não encontrado": "Riesgo no encontrado",
     "Solicitação de mudança não encontrada": "Solicitud de cambio no encontrada",
     "Solicitação não encontrada": "Solicitud no encontrada",
@@ -69,6 +76,12 @@ _ES: dict[str, str] = {
     "Token de acesso ausente": "Token de acceso ausente",
     "Token inválido ou expirado": "Token inválido o expirado",
     "Uma tarefa não pode depender de si mesma": "Una tarea no puede depender de sí misma",
+    "Usuário é gerente de um ou mais projetos — troque o gerente antes de excluir": (
+        "El usuario es gerente de uno o más proyectos — cambie el gerente antes de eliminar"
+    ),
+    "Usuário solicitou uma ou mais mudanças de escopo — não pode ser excluído": (
+        "El usuario solicitó una o más solicitudes de cambio — no se puede eliminar"
+    ),
     "Usuário inativo ou bloqueado": "Usuario inactivo o bloqueado",
     "Usuário inválido ou inativo": "Usuario inválido o inactivo",
     "Usuário não encontrado": "Usuario no encontrado",

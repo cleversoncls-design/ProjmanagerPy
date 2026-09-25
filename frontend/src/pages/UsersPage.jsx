@@ -57,6 +57,7 @@ export default function UsersPage() {
   const [savingPassword, setSavingPassword] = useState(false)
 
   const [deletingResourceTarget, setDeletingResourceTarget] = useState(null)
+  const [deletingUserTarget, setDeletingUserTarget] = useState(null)
 
   function loadAll() {
     setLoading(true)
@@ -266,6 +267,22 @@ export default function UsersPage() {
                     ) : (
                       <IconButton icon={BriefcaseIcon} label={t('Vincular como recurso')} onClick={() => openLinkResourceModal(row)} />
                     )}
+                    {/* Excluir o USUÁRIO (não só o vínculo de recurso acima) — pra
+                        dar conta de um cadastro feito por engano, mesmo quando não
+                        chegou a virar recurso (ex.: um PM do cliente). Só o
+                        Administrador nunca pode ser excluído; qualquer outro perfil
+                        pode, e o backend (DELETE /users/{id}) é quem garante que não
+                        dá pra apagar um usuário que é gerente de projeto, autor de
+                        uma solicitação de mudança, ou dono de um recurso com
+                        alocação/horas já lançadas. */}
+                    {row.role !== 'ADMIN' && (
+                      <IconButton
+                        icon={TrashIcon}
+                        label={t('Excluir usuário')}
+                        variant="danger"
+                        onClick={() => setDeletingUserTarget(row)}
+                      />
+                    )}
                   </div>
                 ),
               },
@@ -464,6 +481,17 @@ export default function UsersPage() {
           }}
         />
       )}
+
+      {deletingUserTarget && (
+        <UserDeleteModal
+          target={deletingUserTarget}
+          onClose={() => setDeletingUserTarget(null)}
+          onDeleted={() => {
+            setDeletingUserTarget(null)
+            loadAll()
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -499,6 +527,53 @@ function ResourceDeleteModal({ target, onClose, onDeleted }) {
         <p className="text-sm text-[var(--text-secondary)]">
           {t('Tem certeza que quer excluir o recurso de')} <span className="font-medium text-[var(--text-primary)]">{target.row.name}</span>{' '}
           ({target.resource.role_title})? {t('Só é possível excluir um recurso que não esteja alocado em projetos ou tarefas.')}
+        </p>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
+            {deleting ? t('Excluindo…') : t('Excluir')}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/** Modal de confirmação pra excluir o USUÁRIO inteiro (login + cadastro) —
+ * diferente do ResourceDeleteModal acima, que só remove o vínculo de
+ * recurso. Cobre o caso de um cadastro feito por engano, mesmo quando o
+ * usuário nunca chegou a virar recurso (ex.: um PM do cliente). A API
+ * recusa (409) se o usuário for o Administrador, gerente de algum
+ * projeto, autor de alguma solicitação de mudança, ou dono de um recurso
+ * já alocado/com horas lançadas (ver DELETE /users/{id}) — a mensagem de
+ * erro do backend já explica qual dos casos é. */
+function UserDeleteModal({ target, onClose, onDeleted }) {
+  const { t } = useLanguage()
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleDelete() {
+    setDeleting(true)
+    setError('')
+    try {
+      await usersApi.deleteUser(target.id)
+      onDeleted()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Modal title={t('Excluir usuário')} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--text-secondary)]">
+          {t('Tem certeza que quer excluir o usuário')} <span className="font-medium text-[var(--text-primary)]">{target.name}</span> (
+          {target.email})? {t('Essa ação não pode ser desfeita.')}
         </p>
         <ErrorBanner message={error} />
         <div className="flex justify-end gap-2 pt-1">

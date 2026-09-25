@@ -16,6 +16,10 @@ export function resetPassword(userId, payload) {
   return api.post(`/users/${userId}/reset-password`, payload)
 }
 
+export function deleteUser(userId) {
+  return api.del(`/users/${userId}`)
+}
+
 /** Autoatendimento de idioma — qualquer usuário logado troca o próprio
  * idioma (PATCH /users/me), sem precisar de permissão de ADMIN. */
 export function updateMyLanguage(language) {
