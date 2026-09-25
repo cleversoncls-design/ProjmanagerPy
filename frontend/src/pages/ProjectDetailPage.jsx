@@ -137,6 +137,7 @@ export default function ProjectDetailPage() {
 }
 
 function OverviewTab({ project, report, evm }) {
+  const { labels } = useLanguage()
   const financials = report.financials
   const byType = report.financials_by_task_type
 
@@ -218,6 +219,7 @@ function OverviewTab({ project, report, evm }) {
 }
 
 function ProjectEditModal({ project, onClose, onSaved }) {
+  const { labels } = useLanguage()
   const [form, setForm] = useState({
     name: project.name,
     manager_id: project.manager_id,
@@ -781,6 +783,7 @@ function DeleteTaskModal({ task, onClose, onDeleted }) {
 }
 
 function TasksTab({ projectId, canWrite, onTaskCreated }) {
+  const { labels } = useLanguage()
   const [schedule, setSchedule] = useState(null)
   const [resources, setResources] = useState([])
   const [users, setUsers] = useState([])
@@ -1159,6 +1162,7 @@ const EMPTY_TASK_FORM = {
 }
 
 function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, initialDependencies, initialAssignments, onClose, onSaved }) {
+  const { labels } = useLanguage()
   const isEdit = Boolean(task)
   const [form, setForm] = useState(() =>
     isEdit
