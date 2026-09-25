@@ -178,3 +178,13 @@ export const KeyIcon = (props) => (
     <path d="M16.5 6.5 19 9M14 9l2 2" />
   </Icon>
 )
+
+// Seletor de idioma da tela de Login (splash sempre escuro, fora do tema
+// claro/escuro do conteúdo — ver LoginPage.jsx).
+export const GlobeIcon = (props) => (
+  <Icon {...props}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18" />
+    <path d="M12 3c2.8 2.5 4.3 5.7 4.3 9s-1.5 6.5-4.3 9c-2.8-2.5-4.3-5.7-4.3-9s1.5-6.5 4.3-9Z" />
+  </Icon>
+)

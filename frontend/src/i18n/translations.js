@@ -330,6 +330,14 @@ export const es = {
   'Excluir recurso': 'Eliminar recurso',
   'Tem certeza que quer excluir o recurso de': '¿Está seguro de que quiere eliminar el recurso de',
   'Só é possível excluir um recurso que não esteja alocado em projetos ou tarefas.': 'Solo es posible eliminar un recurso que no esté asignado a proyectos o tareas.',
+
+  // --- Tela de Login (redesenho a partir da referência Resultar Servicios) ---
+  Mostrar: 'Mostrar',
+  Ocultar: 'Ocultar',
+  'Preciso recuperar meu acesso': 'Necesito recuperar mi acceso',
+  'A redefinição de senha deve ser solicitada ao Administrador.': 'El restablecimiento de contraseña debe solicitarse al Administrador.',
+  'Acesso privado da organização': 'Acceso privado de la organización',
+  'Os usuários e permissões são administrados pelo Administrador.': 'Los usuarios y permisos son administrados por el Administrador.',
 }
 
 export function translate(lang, text, vars) {
