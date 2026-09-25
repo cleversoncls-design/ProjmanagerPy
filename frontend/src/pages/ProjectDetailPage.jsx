@@ -834,6 +834,13 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
 
   const orderedTasks = useMemo(() => (schedule ? buildOrderedTasks(schedule.tasks) : []), [schedule])
   const taskById = useMemo(() => Object.fromEntries((schedule?.tasks || []).map((t) => [t.id, t])), [schedule])
+  // Tarefa "pai" = tem ao menos uma outra tarefa apontando pra ela via
+  // parent_task_id — calculado direto da lista (não de orderedTasks) pra não
+  // depender da árvore já estar montada/ordenada.
+  const parentTaskIds = useMemo(
+    () => new Set((schedule?.tasks || []).map((t) => t.parent_task_id).filter(Boolean)),
+    [schedule],
+  )
   const userById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
   const resourceById = useMemo(() => Object.fromEntries(resources.map((r) => [r.id, r])), [resources])
   const predecessorsBySuccessor = useMemo(() => {
@@ -1011,13 +1018,20 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
 
   const columns = [
     { key: 'status_dot', header: '', render: (row) => <StatusDot color={row.status_dot} /> },
-    { key: 'wbs_code', header: 'WBS' },
+    {
+      key: 'wbs_code',
+      header: 'WBS',
+      render: (row) => <span className={parentTaskIds.has(row.id) ? 'font-semibold' : ''}>{row.wbs_code}</span>,
+    },
     {
       key: 'name',
       header: t('Nome da tarefa'),
       nowrap: true,
       render: (row) => (
-        <span style={{ paddingLeft: row.depth * 18 }} className="flex items-center gap-1.5">
+        <span
+          style={{ paddingLeft: row.depth * 18 }}
+          className={`flex items-center gap-1.5 ${parentTaskIds.has(row.id) ? 'font-semibold' : ''}`}
+        >
           {row.is_milestone && <span className="inline-block h-2 w-2 shrink-0 rotate-45" style={{ backgroundColor: 'var(--text-muted)' }} />}
           {row.name}
         </span>
@@ -1778,6 +1792,11 @@ function GanttTab({ projectId, project }) {
     }
   }, [projectId])
 
+  // Tarefa "pai" = tem ao menos uma outra tarefa apontando pra ela via
+  // parent_task_id (mesmo critério usado na aba Tarefas). Precisa ficar
+  // antes dos "return" condicionais abaixo — hooks não podem vir depois.
+  const parentTaskIds = useMemo(() => new Set((data?.tasks || []).map((task) => task.parent_task_id).filter(Boolean)), [data])
+
   if (loading) return <Spinner />
   if (error) return <ErrorBanner message={error} />
   if (!data || data.tasks.length === 0) {
@@ -1915,8 +1934,12 @@ function GanttTab({ projectId, project }) {
 
       ctx.fillStyle = textSecondary
       ctx.textAlign = 'left'
+      // Tarefa-pai em negrito no PNG exportado também, pra bater com o que
+      // aparece na tela (ver isParentTask/parentTaskIds no JSX abaixo).
+      ctx.font = parentTaskIds.has(task.id) ? 'bold 11px sans-serif' : '11px sans-serif'
       const label = `${task.wbs_code} ${task.name}`
       ctx.fillText(ganttTruncateForCanvas(ctx, label, GANTT_LABEL_COL_PX - 8), 0, y + rowH / 2)
+      ctx.font = '11px sans-serif'
 
       if (start && end) {
         const left = GANTT_LABEL_COL_PX + layout.pxFromDate(start)
@@ -2031,11 +2054,24 @@ function GanttTab({ projectId, project }) {
               const hasDates = Boolean(start && end)
               const color = TASK_TYPE_COLORS[task.task_type] || 'var(--text-muted)'
               const preds = predecessorCount[task.id] || 0
+              const isParentTask = parentTaskIds.has(task.id)
               return (
-                <div key={task.id} className="flex items-center">
+                // Sem "items-center" aqui de propósito: com ele, a coluna
+                // fixa (sticky) abaixo só ficava tão alta quanto o texto
+                // (~16px) dentro de uma linha de 30px, deixando ~7px sem
+                // fundo opaco em cima/embaixo — aí, ao rolar a barra
+                // horizontal, as linhas de grade e as barras da timeline
+                // (que ficam por baixo da coluna fixa) apareciam por essa
+                // fresta, dando a impressão de que as semanas "avançavam"
+                // sobre a descrição da tarefa. Fixando a altura da linha e
+                // da coluna e centralizando o texto com flex, a coluna fixa
+                // cobre a linha inteira.
+                <div key={task.id} className="flex" style={{ height: GANTT_ROW_PX }}>
                   <span
-                    className="sticky left-0 z-10 shrink-0 truncate bg-[var(--surface)] pr-2 text-xs text-[var(--text-secondary)]"
-                    style={{ width: GANTT_LABEL_COL_PX }}
+                    className={`sticky left-0 z-10 flex shrink-0 items-center truncate bg-[var(--surface)] pr-2 text-xs text-[var(--text-secondary)] ${
+                      isParentTask ? 'font-semibold' : ''
+                    }`}
+                    style={{ width: GANTT_LABEL_COL_PX, height: GANTT_ROW_PX }}
                     title={task.name}
                   >
                     <span className="text-[var(--text-muted)]">{task.wbs_code}</span> {task.name}
