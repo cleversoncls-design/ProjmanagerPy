@@ -375,6 +375,7 @@ class TaskDependency(Base):
 class AuditAction(StrEnum):
     CREATE = "CREATE"
     UPDATE = "UPDATE"
+    DELETE = "DELETE"
 
 
 class AuditLog(Base):

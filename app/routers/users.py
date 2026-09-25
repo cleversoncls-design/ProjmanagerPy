@@ -8,7 +8,7 @@ from ..audit import record_audit
 from ..database import get_db
 from ..deps import get_current_user, require_roles
 from ..i18n import t as translate
-from ..models import AuditAction, Client, User, UserRole
+from ..models import AuditAction, ChangeRequest, Client, Project, Resource, TaskAssignment, Timesheet, User, UserRole
 from ..schemas import UserCreate, UserPasswordReset, UserRead, UserSelfUpdate, UserUpdate
 from ..security import hash_password
 
@@ -106,6 +106,63 @@ def update_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: str,
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
+    db: Session = Depends(get_db),
+) -> None:
+    """O usuário Administrador nunca pode ser excluído — mas qualquer outro
+    (inclusive um perfil de cliente sem recurso vinculado, ex.: cadastrado
+    por engano) pode, desde que não esteja "em uso":
+    - gerente de algum projeto (Project.manager_id é ondelete=RESTRICT —
+      sem esta checagem, o DELETE quebraria com um IntegrityError feio em
+      vez de uma mensagem clara);
+    - autor de alguma solicitação de mudança (ChangeRequest.requested_by
+      também é RESTRICT, mesmo motivo);
+    - dono de um recurso que já tem alocação em tarefa ou apontamento de
+      horas — Resource.user_id é ondelete=CASCADE, então apagar o usuário
+      apagaria o recurso (e, em cascata, esse histórico) sem perguntar;
+      um recurso "limpo" (sem histórico) pode ir junto sem problema.
+    """
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail=translate("Usuário não encontrado", current_user.language))
+    if user.role == UserRole.ADMIN:
+        raise HTTPException(status_code=409, detail=translate("O usuário Administrador não pode ser excluído", current_user.language))
+    if db.scalar(select(Project).where(Project.manager_id == user_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Usuário é gerente de um ou mais projetos — troque o gerente antes de excluir", current_user.language),
+        )
+    if db.scalar(select(ChangeRequest).where(ChangeRequest.requested_by == user_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Usuário solicitou uma ou mais mudanças de escopo — não pode ser excluído", current_user.language),
+        )
+    resource = db.scalar(select(Resource).where(Resource.user_id == user_id))
+    if resource:
+        if db.scalar(select(TaskAssignment).where(TaskAssignment.resource_id == resource.id)):
+            raise HTTPException(
+                status_code=409,
+                detail=translate(
+                    "O recurso deste usuário está alocado em uma ou mais tarefas — remova as alocações antes de excluir",
+                    current_user.language,
+                ),
+            )
+        if db.scalar(select(Timesheet).where(Timesheet.resource_id == resource.id)):
+            raise HTTPException(
+                status_code=409,
+                detail=translate(
+                    "O recurso deste usuário tem apontamento de horas em projetos/tarefas — não pode ser excluído",
+                    current_user.language,
+                ),
+            )
+    record_audit(db, entity_type="user", entity_id=user.id, action=AuditAction.DELETE, user_id=current_user.id, details={"email": user.email})
+    db.delete(user)  # cascata apaga o Resource (se houver e já passou pelas checagens acima)
+    db.commit()
 
 
 @router.post("/users/{user_id}/reset-password", status_code=status.HTTP_204_NO_CONTENT)
