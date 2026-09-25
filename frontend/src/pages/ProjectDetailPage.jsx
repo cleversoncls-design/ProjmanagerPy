@@ -43,7 +43,7 @@ const TABS = [
 export default function ProjectDetailPage() {
   const { projectId } = useParams()
   const { user } = useAuth()
-  const { labels } = useLanguage()
+  const { labels, t } = useLanguage()
   const canWrite = MANAGEMENT_ROLES.includes(user.role)
 
   const [project, setProject] = useState(null)
@@ -86,11 +86,11 @@ export default function ProjectDetailPage() {
           <div className="flex items-center gap-2">
             <StatusPill label={labels.PROJECT_STATUS_LABELS[project.status] || project.status} tone={PROJECT_STATUS_TONE[project.status]} />
             <Button variant="secondary" onClick={() => setShowStatsModal(true)}>
-              Estatísticas
+              {t('Estatísticas')}
             </Button>
             {canWrite && (
               <Button variant="secondary" onClick={() => setShowEditModal(true)}>
-                Editar projeto
+                {t('Editar projeto')}
               </Button>
             )}
           </div>
@@ -109,7 +109,7 @@ export default function ProjectDetailPage() {
                 : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
-            {item.label}
+            {t(item.label)}
           </button>
         ))}
       </div>
@@ -137,35 +137,35 @@ export default function ProjectDetailPage() {
 }
 
 function OverviewTab({ project, report, evm }) {
-  const { labels } = useLanguage()
+  const { labels, t } = useLanguage()
   const financials = report.financials
   const byType = report.financials_by_task_type
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatTile label="Progresso" value={formatPercent(report.percent_complete)} />
-        <StatTile label="Tarefas" value={report.tasks_total} />
-        <StatTile label="Tarefas restantes" value={report.tasks_remaining} />
-        <StatTile label="Início — fim planejado" value={`${formatDate(project.start_date)} – ${formatDate(project.end_date)}`} />
+        <StatTile label={t('Progresso')} value={formatPercent(report.percent_complete)} />
+        <StatTile label={t('Tarefas')} value={report.tasks_total} />
+        <StatTile label={t('Tarefas restantes')} value={report.tasks_remaining} />
+        <StatTile label={t('Início — fim planejado')} value={`${formatDate(project.start_date)} – ${formatDate(project.end_date)}`} />
       </div>
 
       {evm && (
         <Card
-          title="Desempenho do cronograma (Earned Value, em horas)"
-          action={<span className="text-xs text-[var(--text-muted)]">Data de status: {formatDate(evm.status_date)}</span>}
+          title={t('Desempenho do cronograma (Earned Value, em horas)')}
+          action={<span className="text-xs text-[var(--text-muted)]">{t('Data de status:')} {formatDate(evm.status_date)}</span>}
         >
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <StatTile label="SPI" value={formatIndex(evm.spi)} tone={evm.spi !== null && Number(evm.spi) < 1 ? 'warning' : 'default'} />
             <StatTile label="CPI" value={formatIndex(evm.cpi)} tone={evm.cpi !== null && Number(evm.cpi) < 1 ? 'warning' : 'default'} />
-            <StatTile label="% previsto" value={formatPercent(evm.planned_percent_complete)} />
-            <StatTile label="% realizado" value={formatPercent(evm.percent_complete)} />
+            <StatTile label={t('% previsto')} value={formatPercent(evm.planned_percent_complete)} />
+            <StatTile label={t('% realizado')} value={formatPercent(evm.percent_complete)} />
           </div>
         </Card>
       )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card title="Tarefas por status">
+        <Card title={t('Tarefas por status')}>
           {report.tasks_total > 0 ? (
             <CategoryBars
               items={Object.entries(report.tasks_by_status).map(([key, value]) => ({
@@ -176,18 +176,18 @@ function OverviewTab({ project, report, evm }) {
               }))}
             />
           ) : (
-            <p className="text-sm text-[var(--text-muted)]">Nenhuma tarefa cadastrada ainda.</p>
+            <p className="text-sm text-[var(--text-muted)]">{t('Nenhuma tarefa cadastrada ainda.')}</p>
           )}
         </Card>
 
-        <Card title="Financeiro">
+        <Card title={t('Financeiro')}>
           {financials ? (
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-3">
-                <StatTile label="Valor vendido" value={formatCurrency(financials.sold_value)} />
-                <StatTile label="Custo real" value={formatCurrency(financials.real_cost)} />
+                <StatTile label={t('Valor vendido')} value={formatCurrency(financials.sold_value)} />
+                <StatTile label={t('Custo real')} value={formatCurrency(financials.real_cost)} />
                 <StatTile
-                  label="Margem"
+                  label={t('Margem')}
                   value={formatCurrency(financials.profit_margin)}
                   tone={Number(financials.profit_margin) < 0 ? 'critical' : 'default'}
                 />
@@ -195,9 +195,9 @@ function OverviewTab({ project, report, evm }) {
               {byType && (
                 <Table
                   columns={[
-                    { key: 'type', header: 'Tipo' },
-                    { key: 'hours', header: 'Horas', align: 'right' },
-                    { key: 'cost', header: 'Custo', align: 'right' },
+                    { key: 'type', header: t('Tipo') },
+                    { key: 'hours', header: t('Horas'), align: 'right' },
+                    { key: 'cost', header: t('Custo'), align: 'right' },
                   ]}
                   rows={Object.entries(byType).map(([key, value]) => ({
                     id: key,
@@ -210,7 +210,7 @@ function OverviewTab({ project, report, evm }) {
               )}
             </div>
           ) : (
-            <p className="text-sm text-[var(--text-muted)]">Seu perfil não tem acesso a dados financeiros deste projeto.</p>
+            <p className="text-sm text-[var(--text-muted)]">{t('Seu perfil não tem acesso a dados financeiros deste projeto.')}</p>
           )}
         </Card>
       </div>
@@ -219,7 +219,7 @@ function OverviewTab({ project, report, evm }) {
 }
 
 function ProjectEditModal({ project, onClose, onSaved }) {
-  const { labels } = useLanguage()
+  const { labels, t } = useLanguage()
   const [form, setForm] = useState({
     name: project.name,
     manager_id: project.manager_id,
@@ -277,13 +277,13 @@ function ProjectEditModal({ project, onClose, onSaved }) {
   }
 
   return (
-    <Modal title="Editar projeto" onClose={onClose} wide>
+    <Modal title={t('Editar projeto')} onClose={onClose} wide>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
-          <FormField label="Nome" required>
+          <FormField label={t('Nome')} required>
             <TextInput required value={form.name} onChange={updateField('name')} />
           </FormField>
-          <FormField label="Gerente responsável" required hint="Precisa ser ADMIN ou gerente de projetos interno.">
+          <FormField label={t('Gerente responsável')} required hint={t('Precisa ser ADMIN ou gerente de projetos interno.')}>
             <Select required value={form.manager_id} onChange={updateField('manager_id')}>
               {managers.map((manager) => (
                 <option key={manager.id} value={manager.id}>
@@ -294,7 +294,7 @@ function ProjectEditModal({ project, onClose, onSaved }) {
           </FormField>
         </div>
         <div className="grid grid-cols-2 gap-4">
-          <FormField label="Status" required>
+          <FormField label={t('Status')} required>
             <Select required value={form.status} onChange={updateField('status')}>
               {Object.entries(labels.PROJECT_STATUS_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>
@@ -303,9 +303,9 @@ function ProjectEditModal({ project, onClose, onSaved }) {
               ))}
             </Select>
           </FormField>
-          <FormField label="Calendário do projeto" hint="Usado para calcular dias úteis nas datas planejadas.">
+          <FormField label={t('Calendário do projeto')} hint={t('Usado para calcular dias úteis nas datas planejadas.')}>
             <Select value={form.calendar_id} onChange={updateField('calendar_id')}>
-              <option value="">Padrão (segunda a sexta, sem feriados)</option>
+              <option value="">{t('Padrão (segunda a sexta, sem feriados)')}</option>
               {calendars.map((calendar) => (
                 <option key={calendar.id} value={calendar.id}>
                   {calendar.name}
@@ -315,30 +315,30 @@ function ProjectEditModal({ project, onClose, onSaved }) {
           </FormField>
         </div>
         <div className="grid grid-cols-3 gap-4">
-          <FormField label="Data de status" hint="Data-base para % previsto e status das tarefas.">
+          <FormField label={t('Data de status')} hint={t('Data-base para % previsto e status das tarefas.')}>
             <TextInput type="date" value={form.status_date} onChange={updateField('status_date')} />
           </FormField>
-          <FormField label="Início planejado">
+          <FormField label={t('Início planejado')}>
             <TextInput type="date" value={form.start_date} onChange={updateField('start_date')} />
           </FormField>
-          <FormField label="Fim planejado">
+          <FormField label={t('Fim planejado')}>
             <TextInput type="date" value={form.end_date} onChange={updateField('end_date')} />
           </FormField>
         </div>
 
         <div className="rounded-lg border border-[var(--border)] p-4">
-          <p className="mb-3 text-xs font-medium text-[var(--text-secondary)]">Pacote vendido (horas × valor/hora)</p>
+          <p className="mb-3 text-xs font-medium text-[var(--text-secondary)]">{t('Pacote vendido (horas × valor/hora)')}</p>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <FormField label="Horas de gestão">
+            <FormField label={t('Horas de gestão')}>
               <TextInput type="number" min="0" step="0.5" value={form.management_hours} onChange={updateField('management_hours')} />
             </FormField>
-            <FormField label="Valor/h gestão">
+            <FormField label={t('Valor/h gestão')}>
               <TextInput type="number" min="0" step="0.01" value={form.management_rate} onChange={updateField('management_rate')} />
             </FormField>
-            <FormField label="Horas de consultoria">
+            <FormField label={t('Horas de consultoria')}>
               <TextInput type="number" min="0" step="0.5" value={form.consulting_hours} onChange={updateField('consulting_hours')} />
             </FormField>
-            <FormField label="Valor/h consultoria">
+            <FormField label={t('Valor/h consultoria')}>
               <TextInput type="number" min="0" step="0.01" value={form.consulting_rate} onChange={updateField('consulting_rate')} />
             </FormField>
           </div>
@@ -348,10 +348,10 @@ function ProjectEditModal({ project, onClose, onSaved }) {
 
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="secondary" onClick={onClose}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? 'Salvando…' : 'Salvar'}
+            {saving ? t('Salvando…') : t('Salvar')}
           </Button>
         </div>
       </form>
@@ -379,6 +379,7 @@ function StatisticsRow({ label, field, stats }) {
 }
 
 function ProjectStatisticsModal({ projectId, projectLabel, onClose }) {
+  const { t } = useLanguage()
   const [stats, setStats] = useState(null)
   const [baselines, setBaselines] = useState([])
   const [error, setError] = useState('')
@@ -434,7 +435,7 @@ function ProjectStatisticsModal({ projectId, projectLabel, onClose }) {
   const latestBaseline = baselines[baselines.length - 1]
 
   return (
-    <Modal title={`Estatísticas do projeto — ${projectLabel}`} onClose={onClose} wide>
+    <Modal title={`${t('Estatísticas do projeto')} — ${projectLabel}`} onClose={onClose} wide>
       {loading && <Spinner />}
       <ErrorBanner message={error} />
       {stats && (
@@ -444,17 +445,17 @@ function ProjectStatisticsModal({ projectId, projectLabel, onClose }) {
               <thead>
                 <tr className="border-b border-[var(--border)]">
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]"></th>
-                  <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Atual</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Linha de base</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Real</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">{t('Atual')}</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">{t('Linha de base')}</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">{t('Real')}</th>
                 </tr>
               </thead>
               <tbody>
-                <StatisticsRow label="Início" field="start_date" stats={stats} />
-                <StatisticsRow label="Término" field="finish_date" stats={stats} />
-                <StatisticsRow label="Duração" field="duration_days" stats={stats} />
-                <StatisticsRow label="Trabalho" field="work_hours" stats={stats} />
-                <StatisticsRow label="Custo" field="cost" stats={stats} />
+                <StatisticsRow label={t('Início')} field="start_date" stats={stats} />
+                <StatisticsRow label={t('Término')} field="finish_date" stats={stats} />
+                <StatisticsRow label={t('Duração')} field="duration_days" stats={stats} />
+                <StatisticsRow label={t('Trabalho')} field="work_hours" stats={stats} />
+                <StatisticsRow label={t('Custo')} field="cost" stats={stats} />
               </tbody>
             </table>
           </div>
@@ -463,16 +464,16 @@ function ProjectStatisticsModal({ projectId, projectLabel, onClose }) {
             <p className="text-xs text-[var(--text-muted)]">
               {latestBaseline ? (
                 <>
-                  Linha de base atual: <span className="font-medium text-[var(--text-primary)]">{latestBaseline.version_name}</span> (salva em{' '}
+                  {t('Linha de base atual:')} <span className="font-medium text-[var(--text-primary)]">{latestBaseline.version_name}</span> ({t('salva em')}{' '}
                   {formatDate(latestBaseline.created_at)})
                 </>
               ) : (
-                'Nenhuma linha de base salva ainda para este projeto.'
+                t('Nenhuma linha de base salva ainda para este projeto.')
               )}
             </p>
             {!showBaselineForm && (
               <Button type="button" variant="secondary" onClick={() => setShowBaselineForm(true)}>
-                Salvar linha de base
+                {t('Salvar linha de base')}
               </Button>
             )}
           </div>
@@ -480,17 +481,17 @@ function ProjectStatisticsModal({ projectId, projectLabel, onClose }) {
           {showBaselineForm && (
             <form onSubmit={handleSaveBaseline} className="flex items-end gap-2 rounded-lg border border-[var(--border)] p-3">
               <div className="flex-1">
-                <FormField label="Nome da versão" hint="Ex.: Baseline inicial, Revisão de escopo #2.">
+                <FormField label={t('Nome da versão')} hint={t('Ex.: Baseline inicial, Revisão de escopo #2.')}>
                   <TextInput
                     value={versionName}
                     onChange={(event) => setVersionName(event.target.value)}
-                    placeholder="Ex.: Baseline inicial"
+                    placeholder={t('Ex.: Baseline inicial')}
                     autoFocus
                   />
                 </FormField>
               </div>
               <Button type="submit" disabled={savingBaseline || !versionName.trim()}>
-                {savingBaseline ? 'Salvando…' : 'Salvar'}
+                {savingBaseline ? t('Salvando…') : t('Salvar')}
               </Button>
               <Button
                 type="button"
@@ -501,7 +502,7 @@ function ProjectStatisticsModal({ projectId, projectLabel, onClose }) {
                   setBaselineError('')
                 }}
               >
-                Cancelar
+                {t('Cancelar')}
               </Button>
             </form>
           )}
@@ -509,15 +510,15 @@ function ProjectStatisticsModal({ projectId, projectLabel, onClose }) {
 
           <div className="grid grid-cols-3 gap-4">
             <StatTile
-              label="Variância de término"
+              label={t('Variância de término')}
               value={
                 stats.variance_finish_days === null || stats.variance_finish_days === undefined
                   ? '—'
                   : `${Number(stats.variance_finish_days) > 0 ? '+' : ''}${formatNumber(stats.variance_finish_days)} d`
               }
             />
-            <StatTile label="% concluído (Duração)" value={formatPercent(stats.percent_complete_duration)} />
-            <StatTile label="% concluído (Trabalho)" value={formatPercent(stats.percent_complete_work)} />
+            <StatTile label={t('% concluído (Duração)')} value={formatPercent(stats.percent_complete_duration)} />
+            <StatTile label={t('% concluído (Trabalho)')} value={formatPercent(stats.percent_complete_work)} />
           </div>
         </div>
       )}
@@ -532,6 +533,7 @@ function ProjectStatisticsModal({ projectId, projectLabel, onClose }) {
  * Fica disponível direto na tela de Tarefas — onde o usuário está olhando o
  * cronograma — em vez de escondida só dentro do modal de Estatísticas. */
 function BaselineModal({ projectId, onClose, onSaved }) {
+  const { t } = useLanguage()
   const [versionName, setVersionName] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -553,23 +555,23 @@ function BaselineModal({ projectId, onClose, onSaved }) {
   }
 
   return (
-    <Modal title="Salvar linha de base" onClose={onClose}>
+    <Modal title={t('Salvar linha de base')} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <p className="text-sm text-[var(--text-secondary)]">
-          Grava a Duração, o Trabalho e as datas planejadas de hoje de todas as tarefas como a nova linha de base do
-          projeto — usada para comparar com o realizado depois (colunas "Linha base" na grade e variância de término
-          nas Estatísticas).
+          {t(
+            'Grava a Duração, o Trabalho e as datas planejadas de hoje de todas as tarefas como a nova linha de base do projeto — usada para comparar com o realizado depois (colunas "Linha base" na grade e variância de término nas Estatísticas).',
+          )}
         </p>
-        <FormField label="Nome da versão" required hint='Ex.: "Baseline inicial", "Revisão de escopo #2".'>
-          <TextInput value={versionName} onChange={(event) => setVersionName(event.target.value)} placeholder="Ex.: Baseline inicial" autoFocus />
+        <FormField label={t('Nome da versão')} required hint={t('Ex.: "Baseline inicial", "Revisão de escopo #2".')}>
+          <TextInput value={versionName} onChange={(event) => setVersionName(event.target.value)} placeholder={t('Ex.: Baseline inicial')} autoFocus />
         </FormField>
         <ErrorBanner message={error} />
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="secondary" onClick={onClose}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button type="submit" disabled={saving || !versionName.trim()}>
-            {saving ? 'Salvando…' : 'Salvar linha de base'}
+            {saving ? t('Salvando…') : t('Salvar linha de base')}
           </Button>
         </div>
       </form>
@@ -658,6 +660,7 @@ function saveTaskColumnPrefs(prefs) {
  * que importa pro que está fazendo, sem depender de scroll horizontal pra
  * achar a coluna certa. */
 function ColumnsModal({ order, hidden, onClose, onSave }) {
+  const { t } = useLanguage()
   const [draftOrder, setDraftOrder] = useState(order)
   const [draftHidden, setDraftHidden] = useState(new Set(hidden))
 
@@ -679,18 +682,17 @@ function ColumnsModal({ order, hidden, onClose, onSave }) {
   }
 
   return (
-    <Modal title="Colunas da grade de tarefas" onClose={onClose}>
+    <Modal title={t('Colunas da grade de tarefas')} onClose={onClose}>
       <div className="space-y-4">
         <p className="text-sm text-[var(--text-secondary)]">
-          Escolha quais colunas aparecem e em que ordem — WBS, nome da tarefa e as ações da linha ficam sempre
-          fixas nas pontas.
+          {t('Escolha quais colunas aparecem e em que ordem — WBS, nome da tarefa e as ações da linha ficam sempre fixas nas pontas.')}
         </p>
         <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
           {draftOrder.map((key, index) => (
             <li key={key} className="flex items-center gap-3 px-3 py-2">
               <label className="flex flex-1 items-center gap-2 text-sm text-[var(--text-primary)]">
                 <input type="checkbox" checked={!draftHidden.has(key)} onChange={() => toggle(key)} />
-                {TASK_COLUMN_LABELS[key]}
+                {t(TASK_COLUMN_LABELS[key])}
               </label>
               <div className="flex gap-1">
                 <button
@@ -698,7 +700,7 @@ function ColumnsModal({ order, hidden, onClose, onSave }) {
                   disabled={index === 0}
                   onClick={() => move(index, -1)}
                   className="rounded px-1.5 py-0.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--page)] disabled:opacity-30"
-                  title="Mover para cima"
+                  title={t('Mover para cima')}
                 >
                   ↑
                 </button>
@@ -707,7 +709,7 @@ function ColumnsModal({ order, hidden, onClose, onSave }) {
                   disabled={index === draftOrder.length - 1}
                   onClick={() => move(index, 1)}
                   className="rounded px-1.5 py-0.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--page)] disabled:opacity-30"
-                  title="Mover para baixo"
+                  title={t('Mover para baixo')}
                 >
                   ↓
                 </button>
@@ -724,14 +726,14 @@ function ColumnsModal({ order, hidden, onClose, onSave }) {
               setDraftHidden(new Set())
             }}
           >
-            Restaurar padrão
+            {t('Restaurar padrão')}
           </Button>
           <div className="flex gap-2">
             <Button type="button" variant="secondary" onClick={onClose}>
-              Cancelar
+              {t('Cancelar')}
             </Button>
             <Button type="button" onClick={() => onSave({ order: draftOrder, hidden: [...draftHidden] })}>
-              Salvar
+              {t('Salvar')}
             </Button>
           </div>
         </div>
@@ -745,6 +747,7 @@ function ColumnsModal({ order, hidden, onClose, onSave }) {
  * DELETE /tasks/{id}); a mensagem de erro do backend já explica qual dos
  * dois casos é, então basta repassá-la. */
 function DeleteTaskModal({ task, onClose, onDeleted }) {
+  const { t } = useLanguage()
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
 
@@ -762,19 +765,19 @@ function DeleteTaskModal({ task, onClose, onDeleted }) {
   }
 
   return (
-    <Modal title="Apagar tarefa" onClose={onClose}>
+    <Modal title={t('Apagar tarefa')} onClose={onClose}>
       <div className="space-y-4">
         <p className="text-sm text-[var(--text-secondary)]">
-          Tem certeza que quer apagar <span className="font-medium text-[var(--text-primary)]">{task.wbs_code} {task.name}</span>?
-          Essa ação não pode ser desfeita.
+          {t('Tem certeza que quer apagar')} <span className="font-medium text-[var(--text-primary)]">{task.wbs_code} {task.name}</span>?{' '}
+          {t('Essa ação não pode ser desfeita.')}
         </p>
         <ErrorBanner message={error} />
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="secondary" onClick={onClose}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
-            {deleting ? 'Apagando…' : 'Apagar'}
+            {deleting ? t('Apagando…') : t('Apagar')}
           </Button>
         </div>
       </div>
@@ -783,7 +786,7 @@ function DeleteTaskModal({ task, onClose, onDeleted }) {
 }
 
 function TasksTab({ projectId, canWrite, onTaskCreated }) {
-  const { labels } = useLanguage()
+  const { labels, t } = useLanguage()
   const [schedule, setSchedule] = useState(null)
   const [resources, setResources] = useState([])
   const [users, setUsers] = useState([])
@@ -864,11 +867,11 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
 
   function handleApplyStatusDate(event) {
     event.preventDefault()
-    withBusy('Atualizando data de status…', () => projectsApi.updateProject(projectId, { status_date: statusDateInput || null }))
+    withBusy(t('Atualizando data de status…'), () => projectsApi.updateProject(projectId, { status_date: statusDateInput || null }))
   }
 
   async function handleExport() {
-    setBusyMessage('Gerando planilha…')
+    setBusyMessage(t('Gerando planilha…'))
     setError('')
     try {
       await reportsApi.downloadTasksXlsx(projectId, `${projectId}_tarefas.xlsx`)
@@ -918,29 +921,29 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
   const middleColumnDefs = {
     duration_days: {
       key: 'duration_days',
-      header: 'Duração',
+      header: t('Duração'),
       align: 'right',
       render: (row) => `${formatNumber(row.rollup_duration_days ?? row.duration_days)} d`,
     },
     estimated_hours: {
       key: 'estimated_hours',
-      header: 'Trabalho',
+      header: t('Trabalho'),
       align: 'right',
       render: (row) => `${formatNumber(row.rollup_estimated_hours ?? row.estimated_hours)} h`,
     },
     planned_start_date: {
       key: 'planned_start_date',
-      header: 'Início',
+      header: t('Início'),
       render: (row) => formatDate(row.rollup_start_date ?? row.planned_start_date),
     },
     planned_end_date: {
       key: 'planned_end_date',
-      header: 'Fim',
+      header: t('Fim'),
       render: (row) => formatDate(row.rollup_end_date ?? row.planned_end_date),
     },
     resources: {
       key: 'resources',
-      header: 'Recursos',
+      header: t('Recursos'),
       render: (row) => {
         const assignments = assignmentsByTask[row.id] || []
         if (assignments.length === 0) return <span className="text-[var(--text-muted)]">—</span>
@@ -949,10 +952,10 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     },
     predecessors: {
       key: 'predecessors',
-      header: 'Predecessora(s)',
+      header: t('Predecessora(s)'),
       render: (row) => {
         const deps = predecessorsBySuccessor.get(row.id) || []
-        if (deps.length === 0) return <span className="text-[var(--text-muted)]">Nenhuma</span>
+        if (deps.length === 0) return <span className="text-[var(--text-muted)]">{t('Nenhuma')}</span>
         return deps
           .map((dep) => {
             const pred = taskById[dep.predecessor_task_id]
@@ -964,13 +967,13 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     },
     progress_percentage: {
       key: 'progress_percentage',
-      header: '% realizado',
+      header: t('% realizado'),
       align: 'right',
       render: (row) => formatPercent(row.progress_percentage),
     },
     planned_percent_complete: {
       key: 'planned_percent_complete',
-      header: '% previsto',
+      header: t('% previsto'),
       align: 'right',
       render: (row) => formatPercent(row.planned_percent_complete),
     },
@@ -978,7 +981,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     cpi: { key: 'cpi', header: 'CPI', align: 'right', render: (row) => formatIndex(row.cpi) },
     baseline: {
       key: 'baseline',
-      header: 'Linha base (início)',
+      header: t('Linha base (início)'),
       // Só a data de início importa aqui (o que o usuário quer comparar é
       // "começou quando devia?") — fim e trabalho da linha base continuam
       // disponíveis no título/tooltip pra quem precisar, sem poluir a
@@ -986,7 +989,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
       render: (row) =>
         row.baseline_start_date ? (
           <span
-            title={`Fim na linha base: ${formatDate(row.baseline_end_date)} · Trabalho na linha base: ${row.baseline_estimated_hours ? `${formatNumber(row.baseline_estimated_hours)}h` : '—'}`}
+            title={`${t('Fim na linha base:')} ${formatDate(row.baseline_end_date)} · ${t('Trabalho na linha base:')} ${row.baseline_estimated_hours ? `${formatNumber(row.baseline_estimated_hours)}h` : '—'}`}
           >
             {formatDate(row.baseline_start_date)}
           </span>
@@ -996,12 +999,12 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     },
     status: {
       key: 'status',
-      header: 'Status',
+      header: t('Status'),
       render: (row) => <StatusPill label={labels.TASK_STATUS_LABELS[row.status] || row.status} tone={TASK_STATUS_TONE[row.status]} />,
     },
     client_approval_status: {
       key: 'client_approval_status',
-      header: 'Aprovação do cliente',
+      header: t('Aprovação do cliente'),
       render: (row) => <StatusPill label={labels.APPROVAL_STATUS_LABELS[row.client_approval_status]} tone={APPROVAL_STATUS_TONE[row.client_approval_status]} />,
     },
   }
@@ -1011,7 +1014,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     { key: 'wbs_code', header: 'WBS' },
     {
       key: 'name',
-      header: 'Nome da tarefa',
+      header: t('Nome da tarefa'),
       nowrap: true,
       render: (row) => (
         <span style={{ paddingLeft: row.depth * 18 }} className="flex items-center gap-1.5">
@@ -1032,14 +1035,14 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
         <div className="flex justify-end gap-1.5">
           <IconButton
             icon={PencilIcon}
-            label="Editar tarefa"
+            label={t('Editar tarefa')}
             onClick={() => {
               setEditingTask(row)
               setShowModal(true)
             }}
           />
-          <IconButton icon={MoveIcon} label="Mover tarefa" onClick={() => setMovingTask(row)} />
-          <IconButton icon={TrashIcon} label="Apagar tarefa" variant="danger" onClick={() => setDeletingTask(row)} />
+          <IconButton icon={MoveIcon} label={t('Mover tarefa')} onClick={() => setMovingTask(row)} />
+          <IconButton icon={TrashIcon} label={t('Apagar tarefa')} variant="danger" onClick={() => setDeletingTask(row)} />
         </div>
       ),
     })
@@ -1049,38 +1052,38 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     <div>
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <form onSubmit={handleApplyStatusDate} className="flex items-end gap-2">
-          <FormField label="Data de status" hint="Data-base para % previsto e status das tarefas.">
+          <FormField label={t('Data de status')} hint={t('Data-base para % previsto e status das tarefas.')}>
             <TextInput type="date" value={statusDateInput} onChange={(event) => setStatusDateInput(event.target.value)} disabled={!canWrite} />
           </FormField>
           {canWrite && (
             <Button type="submit" variant="secondary" disabled={Boolean(busyMessage)}>
-              Aplicar
+              {t('Aplicar')}
             </Button>
           )}
         </form>
         <div className="flex flex-wrap gap-1.5">
-          <IconButton icon={ColumnsIcon} label="Colunas" onClick={() => setShowColumnsModal(true)} />
+          <IconButton icon={ColumnsIcon} label={t('Colunas')} onClick={() => setShowColumnsModal(true)} />
           {/* Exportar não depende de canWrite: é leitura, então também fica
               disponível para perfis externos (CLIENT_PM/CLIENT_USER). */}
-          <IconButton icon={DownloadIcon} label="Exportar (Excel)" disabled={Boolean(busyMessage)} onClick={handleExport} />
+          <IconButton icon={DownloadIcon} label={t('Exportar (Excel)')} disabled={Boolean(busyMessage)} onClick={handleExport} />
           {canWrite && (
             <>
-              <IconButton icon={FlagIcon} label="Salvar linha de base" disabled={Boolean(busyMessage)} onClick={() => setShowBaselineModal(true)} />
+              <IconButton icon={FlagIcon} label={t('Salvar linha de base')} disabled={Boolean(busyMessage)} onClick={() => setShowBaselineModal(true)} />
               <IconButton
                 icon={HashIcon}
-                label="Recalcular WBS/EAP"
+                label={t('Recalcular WBS/EAP')}
                 disabled={Boolean(busyMessage)}
-                onClick={() => withBusy('Recalculando WBS/EAP…', () => tasksApi.recalculateWbs(projectId))}
+                onClick={() => withBusy(t('Recalculando WBS/EAP…'), () => tasksApi.recalculateWbs(projectId))}
               />
               <IconButton
                 icon={RefreshIcon}
-                label="Recalcular tudo"
+                label={t('Recalcular tudo')}
                 disabled={Boolean(busyMessage)}
-                onClick={() => withBusy('Recalculando datas do projeto…', () => tasksApi.rescheduleProject(projectId))}
+                onClick={() => withBusy(t('Recalculando datas do projeto…'), () => tasksApi.rescheduleProject(projectId))}
               />
               <IconButton
                 icon={PlusIcon}
-                label="Nova tarefa"
+                label={t('Nova tarefa')}
                 variant="primary"
                 onClick={() => {
                   setEditingTask(null)
@@ -1098,7 +1101,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
 
       {!loading && !error && (
         <Card dense>
-          <Table columns={columns} rows={orderedTasks} getRowKey={(row) => row.id} emptyMessage="Nenhuma tarefa cadastrada ainda." dense />
+          <Table columns={columns} rows={orderedTasks} getRowKey={(row) => row.id} emptyMessage={t('Nenhuma tarefa cadastrada ainda.')} dense />
         </Card>
       )}
 
@@ -1162,7 +1165,7 @@ const EMPTY_TASK_FORM = {
 }
 
 function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, initialDependencies, initialAssignments, onClose, onSaved }) {
-  const { labels } = useLanguage()
+  const { labels, t } = useLanguage()
   const isEdit = Boolean(task)
   const [form, setForm] = useState(() =>
     isEdit
@@ -1251,7 +1254,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
     event.preventDefault()
     setDepError('')
     if (!depForm.predecessor_task_id) {
-      setDepError('Selecione a tarefa predecessora.')
+      setDepError(t('Selecione a tarefa predecessora.'))
       return
     }
     try {
@@ -1282,7 +1285,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
     event.preventDefault()
     setAssignError('')
     if (!assignForm.resource_id || !assignForm.allocated_hours) {
-      setAssignError('Selecione o recurso e informe as horas alocadas.')
+      setAssignError(t('Selecione o recurso e informe as horas alocadas.'))
       return
     }
     try {
@@ -1312,27 +1315,27 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
   const resourceOptions = resources.filter((r) => !assignedResourceIds.has(r.id))
 
   return (
-    <Modal title={isEdit ? `Editar tarefa — ${task.wbs_code} ${task.name}` : 'Nova tarefa'} onClose={onClose} wide>
+    <Modal title={isEdit ? `${t('Editar tarefa')} — ${task.wbs_code} ${task.name}` : t('Nova tarefa')} onClose={onClose} wide>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
-          <FormField label="Código WBS" required hint={isEdit ? 'Use "Recalcular WBS/EAP" para renumerar.' : 'Ex.: "1.2"'}>
+          <FormField label={t('Código WBS')} required hint={isEdit ? t('Use "Recalcular WBS/EAP" para renumerar.') : t('Ex.: "1.2"')}>
             <TextInput required disabled={isEdit} value={form.wbs_code} onChange={updateField('wbs_code')} />
           </FormField>
-          <FormField label="Nome" required>
+          <FormField label={t('Nome')} required>
             <TextInput required value={form.name} onChange={updateField('name')} />
           </FormField>
         </div>
         <div className="grid grid-cols-2 gap-4">
-          <FormField label="Tipo" required>
+          <FormField label={t('Tipo')} required>
             <Select required value={form.task_type} onChange={updateField('task_type')}>
-              <option value="CONSULTING">Consultoria</option>
-              <option value="MANAGEMENT">Gestão</option>
+              <option value="CONSULTING">{t('Consultoria')}</option>
+              <option value="MANAGEMENT">{t('Gestão')}</option>
             </Select>
           </FormField>
           {!isEdit ? (
-            <FormField label="Tarefa pai" hint="Deixe em branco para uma tarefa de topo (raiz).">
+            <FormField label={t('Tarefa pai')} hint={t('Deixe em branco para uma tarefa de topo (raiz).')}>
               <Select value={form.parent_task_id} onChange={updateField('parent_task_id')}>
-                <option value="">Nenhuma (raiz)</option>
+                <option value="">{t('Nenhuma (raiz)')}</option>
                 {allTasks.map((t) => (
                   <option key={t.id} value={t.id}>
                     {'—'.repeat(t.depth)} {t.wbs_code} {t.name}
@@ -1341,7 +1344,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
               </Select>
             </FormField>
           ) : (
-            <FormField label="Status">
+            <FormField label={t('Status')}>
               <Select value={form.status} onChange={updateField('status')}>
                 {Object.entries(labels.TASK_STATUS_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
@@ -1353,47 +1356,47 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           )}
         </div>
         <div className="grid grid-cols-2 gap-4">
-          <FormField label="Duração (dias)" hint="Editar recalcula o Trabalho.">
+          <FormField label={t('Duração (dias)')} hint={t('Editar recalcula o Trabalho.')}>
             {/* step="0.5" rejeitava qualquer valor com centavos que não caísse
                 na grade min + n*0.5 (ex.: 2.00 ou 1.75) — o navegador acusava
                 "valor inválido" mesmo sendo um número perfeitamente válido
                 para o campo. step="0.01" aceita duas casas decimais, que é a
                 precisão que Duração/Trabalho já usam no backend (Decimal). */}
-            <TextInput type="number" min="0.01" step="0.01" value={form.duration_days} onChange={updateField('duration_days')} placeholder="Ex.: 2" />
+            <TextInput type="number" min="0.01" step="0.01" value={form.duration_days} onChange={updateField('duration_days')} placeholder={t('Ex.: 2')} />
           </FormField>
-          <FormField label="Trabalho (horas)" hint="Editar recalcula a Duração.">
-            <TextInput type="number" min="0" step="0.01" value={form.estimated_hours} onChange={updateField('estimated_hours')} placeholder="Ex.: 16" />
+          <FormField label={t('Trabalho (horas)')} hint={t('Editar recalcula a Duração.')}>
+            <TextInput type="number" min="0" step="0.01" value={form.estimated_hours} onChange={updateField('estimated_hours')} placeholder={t('Ex.: 16')} />
           </FormField>
         </div>
         <div className="grid grid-cols-2 gap-4">
-          <FormField label="Início planejado" hint="Sem predecessora, esta data fica manual.">
+          <FormField label={t('Início planejado')} hint={t('Sem predecessora, esta data fica manual.')}>
             <TextInput type="date" value={form.planned_start_date} onChange={updateField('planned_start_date')} />
           </FormField>
-          <FormField label="Fim planejado">
+          <FormField label={t('Fim planejado')}>
             <TextInput type="date" value={form.planned_end_date} onChange={updateField('planned_end_date')} />
           </FormField>
         </div>
         {isEdit && (
-          <FormField label="% Realizado">
+          <FormField label={t('% Realizado')}>
             <TextInput type="number" min="0" max="100" step="1" value={form.progress_percentage} onChange={updateField('progress_percentage')} />
           </FormField>
         )}
-        <FormField label="Observações">
+        <FormField label={t('Observações')}>
           <TextArea rows={2} value={form.notes} onChange={updateField('notes')} />
         </FormField>
         <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
           <input type="checkbox" checked={form.is_milestone} onChange={updateField('is_milestone')} />
-          É um marco (milestone)
+          {t('É um marco (milestone)')}
         </label>
 
         <ErrorBanner message={error} />
 
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="secondary" onClick={onClose}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? 'Salvando…' : 'Salvar'}
+            {saving ? t('Salvando…') : t('Salvar')}
           </Button>
         </div>
       </form>
@@ -1401,9 +1404,9 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
       {isEdit && (
         <div className="mt-6 space-y-5 border-t border-[var(--border)] pt-5">
           <div>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Predecessoras</h3>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{t('Predecessoras')}</h3>
             {dependencies.length === 0 ? (
-              <p className="text-sm text-[var(--text-muted)]">Nenhuma — a data de início desta tarefa fica manual.</p>
+              <p className="text-sm text-[var(--text-muted)]">{t('Nenhuma — a data de início desta tarefa fica manual.')}</p>
             ) : (
               <ul className="space-y-1.5">
                 {dependencies.map((dep) => {
@@ -1415,7 +1418,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
                         {dep.lag_days ? ` · ${dep.lag_days > 0 ? '+' : ''}${dep.lag_days}d` : ''}
                       </span>
                       <button type="button" onClick={() => handleRemoveDependency(dep.id)} className="text-xs text-[var(--status-critical)] hover:underline">
-                        Remover
+                        {t('Remover')}
                       </button>
                     </li>
                   )
@@ -1423,9 +1426,9 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
               </ul>
             )}
             <form onSubmit={handleAddDependency} className="mt-3 flex flex-wrap items-end gap-2">
-              <FormField label="Nova predecessora">
+              <FormField label={t('Nova predecessora')}>
                 <Select value={depForm.predecessor_task_id} onChange={(event) => setDepForm((prev) => ({ ...prev, predecessor_task_id: event.target.value }))}>
-                  <option value="">Selecione…</option>
+                  <option value="">{t('Selecione…')}</option>
                   {predecessorOptions.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.wbs_code} — {t.name}
@@ -1433,7 +1436,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Tipo">
+              <FormField label={t('Tipo')}>
                 <Select value={depForm.dependency_type} onChange={(event) => setDepForm((prev) => ({ ...prev, dependency_type: event.target.value }))}>
                   {Object.entries(labels.DEPENDENCY_TYPE_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>
@@ -1442,7 +1445,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Atraso (dias)">
+              <FormField label={t('Atraso (dias)')}>
                 <TextInput
                   type="number"
                   step="1"
@@ -1452,34 +1455,34 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
                 />
               </FormField>
               <Button type="submit" variant="secondary">
-                Adicionar
+                {t('Adicionar')}
               </Button>
             </form>
             <ErrorBanner message={depError} />
           </div>
 
           <div>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Recursos alocados</h3>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{t('Recursos alocados')}</h3>
             {assignments.length === 0 ? (
-              <p className="text-sm text-[var(--text-muted)]">Nenhum recurso alocado — o Trabalho usa uma FTE genérica de 8h/dia.</p>
+              <p className="text-sm text-[var(--text-muted)]">{t('Nenhum recurso alocado — o Trabalho usa uma FTE genérica de 8h/dia.')}</p>
             ) : (
               <ul className="space-y-1.5">
                 {assignments.map((a) => (
                   <li key={a.id} className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm">
                     <span>
-                      {resourceLabel(a.resource_id)} · {formatNumber(a.allocated_hours)}h alocadas
+                      {resourceLabel(a.resource_id)} · {formatNumber(a.allocated_hours)}h {t('alocadas')}
                     </span>
                     <button type="button" onClick={() => handleRemoveAssignment(a.id)} className="text-xs text-[var(--status-critical)] hover:underline">
-                      Remover
+                      {t('Remover')}
                     </button>
                   </li>
                 ))}
               </ul>
             )}
             <form onSubmit={handleAddAssignment} className="mt-3 flex flex-wrap items-end gap-2">
-              <FormField label="Recurso">
+              <FormField label={t('Recurso')}>
                 <Select value={assignForm.resource_id} onChange={(event) => setAssignForm((prev) => ({ ...prev, resource_id: event.target.value }))}>
-                  <option value="">Selecione…</option>
+                  <option value="">{t('Selecione…')}</option>
                   {resourceOptions.map((r) => (
                     <option key={r.id} value={r.id}>
                       {resourceLabel(r.id)}
@@ -1487,7 +1490,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Horas alocadas">
+              <FormField label={t('Horas alocadas')}>
                 <TextInput
                   type="number"
                   min="0.5"
@@ -1498,7 +1501,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
                 />
               </FormField>
               <Button type="submit" variant="secondary">
-                Adicionar
+                {t('Adicionar')}
               </Button>
             </form>
             <ErrorBanner message={assignError} />
@@ -1510,6 +1513,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
 }
 
 function MoveTaskModal({ task, allTasks, onClose, onSaved }) {
+  const { t } = useLanguage()
   const [newParentId, setNewParentId] = useState(task.parent_task_id || '')
   const [beforeTaskId, setBeforeTaskId] = useState('')
   const [error, setError] = useState('')
@@ -1542,9 +1546,9 @@ function MoveTaskModal({ task, allTasks, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={`Mover tarefa — ${task.wbs_code} ${task.name}`} onClose={onClose}>
+    <Modal title={`${t('Mover tarefa')} — ${task.wbs_code} ${task.name}`} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <FormField label="Nova tarefa pai" hint="Deixe em branco para mover para a raiz do projeto.">
+        <FormField label={t('Nova tarefa pai')} hint={t('Deixe em branco para mover para a raiz do projeto.')}>
           <Select
             value={newParentId}
             onChange={(event) => {
@@ -1552,7 +1556,7 @@ function MoveTaskModal({ task, allTasks, onClose, onSaved }) {
               setBeforeTaskId('')
             }}
           >
-            <option value="">Nenhuma (raiz)</option>
+            <option value="">{t('Nenhuma (raiz)')}</option>
             {parentOptions.map((t) => (
               <option key={t.id} value={t.id}>
                 {'—'.repeat(t.depth)} {t.wbs_code} {t.name}
@@ -1560,9 +1564,9 @@ function MoveTaskModal({ task, allTasks, onClose, onSaved }) {
             ))}
           </Select>
         </FormField>
-        <FormField label="Colocar antes de" hint="Deixe em branco para colocar por último entre as irmãs.">
+        <FormField label={t('Colocar antes de')} hint={t('Deixe em branco para colocar por último entre as irmãs.')}>
           <Select value={beforeTaskId} onChange={(event) => setBeforeTaskId(event.target.value)}>
-            <option value="">Por último</option>
+            <option value="">{t('Por último')}</option>
             {siblingOptions.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.wbs_code} — {t.name}
@@ -1571,15 +1575,15 @@ function MoveTaskModal({ task, allTasks, onClose, onSaved }) {
           </Select>
         </FormField>
         <p className="text-xs text-[var(--text-muted)]">
-          Depois de mover, use "Recalcular WBS/EAP" para renumerar e "Recalcular tudo" se a tarefa tiver predecessoras.
+          {t('Depois de mover, use "Recalcular WBS/EAP" para renumerar e "Recalcular tudo" se a tarefa tiver predecessoras.')}
         </p>
         <ErrorBanner message={error} />
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="secondary" onClick={onClose}>
-            Cancelar
+            {t('Cancelar')}
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? 'Movendo…' : 'Mover'}
+            {saving ? t('Movendo…') : t('Mover')}
           </Button>
         </div>
       </form>
@@ -1608,7 +1612,16 @@ const GANTT_ROW_PX = 30
 // ISO-like de qualquer data por subtração de datas — não é uma data real do
 // projeto, é só uma âncora fixa de cálculo.
 const GANTT_WEEK_ANCHOR_MS = Date.UTC(2000, 0, 3)
-const GANTT_MONTH_YEAR_FORMATTER = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+// Um formatador por idioma da interface (não só pt-BR fixo) — senão o
+// cabeçalho de mês/ano do Gantt continuava em português mesmo com a
+// interface toda em espanhol.
+const GANTT_MONTH_YEAR_FORMATTERS = {
+  'pt-BR': new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+  es: new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+}
+function getGanttMonthYearFormatter(lang) {
+  return GANTT_MONTH_YEAR_FORMATTERS[lang] || GANTT_MONTH_YEAR_FORMATTERS['pt-BR']
+}
 
 /** Largura de cada coluna de SEMANA no modo "semana" do Gantt — diminui
  * conforme o período cresce (pedido do usuário), pra régua não ficar
@@ -1630,7 +1643,8 @@ function ganttWeekColumnPx(weeksCount) {
  *   semana), coluna mais estreita quanto mais semanas o período tiver.
  * A régua de mês/ano de cima é calculada à parte, em cima do mesmo
  * pxPerDay — funciona igual nos dois modos, sem precisar saber qual é. */
-function buildGanttLayout(rangeStartDate, rangeEndDate, totalDays) {
+function buildGanttLayout(rangeStartDate, rangeEndDate, totalDays, lang) {
+  const monthYearFormatter = getGanttMonthYearFormatter(lang)
   const numDays = Math.round(totalDays) + 1
   const mode = numDays <= 31 ? 'day' : 'week'
 
@@ -1682,7 +1696,7 @@ function buildGanttLayout(rangeStartDate, rangeEndDate, totalDays) {
     const segmentEndTime = Math.min(nextMonthStart - 86_400_000, rangeEndDate.getTime())
     const daysInSegment = Math.round((segmentEndTime - cursor.getTime()) / 86_400_000) + 1
     const leftPx = Math.round((cursor.getTime() - rangeStartDate.getTime()) / 86_400_000) * pxPerDay
-    const label = GANTT_MONTH_YEAR_FORMATTER.format(cursor)
+    const label = monthYearFormatter.format(cursor)
     monthSpans.push({
       key: cursor.toISOString().slice(0, 7),
       leftPx,
@@ -1741,6 +1755,7 @@ function ganttTruncateForCanvas(ctx, text, maxWidth) {
 }
 
 function GanttTab({ projectId, project }) {
+  const { t, language } = useLanguage()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -1766,14 +1781,14 @@ function GanttTab({ projectId, project }) {
   if (loading) return <Spinner />
   if (error) return <ErrorBanner message={error} />
   if (!data || data.tasks.length === 0) {
-    return <p className="text-sm text-[var(--text-muted)]">Nenhuma tarefa cadastrada ainda.</p>
+    return <p className="text-sm text-[var(--text-muted)]">{t('Nenhuma tarefa cadastrada ainda.')}</p>
   }
 
   const scheduled = data.tasks.filter((task) => ganttStart(task) && ganttEnd(task))
   if (scheduled.length === 0) {
     return (
       <p className="text-sm text-[var(--text-muted)]">
-        Nenhuma tarefa tem datas planejadas ainda — o Gantt aparece assim que houver início/fim planejados.
+        {t('Nenhuma tarefa tem datas planejadas ainda — o Gantt aparece assim que houver início/fim planejados.')}
       </p>
     )
   }
@@ -1794,7 +1809,7 @@ function GanttTab({ projectId, project }) {
   const rangeEndDate = parseApiDate(effectiveEndStr)
   const totalDays = Math.max(1, (rangeEndDate.getTime() - rangeStartDate.getTime()) / 86_400_000)
 
-  const layout = buildGanttLayout(rangeStartDate, rangeEndDate, totalDays)
+  const layout = buildGanttLayout(rangeStartDate, rangeEndDate, totalDays, language)
 
   const predecessorCount = {}
   for (const dependency of data.dependencies) {
@@ -1927,8 +1942,8 @@ function GanttTab({ projectId, project }) {
     ctx.textAlign = 'left'
     let lx = 0
     ;[
-      { label: 'Consultoria', color: resolveGanttColor(TASK_TYPE_COLORS.CONSULTING) },
-      { label: 'Gestão', color: resolveGanttColor(TASK_TYPE_COLORS.MANAGEMENT) },
+      { label: t('Consultoria'), color: resolveGanttColor(TASK_TYPE_COLORS.CONSULTING) },
+      { label: t('Gestão'), color: resolveGanttColor(TASK_TYPE_COLORS.MANAGEMENT) },
     ].forEach((item) => {
       ctx.fillStyle = item.color
       ctx.beginPath()
@@ -1956,14 +1971,14 @@ function GanttTab({ projectId, project }) {
     <Card>
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <div className="flex flex-wrap items-end gap-2">
-          <FormField label="Início do período exibido">
+          <FormField label={t('Início do período exibido')}>
             <TextInput
               type="date"
               value={rangeOverride.start || rangeStartStr}
               onChange={(event) => setRangeOverride((prev) => ({ ...prev, start: event.target.value }))}
             />
           </FormField>
-          <FormField label="Fim do período exibido">
+          <FormField label={t('Fim do período exibido')}>
             <TextInput
               type="date"
               value={rangeOverride.end || rangeEndStr}
@@ -1972,11 +1987,11 @@ function GanttTab({ projectId, project }) {
           </FormField>
           {hasCustomRange && (
             <Button variant="secondary" onClick={() => setRangeOverride({ start: '', end: '' })}>
-              Restaurar período do projeto
+              {t('Restaurar período do projeto')}
             </Button>
           )}
         </div>
-        <IconButton icon={DownloadIcon} label="Exportar PNG" onClick={handleExportPng} />
+        <IconButton icon={DownloadIcon} label={t('Exportar PNG')} onClick={handleExportPng} />
       </div>
 
       <div className="overflow-x-auto">
@@ -2027,7 +2042,7 @@ function GanttTab({ projectId, project }) {
                     {preds > 0 && (
                       <span className="text-[var(--text-muted)]">
                         {' '}
-                        · {preds} predecessora{preds > 1 ? 's' : ''}
+                        · {preds} {preds > 1 ? t('predecessoras') : t('predecessora')}
                       </span>
                     )}
                   </span>
@@ -2044,7 +2059,7 @@ function GanttTab({ projectId, project }) {
                         <span
                           className="absolute top-1/2 h-3 w-3 -translate-y-1/2 -translate-x-1/2 rotate-45"
                           style={{ left: layout.pxFromDate(start) + layout.pxPerDay / 2, backgroundColor: color }}
-                          title={`Marco: ${formatDate(start)}`}
+                          title={`${t('Marco:')} ${formatDate(start)}`}
                         />
                       ) : (
                         <span
@@ -2058,7 +2073,7 @@ function GanttTab({ projectId, project }) {
                         />
                       )
                     ) : (
-                      <span className="absolute inset-y-0 left-2 flex items-center text-xs text-[var(--text-muted)]">sem datas</span>
+                      <span className="absolute inset-y-0 left-2 flex items-center text-xs text-[var(--text-muted)]">{t('sem datas')}</span>
                     )}
                   </div>
                 </div>
@@ -2071,15 +2086,15 @@ function GanttTab({ projectId, project }) {
       <div className="mt-5 flex items-center gap-4 border-t border-[var(--border)] pt-3 text-xs text-[var(--text-secondary)]">
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: TASK_TYPE_COLORS.CONSULTING }} />
-          Consultoria
+          {t('Consultoria')}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: TASK_TYPE_COLORS.MANAGEMENT }} />
-          Gestão
+          {t('Gestão')}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rotate-45" style={{ backgroundColor: 'var(--text-muted)' }} />
-          Marco
+          {t('Marco')}
         </span>
       </div>
     </Card>
