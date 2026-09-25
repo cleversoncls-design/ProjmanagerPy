@@ -21,12 +21,22 @@ export function formatPercent(value) {
   return `${numberFormatter.format(Number(value))}%`
 }
 
-/** Datas da API vêm como "YYYY-MM-DD" (sem hora) — parse forçando UTC para
- * não perder um dia por causa do fuso do navegador. */
+/** Datas da API normalmente vêm como "YYYY-MM-DD" (sem hora), mas alguns
+ * campos são timestamp completo (ex.: Baseline.created_at, serializado como
+ * "2026-09-20T14:32:10.123456") — por isso corta pros primeiros 10
+ * caracteres ANTES de separar por "-": sem isso, o "T14:32:10..." colado no
+ * dia virava NaN, produzindo uma Date inválida (um objeto Date "truthy",
+ * não null!) que o Intl.DateTimeFormat.format() joga uma exceção ao tentar
+ * formatar — foi exatamente isso que deixava o modal de Estatísticas em
+ * branco quando o projeto já tinha uma linha de base salva (ver "Linha de
+ * base atual: ... salva em {formatDate(latestBaseline.created_at)}" em
+ * ProjectDetailPage.jsx). O parse força UTC para não perder um dia por
+ * causa do fuso do navegador. */
 export function parseApiDate(value) {
   if (!value) return null
-  const [year, month, day] = value.split('-').map(Number)
-  return new Date(Date.UTC(year, month - 1, day))
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
 export function formatDate(value) {
