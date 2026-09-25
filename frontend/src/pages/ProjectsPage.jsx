@@ -16,6 +16,7 @@ import ErrorBanner from '../components/ErrorBanner'
 import StatusPill from '../components/StatusPill'
 import { TrashIcon } from '../components/icons'
 import { FormField, TextInput, Select } from '../components/FormField'
+import ColorSwatchPicker from '../components/ColorSwatchPicker'
 import { formatCurrency, formatPercent } from '../utils/format'
 import { MANAGEMENT_ROLES, PROJECT_STATUS_TONE } from '../utils/labels'
 import { useLanguage } from '../context/LanguageContext'
@@ -25,6 +26,7 @@ const EMPTY_FORM = {
   manager_id: '',
   code: '',
   name: '',
+  color: 'series-1',
   management_hours: '0',
   management_rate: '0',
   consulting_hours: '0',
@@ -121,7 +123,8 @@ export default function ProjectsPage() {
                 key: 'code',
                 header: t('Projeto'),
                 render: (row) => (
-                  <Link to={`/projects/${row.id}`} className="font-medium text-[var(--series-1)] hover:underline">
+                  <Link to={`/projects/${row.id}`} className="inline-flex items-center gap-2 font-medium text-[var(--series-1)] hover:underline">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: `var(--${row.color || 'series-1'})` }} />
                     {row.code} — {row.name}
                   </Link>
                 ),
@@ -201,6 +204,10 @@ export default function ProjectsPage() {
                 </Select>
               </FormField>
             </div>
+
+            <FormField label={t('Cor do projeto')} hint={t('Usada na Agenda de consultores para identificar este projeto.')}>
+              <ColorSwatchPicker value={form.color} onChange={(color) => setForm((prev) => ({ ...prev, color }))} colorLabels={labels.PROJECT_COLOR_LABELS} />
+            </FormField>
 
             <div className="rounded-lg border border-[var(--border)] p-4">
               <p className="mb-3 text-xs font-medium text-[var(--text-secondary)]">{t('Pacote vendido (horas × valor/hora)')}</p>

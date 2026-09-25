@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, Enum as SqlEnum, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Enum as SqlEnum, ForeignKey, Integer, JSON, Numeric, String, Text, Time, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -171,6 +171,12 @@ class ProjectIntake(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+# As 8 chaves da paleta categórica já validada do app (ver --series-1..8
+# em frontend/src/index.css) — Project.color só aceita uma destas (checado
+# no router, não aqui: nível de validação de request, não de coluna).
+PROJECT_COLOR_KEYS = ("series-1", "series-2", "series-3", "series-4", "series-5", "series-6", "series-7", "series-8")
+
+
 class Project(Base):
     __tablename__ = "projects"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -204,6 +210,11 @@ class Project(Base):
     # `services.project_evm` e `services.task_dot_color`. None = usa a data
     # de hoje como data-base (comportamento antes de existir este campo).
     status_date: Mapped[date | None] = mapped_column(Date)
+    # Cor do projeto (uma das 8 chaves da paleta categórica já validada do
+    # app — "series-1".."series-8", ver --series-* em index.css) — aplicada
+    # automaticamente em toda agenda (ResourceSchedule) deste projeto na
+    # tela "Agenda de consultores", sem escolha manual por agendamento.
+    color: Mapped[str] = mapped_column(String(20), nullable=False, default="series-1")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     client: Mapped[Client] = relationship(back_populates="projects")
@@ -279,6 +290,28 @@ class Resource(Base):
     calendar_id: Mapped[str | None] = mapped_column(ForeignKey("calendars.id", ondelete="SET NULL"))
     user: Mapped[User] = relationship(back_populates="resource")
     calendar: Mapped[Calendar | None] = relationship()
+
+
+class ResourceSchedule(Base):
+    """Agenda de um recurso num projeto — item novo, independente de
+    TaskAssignment (que só marca QUE o recurso está alocado na tarefa, sem
+    horário nenhum). Aqui é o "agendamento" de verdade: um bloco de
+    horário (dia + hora início/fim) num projeto específico, usado pela
+    tela "Agenda de consultores" e como referência para o apontamento
+    (Timesheet) saber se o consultor tinha algo agendado naquele dia —
+    ver TimesheetCreate.schedule_id no fase 2 (apontamento)."""
+
+    __tablename__ = "resource_schedules"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    resource_id: Mapped[str] = mapped_column(ForeignKey("resources.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    start_time: Mapped[time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[time] = mapped_column(Time, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    resource: Mapped[Resource] = relationship()
+    project: Mapped[Project] = relationship()
 
 
 class TaskAssignment(Base):

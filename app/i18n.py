@@ -18,11 +18,13 @@ from .models import Language
 # Só a tradução ES->PT-BR original faz sentido guardar — pt-BR é o próprio
 # texto que já está espalhado pelos routers.
 _ES: dict[str, str] = {
+    "Agendamento não encontrado": "Agenda no encontrada",
     "Alocação não encontrada": "Asignación no encontrada",
     "Apontamento não encontrado": "Registro de horas no encontrado",
     "Calendário não encontrado": "Calendario no encontrado",
     "Cliente não encontrado": "Cliente no encontrado",
     "Cliente precisa informar project_id": "El cliente debe informar project_id",
+    "Cor do projeto inválida": "Color de proyecto inválido",
     "Conflito de integridade de dados (registro duplicado ou referência inválida).": (
         "Conflicto de integridad de datos (registro duplicado o referencia inválida)."
     ),
@@ -32,6 +34,7 @@ _ES: dict[str, str] = {
     "Este usuário já possui um recurso cadastrado": "Este usuario ya tiene un recurso registrado",
     "Feriado não encontrado": "Feriado no encontrado",
     "Fora do escopo do cliente": "Fuera del alcance del cliente",
+    "Hora final precisa ser depois da hora inicial": "La hora final debe ser posterior a la hora inicial",
     "Informe project_id ou task_id": "Informe project_id o task_id",
     "Já existe um apontamento deste recurso nesta tarefa para esta data": "Ya existe un registro de horas de este recurso en esta tarea para esta fecha",
     "Já existe um cliente com este código": "Ya existe un cliente con este código",
@@ -58,6 +61,7 @@ _ES: dict[str, str] = {
     "Projeto já tem solicitações de mudança — não pode ser excluído": "El proyecto ya tiene solicitudes de cambio — no se puede eliminar",
     "Projeto já tem apontamento de horas avulso — não pode ser excluído": "El proyecto ya tiene horas sueltas registradas — no se puede eliminar",
     "Recurso já alocado nesta tarefa": "Recurso ya asignado a esta tarea",
+    "Recurso já tem agendamento nesse horário": "El recurso ya tiene una agenda en ese horario",
     "Recurso não encontrado": "Recurso no encontrado",
     "Recurso não está alocado nesta tarefa": "El recurso no está asignado a esta tarea",
     "O recurso deste usuário está alocado em uma ou mais tarefas — remova as alocações antes de excluir": (

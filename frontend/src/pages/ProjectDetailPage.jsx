@@ -23,6 +23,7 @@ import StatusPill from '../components/StatusPill'
 import StatusDot from '../components/StatusDot'
 import CategoryBars from '../components/CategoryBars'
 import { FormField, TextInput, Select, TextArea } from '../components/FormField'
+import ColorSwatchPicker from '../components/ColorSwatchPicker'
 import { ColumnsIcon, DownloadIcon, FlagIcon, HashIcon, MoveIcon, PencilIcon, PlusIcon, RefreshIcon, TrashIcon } from '../components/icons'
 import { formatCurrency, formatDate, formatIndex, formatNumber, formatPercent, parseApiDate } from '../utils/format'
 import {
@@ -225,6 +226,7 @@ function ProjectEditModal({ project, onClose, onSaved }) {
     manager_id: project.manager_id,
     status: project.status,
     calendar_id: project.calendar_id || '',
+    color: project.color || 'series-1',
     status_date: project.status_date || '',
     start_date: project.start_date || '',
     end_date: project.end_date || '',
@@ -260,6 +262,7 @@ function ProjectEditModal({ project, onClose, onSaved }) {
         manager_id: form.manager_id,
         status: form.status,
         calendar_id: form.calendar_id || null,
+        color: form.color,
         status_date: form.status_date || null,
         start_date: form.start_date || null,
         end_date: form.end_date || null,
@@ -325,6 +328,10 @@ function ProjectEditModal({ project, onClose, onSaved }) {
             <TextInput type="date" value={form.end_date} onChange={updateField('end_date')} />
           </FormField>
         </div>
+
+        <FormField label={t('Cor do projeto')} hint={t('Usada na Agenda de consultores para identificar este projeto.')}>
+          <ColorSwatchPicker value={form.color} onChange={(color) => setForm((prev) => ({ ...prev, color }))} colorLabels={labels.PROJECT_COLOR_LABELS} />
+        </FormField>
 
         <div className="rounded-lg border border-[var(--border)] p-4">
           <p className="mb-3 text-xs font-medium text-[var(--text-secondary)]">{t('Pacote vendido (horas × valor/hora)')}</p>
