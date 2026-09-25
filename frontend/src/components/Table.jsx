@@ -14,8 +14,8 @@ export default function Table({ columns, rows, getRowKey, emptyMessage = 'Nenhum
     return <p className="py-8 text-center text-sm text-[var(--text-muted)]">{emptyMessage}</p>
   }
 
-  const headerPadding = dense ? 'px-3 py-1.5' : 'px-3 py-2'
-  const cellPadding = dense ? 'px-3 py-1' : 'px-3 py-2.5'
+  const headerPadding = dense ? 'px-2 py-1' : 'px-3 py-2'
+  const cellPadding = dense ? 'px-2 py-0.5' : 'px-3 py-2.5'
 
   return (
     <div className="overflow-x-auto">

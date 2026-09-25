@@ -57,6 +57,13 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Sem isso, o Content-Disposition (nome do arquivo) da exportação de
+    # tarefas (.xlsx) fica invisível pro JS do frontend em requisição
+    # cross-origin (frontend e API em portas/hosts diferentes, caso comum
+    # deste deploy) — o navegador só expõe os "response headers simples"
+    # por padrão; o download em si não é afetado, só o nome do arquivo cai
+    # pro fallback genérico (ver reports.js downloadTasksXlsx).
+    expose_headers=["Content-Disposition"],
 )
 
 # Desligado por padrão (RATE_LIMIT_MAX_REQUESTS=0) — só entra na pilha de

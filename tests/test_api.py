@@ -747,6 +747,48 @@ def test_gantt_endpoint_bundles_tasks_and_dependencies(client, setup):
     assert cross_client.status_code == 403
 
 
+def test_export_tasks_xlsx_returns_workbook_with_task_rows(client, setup):
+    """Botão "Exportar (Excel)" da tela de Tarefas — ver app/exports.py.
+    Confere o content-type/anexo e que a planilha de fato tem uma linha por
+    tarefa (mesmos dados de GET /schedule, incluindo o rollup de tarefa-pai)."""
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    project = setup["project_a"]
+    admin_headers = setup["admin_headers"]
+    parent = client.post(f"/projects/{project.id}/tasks", json={"name": "Pai", "wbs_code": "1"}, headers=admin_headers).json()
+    child = client.post(
+        f"/projects/{project.id}/tasks",
+        json={
+            "name": "Filho",
+            "wbs_code": "1.1",
+            "parent_task_id": parent["id"],
+            "planned_start_date": "2026-08-24",
+            "planned_end_date": "2026-08-28",
+        },
+        headers=admin_headers,
+    ).json()
+
+    response = client.get(f"/projects/{project.id}/tasks/export.xlsx", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert "attachment" in response.headers["content-disposition"]
+    assert project.code in response.headers["content-disposition"]
+
+    workbook = load_workbook(BytesIO(response.content))
+    sheet = workbook.active
+    header = [cell.value for cell in sheet[1]]
+    assert header[0] == "WBS"
+    assert header[1] == "Nome da tarefa"
+    rows_by_wbs = {row[0]: row for row in sheet.iter_rows(min_row=2, values_only=True)}
+    assert set(rows_by_wbs.keys()) == {parent["wbs_code"], child["wbs_code"]}
+    # A tarefa-pai não tem Início/Fim próprios (não é folha) — a planilha
+    # usa o rollup agregado da filha, igual à grade de Tarefas na tela.
+    assert rows_by_wbs[parent["wbs_code"]][4] is not None  # Início (rollup)
+    assert rows_by_wbs[child["wbs_code"]][4] is not None  # Início (próprio)
+
+
 # ---------------------------------------------------------------------------
 # Fase 4: motor de agendamento (effort-driven, WBS, mover tarefa, calendário
 # de projeto/status date, estatísticas, bloqueio de usuário)

@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access, require_roles
+from ..exports import build_tasks_workbook
 from ..models import Project, Task, TaskDependency, TaskStatus, User, UserRole
 from ..schemas import (
     DashboardResponse,
@@ -220,6 +221,22 @@ def project_schedule(project_id: str, user: User = Depends(get_current_user), db
         else []
     )
     return {"status_date": schedule["status_date"], "tasks": tasks_payload, "dependencies": dependencies}
+
+
+@router.get("/projects/{project_id}/tasks/export.xlsx")
+def export_tasks_xlsx(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Response:
+    """Exporta a grade de tarefas pra .xlsx (Excel/LibreOffice/OpenOffice) —
+    mesmos dados calculados de GET /schedule (rollup, linha de base, SPI/CPI
+    por tarefa), ver app/exports.build_tasks_workbook."""
+    project = _get_project_or_404(db, project_id)
+    require_project_access(project, user)
+    content = build_tasks_workbook(db, project)
+    filename = f"{project.code}_tarefas.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/projects/{project_id}/report.evm", response_model=EvmMetrics)
