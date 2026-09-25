@@ -15,3 +15,11 @@ export function listHolidays(calendarId) {
 export function addHoliday(calendarId, payload) {
   return api.post(`/calendars/${calendarId}/holidays`, payload)
 }
+
+export function updateHoliday(calendarId, holidayId, payload) {
+  return api.patch(`/calendars/${calendarId}/holidays/${holidayId}`, payload)
+}
+
+export function deleteHoliday(calendarId, holidayId) {
+  return api.del(`/calendars/${calendarId}/holidays/${holidayId}`)
+}

@@ -465,6 +465,11 @@ class HolidayCreate(BaseModel):
     description: str = Field(min_length=1, max_length=255)
 
 
+class HolidayUpdate(BaseModel):
+    date: date
+    description: str = Field(min_length=1, max_length=255)
+
+
 class HolidayRead(ORMModel):
     id: str
     calendar_id: str

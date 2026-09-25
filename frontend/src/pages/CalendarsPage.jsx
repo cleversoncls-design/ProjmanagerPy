@@ -14,7 +14,7 @@ import { useLanguage } from '../context/LanguageContext'
 const DEFAULT_WORKING_DAYS = [0, 1, 2, 3, 4]
 
 export default function CalendarsPage() {
-  const { labels } = useLanguage()
+  const { labels, t } = useLanguage()
   const [calendars, setCalendars] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -61,9 +61,9 @@ export default function CalendarsPage() {
   return (
     <div>
       <PageHeader
-        title="Calendários"
-        subtitle="Dias úteis e feriados usados no cálculo de cronograma e capacidade."
-        action={<Button onClick={() => setShowModal(true)}>Novo calendário</Button>}
+        title={t('Calendários')}
+        subtitle={t('Dias úteis e feriados usados no cálculo de cronograma e capacidade.')}
+        action={<Button onClick={() => setShowModal(true)}>{t('Novo calendário')}</Button>}
       />
 
       {loading && <Spinner />}
@@ -71,13 +71,13 @@ export default function CalendarsPage() {
 
       {!loading && !error && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card title="Calendários cadastrados">
+          <Card title={t('Calendários cadastrados')}>
             <Table
               columns={[
-                { key: 'name', header: 'Nome' },
+                { key: 'name', header: t('Nome') },
                 {
                   key: 'working_days',
-                  header: 'Dias úteis',
+                  header: t('Dias úteis'),
                   render: (row) => row.working_days.map((day) => labels.WEEKDAY_LABELS[day]).join(', '),
                 },
                 {
@@ -90,34 +90,34 @@ export default function CalendarsPage() {
                       onClick={() => setSelectedCalendar(row)}
                       className="text-xs font-medium text-[var(--series-1)] hover:underline"
                     >
-                      Feriados
+                      {t('Feriados')}
                     </button>
                   ),
                 },
               ]}
               rows={calendars}
               getRowKey={(row) => row.id}
-              emptyMessage="Nenhum calendário cadastrado ainda."
+              emptyMessage={t('Nenhum calendário cadastrado ainda.')}
             />
           </Card>
 
-          <Card title={selectedCalendar ? `Feriados — ${selectedCalendar.name}` : 'Feriados'}>
+          <Card title={selectedCalendar ? `${t('Feriados')} — ${selectedCalendar.name}` : t('Feriados')}>
             {selectedCalendar ? (
               <HolidaysPanel calendar={selectedCalendar} />
             ) : (
-              <p className="text-sm text-[var(--text-muted)]">Selecione um calendário na lista ao lado para ver e cadastrar feriados.</p>
+              <p className="text-sm text-[var(--text-muted)]">{t('Selecione um calendário na lista ao lado para ver e cadastrar feriados.')}</p>
             )}
           </Card>
         </div>
       )}
 
       {showModal && (
-        <Modal title="Novo calendário" onClose={() => setShowModal(false)}>
+        <Modal title={t('Novo calendário')} onClose={() => setShowModal(false)}>
           <form onSubmit={handleCreate} className="space-y-4">
-            <FormField label="Nome" required>
+            <FormField label={t('Nome')} required>
               <TextInput required value={name} onChange={(event) => setName(event.target.value)} />
             </FormField>
-            <FormField label="Dias úteis" required>
+            <FormField label={t('Dias úteis')} required>
               <div className="flex flex-wrap gap-2">
                 {labels.WEEKDAY_LABELS.map((label, day) => (
                   <label
@@ -139,10 +139,10 @@ export default function CalendarsPage() {
 
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="secondary" onClick={() => setShowModal(false)}>
-                Cancelar
+                {t('Cancelar')}
               </Button>
               <Button type="submit" disabled={submitting || workingDays.length === 0}>
-                {submitting ? 'Salvando…' : 'Salvar'}
+                {submitting ? t('Salvando…') : t('Salvar')}
               </Button>
             </div>
           </form>
@@ -153,6 +153,7 @@ export default function CalendarsPage() {
 }
 
 function HolidaysPanel({ calendar }) {
+  const { t } = useLanguage()
   const [holidays, setHolidays] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -160,6 +161,8 @@ function HolidaysPanel({ calendar }) {
   const [description, setDescription] = useState('')
   const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [editingHoliday, setEditingHoliday] = useState(null)
+  const [deletingHoliday, setDeletingHoliday] = useState(null)
 
   function loadHolidays() {
     setLoading(true)
@@ -191,14 +194,14 @@ function HolidaysPanel({ calendar }) {
   return (
     <div className="space-y-4">
       <form onSubmit={handleAdd} className="flex items-end gap-2">
-        <FormField label="Data" required>
+        <FormField label={t('Data')} required>
           <TextInput type="date" required value={date} onChange={(event) => setDate(event.target.value)} />
         </FormField>
-        <FormField label="Descrição" required>
+        <FormField label={t('Descrição')} required>
           <TextInput required value={description} onChange={(event) => setDescription(event.target.value)} />
         </FormField>
         <Button type="submit" disabled={submitting}>
-          Adicionar
+          {t('Adicionar')}
         </Button>
       </form>
       <ErrorBanner message={formError} />
@@ -208,14 +211,142 @@ function HolidaysPanel({ calendar }) {
       {!loading && !error && (
         <Table
           columns={[
-            { key: 'date', header: 'Data', render: (row) => formatDate(row.date) },
-            { key: 'description', header: 'Descrição' },
+            { key: 'date', header: t('Data'), render: (row) => formatDate(row.date) },
+            { key: 'description', header: t('Descrição') },
+            {
+              key: 'actions',
+              header: '',
+              align: 'right',
+              render: (row) => (
+                <div className="flex justify-end gap-3">
+                  <button type="button" onClick={() => setEditingHoliday(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
+                    {t('Editar')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeletingHoliday(row)}
+                    className="text-xs font-medium text-[var(--status-critical)] hover:underline"
+                  >
+                    {t('Excluir')}
+                  </button>
+                </div>
+              ),
+            },
           ]}
           rows={holidays}
           getRowKey={(row) => row.id}
-          emptyMessage="Nenhum feriado cadastrado para este calendário."
+          emptyMessage={t('Nenhum feriado cadastrado para este calendário.')}
+        />
+      )}
+
+      {editingHoliday && (
+        <HolidayEditModal
+          calendarId={calendar.id}
+          holiday={editingHoliday}
+          onClose={() => setEditingHoliday(null)}
+          onSaved={() => {
+            setEditingHoliday(null)
+            loadHolidays()
+          }}
+        />
+      )}
+
+      {deletingHoliday && (
+        <HolidayDeleteModal
+          calendarId={calendar.id}
+          holiday={deletingHoliday}
+          onClose={() => setDeletingHoliday(null)}
+          onDeleted={() => {
+            setDeletingHoliday(null)
+            loadHolidays()
+          }}
         />
       )}
     </div>
+  )
+}
+
+function HolidayEditModal({ calendarId, holiday, onClose, onSaved }) {
+  const { t } = useLanguage()
+  const [date, setDate] = useState(holiday.date)
+  const [description, setDescription] = useState(holiday.description)
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    setError('')
+    setSaving(true)
+    try {
+      await calendarsApi.updateHoliday(calendarId, holiday.id, { date, description })
+      onSaved()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={t('Editar feriado')} onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <FormField label={t('Data')} required>
+          <TextInput type="date" required value={date} onChange={(event) => setDate(event.target.value)} />
+        </FormField>
+        <FormField label={t('Descrição')} required>
+          <TextInput required value={description} onChange={(event) => setDescription(event.target.value)} />
+        </FormField>
+
+        <ErrorBanner message={error} />
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? t('Salvando…') : t('Salvar')}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function HolidayDeleteModal({ calendarId, holiday, onClose, onDeleted }) {
+  const { t } = useLanguage()
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleDelete() {
+    setDeleting(true)
+    setError('')
+    try {
+      await calendarsApi.deleteHoliday(calendarId, holiday.id)
+      onDeleted()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Modal title={t('Excluir feriado')} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--text-secondary)]">
+          {t('Tem certeza que quer excluir o feriado')} <span className="font-medium text-[var(--text-primary)]">{holiday.description}</span> (
+          {formatDate(holiday.date)})?
+        </p>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
+            {deleting ? t('Excluindo…') : t('Excluir')}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   )
 }

@@ -30,6 +30,7 @@ _ES: dict[str, str] = {
     "Dependência não encontrada": "Dependencia no encontrada",
     "Essa dependência já existe": "Esa dependencia ya existe",
     "Este usuário já possui um recurso cadastrado": "Este usuario ya tiene un recurso registrado",
+    "Feriado não encontrado": "Feriado no encontrado",
     "Fora do escopo do cliente": "Fuera del alcance del cliente",
     "Informe project_id ou task_id": "Informe project_id o task_id",
     "Já existe um apontamento deste recurso nesta tarefa para esta data": "Ya existe un registro de horas de este recurso en esta tarea para esta fecha",

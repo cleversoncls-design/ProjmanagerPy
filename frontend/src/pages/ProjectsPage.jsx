@@ -33,7 +33,7 @@ const EMPTY_FORM = {
 
 export default function ProjectsPage() {
   const { user } = useAuth()
-  const { labels } = useLanguage()
+  const { labels, t } = useLanguage()
   const canCreate = MANAGEMENT_ROLES.includes(user.role)
 
   const [rows, setRows] = useState([])
@@ -101,9 +101,9 @@ export default function ProjectsPage() {
   return (
     <div>
       <PageHeader
-        title="Projetos"
-        subtitle="Portfólio de projetos no seu escopo."
-        action={canCreate && <Button onClick={() => setShowModal(true)}>Novo projeto</Button>}
+        title={t('Projetos')}
+        subtitle={t('Portfólio de projetos no seu escopo.')}
+        action={canCreate && <Button onClick={() => setShowModal(true)}>{t('Novo projeto')}</Button>}
       />
 
       {loading && <Spinner />}
@@ -115,7 +115,7 @@ export default function ProjectsPage() {
             columns={[
               {
                 key: 'code',
-                header: 'Projeto',
+                header: t('Projeto'),
                 render: (row) => (
                   <Link to={`/projects/${row.id}`} className="font-medium text-[var(--series-1)] hover:underline">
                     {row.code} — {row.name}
@@ -124,40 +124,40 @@ export default function ProjectsPage() {
               },
               {
                 key: 'status',
-                header: 'Status',
+                header: t('Status'),
                 render: (row) => <StatusPill label={labels.PROJECT_STATUS_LABELS[row.status] || row.status} tone={PROJECT_STATUS_TONE[row.status]} />,
               },
-              { key: 'percent_complete', header: '% concluído', align: 'right', render: (row) => formatPercent(row.percent_complete) },
-              { key: 'tasks_remaining', header: 'Tarefas restantes', align: 'right' },
+              { key: 'percent_complete', header: t('% concluído'), align: 'right', render: (row) => formatPercent(row.percent_complete) },
+              { key: 'tasks_remaining', header: t('Tarefas restantes'), align: 'right' },
               {
                 key: 'margin',
-                header: 'Margem',
+                header: t('Margem'),
                 align: 'right',
                 render: (row) => (row.margin === null || row.margin === undefined ? '—' : formatCurrency(row.margin)),
               },
             ]}
             rows={rows}
             getRowKey={(row) => row.id}
-            emptyMessage="Nenhum projeto no seu escopo ainda."
+            emptyMessage={t('Nenhum projeto no seu escopo ainda.')}
           />
         </Card>
       )}
 
       {showModal && (
-        <Modal title="Novo projeto" onClose={() => setShowModal(false)} wide>
+        <Modal title={t('Novo projeto')} onClose={() => setShowModal(false)} wide>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="Código" required>
+              <FormField label={t('Código')} required>
                 <TextInput required value={form.code} onChange={updateField('code')} />
               </FormField>
-              <FormField label="Nome" required>
+              <FormField label={t('Nome')} required>
                 <TextInput required value={form.name} onChange={updateField('name')} />
               </FormField>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="Cliente" required>
+              <FormField label={t('Cliente')} required>
                 <Select required value={form.client_id} onChange={updateField('client_id')}>
-                  <option value="">Selecione…</option>
+                  <option value="">{t('Selecione…')}</option>
                   {clients.map((client) => (
                     <option key={client.id} value={client.id}>
                       {client.legal_name}
@@ -165,9 +165,9 @@ export default function ProjectsPage() {
                   ))}
                 </Select>
               </FormField>
-              <FormField label="Gerente responsável" required hint="Precisa ser ADMIN ou gerente de projetos interno.">
+              <FormField label={t('Gerente responsável')} required hint={t('Precisa ser ADMIN ou gerente de projetos interno.')}>
                 <Select required value={form.manager_id} onChange={updateField('manager_id')}>
-                  <option value="">Selecione…</option>
+                  <option value="">{t('Selecione…')}</option>
                   {managers.map((manager) => (
                     <option key={manager.id} value={manager.id}>
                       {manager.name}
@@ -178,31 +178,31 @@ export default function ProjectsPage() {
             </div>
 
             <div className="rounded-lg border border-[var(--border)] p-4">
-              <p className="mb-3 text-xs font-medium text-[var(--text-secondary)]">Pacote vendido (horas × valor/hora)</p>
+              <p className="mb-3 text-xs font-medium text-[var(--text-secondary)]">{t('Pacote vendido (horas × valor/hora)')}</p>
               <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                <FormField label="Horas de gestão">
+                <FormField label={t('Horas de gestão')}>
                   <TextInput type="number" min="0" step="0.5" value={form.management_hours} onChange={updateField('management_hours')} />
                 </FormField>
-                <FormField label="Valor/h gestão">
+                <FormField label={t('Valor/h gestão')}>
                   <TextInput type="number" min="0" step="0.01" value={form.management_rate} onChange={updateField('management_rate')} />
                 </FormField>
-                <FormField label="Horas de consultoria">
+                <FormField label={t('Horas de consultoria')}>
                   <TextInput type="number" min="0" step="0.5" value={form.consulting_hours} onChange={updateField('consulting_hours')} />
                 </FormField>
-                <FormField label="Valor/h consultoria">
+                <FormField label={t('Valor/h consultoria')}>
                   <TextInput type="number" min="0" step="0.01" value={form.consulting_rate} onChange={updateField('consulting_rate')} />
                 </FormField>
               </div>
               <p className="mt-3 text-sm">
-                Valor total vendido (calculado): <span className="font-semibold">{formatCurrency(soldValuePreview)}</span>
+                {t('Valor total vendido (calculado):')} <span className="font-semibold">{formatCurrency(soldValuePreview)}</span>
               </p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="Início planejado">
+              <FormField label={t('Início planejado')}>
                 <TextInput type="date" value={form.start_date} onChange={updateField('start_date')} />
               </FormField>
-              <FormField label="Fim planejado">
+              <FormField label={t('Fim planejado')}>
                 <TextInput type="date" value={form.end_date} onChange={updateField('end_date')} />
               </FormField>
             </div>
@@ -211,10 +211,10 @@ export default function ProjectsPage() {
 
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="secondary" onClick={() => setShowModal(false)}>
-                Cancelar
+                {t('Cancelar')}
               </Button>
               <Button type="submit" disabled={submitting}>
-                {submitting ? 'Salvando…' : 'Salvar'}
+                {submitting ? t('Salvando…') : t('Salvar')}
               </Button>
             </div>
           </form>

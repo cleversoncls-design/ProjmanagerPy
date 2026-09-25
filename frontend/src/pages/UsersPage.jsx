@@ -22,7 +22,7 @@ const EMPTY_USER_FORM = { name: '', email: '', password: '', role: 'CONSULTANT',
 const EMPTY_RESOURCE_FORM = { role_title: '', internal_cost_per_hour: '', billing_rate_per_hour: '', daily_capacity_hours: '8', calendar_id: '' }
 
 export default function UsersPage() {
-  const { labels } = useLanguage()
+  const { labels, t } = useLanguage()
   const [users, setUsers] = useState([])
   const [resources, setResources] = useState([])
   const [calendars, setCalendars] = useState([])
@@ -196,9 +196,9 @@ export default function UsersPage() {
   return (
     <div>
       <PageHeader
-        title="Usuários e recursos"
-        subtitle="Usuários internos e externos, e o custo/capacidade de cada um como recurso alocável."
-        action={<Button onClick={() => setShowUserModal(true)}>Novo usuário</Button>}
+        title={t('Usuários e recursos')}
+        subtitle={t('Usuários internos e externos, e o custo/capacidade de cada um como recurso alocável.')}
+        action={<Button onClick={() => setShowUserModal(true)}>{t('Novo usuário')}</Button>}
       />
 
       {loading && <Spinner />}
@@ -208,21 +208,21 @@ export default function UsersPage() {
         <Card>
           <Table
             columns={[
-              { key: 'name', header: 'Nome' },
-              { key: 'email', header: 'E-mail' },
-              { key: 'role', header: 'Perfil', render: (row) => <StatusPill label={labels.ROLE_LABELS[row.role] || row.role} tone="muted" /> },
+              { key: 'name', header: t('Nome') },
+              { key: 'email', header: t('E-mail') },
+              { key: 'role', header: t('Perfil'), render: (row) => <StatusPill label={labels.ROLE_LABELS[row.role] || row.role} tone="muted" /> },
               {
                 key: 'status',
-                header: 'Situação',
+                header: t('Situação'),
                 render: (row) => <StatusPill label={labels.USER_STATUS_LABELS[row.status] || row.status} tone={USER_STATUS_TONE[row.status] || 'muted'} />,
               },
-              { key: 'client', header: 'Cliente', render: (row) => (row.client_id ? clientById[row.client_id]?.legal_name || '—' : '—') },
+              { key: 'client', header: t('Cliente'), render: (row) => (row.client_id ? clientById[row.client_id]?.legal_name || '—' : '—') },
               {
                 key: 'resource',
-                header: 'Recurso (custo/h)',
+                header: t('Recurso (custo/h)'),
                 render: (row) => {
                   const resource = resourceByUserId[row.id]
-                  if (!resource) return <span className="text-[var(--text-muted)]">Não cadastrado</span>
+                  if (!resource) return <span className="text-[var(--text-muted)]">{t('Não cadastrado')}</span>
                   return `${resource.role_title} · ${formatCurrency(resource.internal_cost_per_hour)}/h`
                 },
               },
@@ -233,7 +233,7 @@ export default function UsersPage() {
                 render: (row) => (
                   <div className="flex justify-end gap-3">
                     <button type="button" onClick={() => openEditModal(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
-                      Editar
+                      {t('Editar')}
                     </button>
                     <button
                       type="button"
@@ -244,15 +244,15 @@ export default function UsersPage() {
                       }}
                       className="text-xs font-medium text-[var(--series-1)] hover:underline"
                     >
-                      Redefinir senha
+                      {t('Redefinir senha')}
                     </button>
                     {resourceByUserId[row.id] ? (
                       <button type="button" onClick={() => openEditResourceModal(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
-                        Editar recurso
+                        {t('Editar recurso')}
                       </button>
                     ) : (
                       <button type="button" onClick={() => openLinkResourceModal(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
-                        Vincular como recurso
+                        {t('Vincular como recurso')}
                       </button>
                     )}
                   </div>
@@ -261,24 +261,24 @@ export default function UsersPage() {
             ]}
             rows={users}
             getRowKey={(row) => row.id}
-            emptyMessage="Nenhum usuário cadastrado ainda."
+            emptyMessage={t('Nenhum usuário cadastrado ainda.')}
           />
         </Card>
       )}
 
       {showUserModal && (
-        <Modal title="Novo usuário" onClose={() => setShowUserModal(false)}>
+        <Modal title={t('Novo usuário')} onClose={() => setShowUserModal(false)}>
           <form onSubmit={handleCreateUser} className="space-y-4">
-            <FormField label="Nome" required>
+            <FormField label={t('Nome')} required>
               <TextInput required value={userForm.name} onChange={updateUserField('name')} />
             </FormField>
-            <FormField label="E-mail" required>
+            <FormField label={t('E-mail')} required>
               <TextInput type="email" required value={userForm.email} onChange={updateUserField('email')} />
             </FormField>
-            <FormField label="Senha provisória" required hint="Mínimo de 8 caracteres.">
+            <FormField label={t('Senha provisória')} required hint={t('Mínimo de 8 caracteres.')}>
               <TextInput type="password" required minLength={8} value={userForm.password} onChange={updateUserField('password')} />
             </FormField>
-            <FormField label="Perfil" required>
+            <FormField label={t('Perfil')} required>
               <Select required value={userForm.role} onChange={updateUserField('role')}>
                 {Object.entries(labels.ROLE_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
@@ -288,9 +288,9 @@ export default function UsersPage() {
               </Select>
             </FormField>
             {EXTERNAL_ROLES.includes(userForm.role) && (
-              <FormField label="Cliente" required hint="Obrigatório para perfis do cliente.">
+              <FormField label={t('Cliente')} required hint={t('Obrigatório para perfis do cliente.')}>
                 <Select required value={userForm.client_id} onChange={updateUserField('client_id')}>
-                  <option value="">Selecione…</option>
+                  <option value="">{t('Selecione…')}</option>
                   {clients.map((client) => (
                     <option key={client.id} value={client.id}>
                       {client.legal_name}
@@ -304,10 +304,10 @@ export default function UsersPage() {
 
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="secondary" onClick={() => setShowUserModal(false)}>
-                Cancelar
+                {t('Cancelar')}
               </Button>
               <Button type="submit" disabled={savingUser}>
-                {savingUser ? 'Salvando…' : 'Salvar'}
+                {savingUser ? t('Salvando…') : t('Salvar')}
               </Button>
             </div>
           </form>
@@ -316,31 +316,31 @@ export default function UsersPage() {
 
       {resourceTarget && (
         <Modal
-          title={`${editingResourceId ? 'Editar recurso' : 'Vincular recurso'} — ${resourceTarget.name}`}
+          title={`${editingResourceId ? t('Editar recurso') : t('Vincular recurso')} — ${resourceTarget.name}`}
           onClose={() => {
             setResourceTarget(null)
             setEditingResourceId(null)
           }}
         >
           <form onSubmit={handleSaveResource} className="space-y-4">
-            <FormField label="Função" required hint='Ex.: "Consultor sênior", "Gerente de projetos".'>
+            <FormField label={t('Função')} required hint={t('Ex.: "Consultor sênior", "Gerente de projetos".')}>
               <TextInput required value={resourceForm.role_title} onChange={updateResourceField('role_title')} />
             </FormField>
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="Custo interno (US$/h)" required>
+              <FormField label={t('Custo interno (US$/h)')} required>
                 <TextInput type="number" min="0" step="0.01" required value={resourceForm.internal_cost_per_hour} onChange={updateResourceField('internal_cost_per_hour')} />
               </FormField>
-              <FormField label="Valor de faturamento (US$/h)" required>
+              <FormField label={t('Valor de faturamento (US$/h)')} required>
                 <TextInput type="number" min="0" step="0.01" required value={resourceForm.billing_rate_per_hour} onChange={updateResourceField('billing_rate_per_hour')} />
               </FormField>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="Capacidade diária (h)" required>
+              <FormField label={t('Capacidade diária (h)')} required>
                 <TextInput type="number" min="1" max="24" step="0.5" required value={resourceForm.daily_capacity_hours} onChange={updateResourceField('daily_capacity_hours')} />
               </FormField>
-              <FormField label="Calendário pessoal" hint="Opcional.">
+              <FormField label={t('Calendário pessoal')} hint={t('Opcional.')}>
                 <Select value={resourceForm.calendar_id} onChange={updateResourceField('calendar_id')}>
-                  <option value="">Nenhum</option>
+                  <option value="">{t('Nenhum')}</option>
                   {calendars.map((calendar) => (
                     <option key={calendar.id} value={calendar.id}>
                       {calendar.name}
@@ -361,10 +361,10 @@ export default function UsersPage() {
                   setEditingResourceId(null)
                 }}
               >
-                Cancelar
+                {t('Cancelar')}
               </Button>
               <Button type="submit" disabled={savingResource}>
-                {savingResource ? 'Salvando…' : 'Salvar'}
+                {savingResource ? t('Salvando…') : t('Salvar')}
               </Button>
             </div>
           </form>
@@ -372,12 +372,12 @@ export default function UsersPage() {
       )}
 
       {editTarget && editForm && (
-        <Modal title={`Editar usuário — ${editTarget.name}`} onClose={() => setEditTarget(null)}>
+        <Modal title={`${t('Editar usuário')} — ${editTarget.name}`} onClose={() => setEditTarget(null)}>
           <form onSubmit={handleSaveEdit} className="space-y-4">
-            <FormField label="Nome" required>
+            <FormField label={t('Nome')} required>
               <TextInput required value={editForm.name} onChange={updateEditField('name')} />
             </FormField>
-            <FormField label="Perfil" required>
+            <FormField label={t('Perfil')} required>
               <Select required value={editForm.role} onChange={updateEditField('role')}>
                 {Object.entries(labels.ROLE_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
@@ -387,9 +387,9 @@ export default function UsersPage() {
               </Select>
             </FormField>
             {EXTERNAL_ROLES.includes(editForm.role) && (
-              <FormField label="Cliente" required hint="Obrigatório para perfis do cliente.">
+              <FormField label={t('Cliente')} required hint={t('Obrigatório para perfis do cliente.')}>
                 <Select required value={editForm.client_id} onChange={updateEditField('client_id')}>
-                  <option value="">Selecione…</option>
+                  <option value="">{t('Selecione…')}</option>
                   {clients.map((client) => (
                     <option key={client.id} value={client.id}>
                       {client.legal_name}
@@ -398,7 +398,7 @@ export default function UsersPage() {
                 </Select>
               </FormField>
             )}
-            <FormField label="Situação" required hint="Bloqueado impede login imediatamente.">
+            <FormField label={t('Situação')} required hint={t('Bloqueado impede login imediatamente.')}>
               <Select required value={editForm.status} onChange={updateEditField('status')}>
                 {Object.entries(labels.USER_STATUS_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
@@ -412,10 +412,10 @@ export default function UsersPage() {
 
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="secondary" onClick={() => setEditTarget(null)}>
-                Cancelar
+                {t('Cancelar')}
               </Button>
               <Button type="submit" disabled={savingEdit}>
-                {savingEdit ? 'Salvando…' : 'Salvar'}
+                {savingEdit ? t('Salvando…') : t('Salvar')}
               </Button>
             </div>
           </form>
@@ -423,9 +423,9 @@ export default function UsersPage() {
       )}
 
       {passwordTarget && (
-        <Modal title={`Redefinir senha — ${passwordTarget.name}`} onClose={() => setPasswordTarget(null)}>
+        <Modal title={`${t('Redefinir senha')} — ${passwordTarget.name}`} onClose={() => setPasswordTarget(null)}>
           <form onSubmit={handleResetPassword} className="space-y-4">
-            <FormField label="Nova senha" required hint="Mínimo de 8 caracteres.">
+            <FormField label={t('Nova senha')} required hint={t('Mínimo de 8 caracteres.')}>
               <TextInput type="password" required minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
             </FormField>
 
@@ -433,10 +433,10 @@ export default function UsersPage() {
 
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="secondary" onClick={() => setPasswordTarget(null)}>
-                Cancelar
+                {t('Cancelar')}
               </Button>
               <Button type="submit" disabled={savingPassword}>
-                {savingPassword ? 'Salvando…' : 'Salvar'}
+                {savingPassword ? t('Salvando…') : t('Salvar')}
               </Button>
             </div>
           </form>
