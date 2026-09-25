@@ -553,6 +553,19 @@ def task_schedule_rows(session: Session, project: Project) -> dict:
     cal = calendar_for_project(session, project)
     rollups = _task_rollups(tasks, cal)
 
+    def _baseline_field(row: dict | None, direct_key: str, rollup_key: str):
+        """Tarefa-folha usa o campo direto do snapshot; tarefa-pai (sem
+        planned_start_date/end_date/estimated_hours próprios, ver
+        _task_rollups) cai pro agregado que create_baseline também gravou
+        no snapshot (rollup_start_date/rollup_end_date/rollup_estimated_hours)
+        — mesma regra de fallback rollup ?? campo próprio usada em toda a
+        grade "ao vivo", só que lendo de um snapshot congelado em vez das
+        tarefas atuais. Baselines salvos antes desta rollup existir no
+        snapshot simplesmente não têm a chave — cai pra None, não quebra."""
+        if not row:
+            return None
+        return row.get(direct_key) or row.get(rollup_key)
+
     rows = []
     for t in tasks:
         baseline_row = baseline_map.get(t.id) if baseline_map else None
@@ -592,9 +605,21 @@ def task_schedule_rows(session: Session, project: Project) -> dict:
                 "rollup_end_date": rollup["end"] if rollup else None,
                 "rollup_duration_days": rollup["duration"] if rollup else None,
                 "rollup_estimated_hours": rollup["hours"] if rollup else None,
-                "baseline_start_date": date.fromisoformat(baseline_row["planned_start_date"]) if baseline_row and baseline_row.get("planned_start_date") else None,
-                "baseline_end_date": date.fromisoformat(baseline_row["planned_end_date"]) if baseline_row and baseline_row.get("planned_end_date") else None,
-                "baseline_estimated_hours": baseline_hours,
+                "baseline_start_date": (
+                    date.fromisoformat(_baseline_field(baseline_row, "planned_start_date", "rollup_start_date"))
+                    if _baseline_field(baseline_row, "planned_start_date", "rollup_start_date")
+                    else None
+                ),
+                "baseline_end_date": (
+                    date.fromisoformat(_baseline_field(baseline_row, "planned_end_date", "rollup_end_date"))
+                    if _baseline_field(baseline_row, "planned_end_date", "rollup_end_date")
+                    else None
+                ),
+                "baseline_estimated_hours": (
+                    Decimal(_baseline_field(baseline_row, "estimated_hours", "rollup_estimated_hours"))
+                    if _baseline_field(baseline_row, "estimated_hours", "rollup_estimated_hours")
+                    else None
+                ),
                 "planned_percent_complete": planned_percent,
                 "spi": task_spi,
                 "cpi": task_cpi,

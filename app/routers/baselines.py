@@ -10,6 +10,7 @@ from ..database import get_db
 from ..deps import get_current_user, require_project_access
 from ..models import Baseline, Project, Task, User
 from ..schemas import BaselineCreate, BaselineRead
+from ..services import _task_rollups, calendar_for_project
 
 router = APIRouter(tags=["baselines"])
 
@@ -34,6 +35,18 @@ def create_baseline(
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
     require_project_access(project, user, write=True)
     tasks = db.scalars(select(Task).where(Task.project_id == project_id)).all()
+    # Tarefa-pai (WBS) nunca tem planned_start_date/planned_end_date/
+    # estimated_hours própria preenchida — o motor de agendamento só
+    # escreve nesses campos em tarefa-folha (mesmo motivo de
+    # services._task_rollups). Sem isto, toda tarefa-pai nascia com o
+    # snapshot vazio e a coluna "Linha base" da grade ficava em branco pra
+    # ela pra sempre (diferente do agregado "ao vivo" de hoje, que sempre
+    # recalcula na hora). Calculado uma vez aqui e gravado junto, porque o
+    # baseline é uma FOTO do que existia neste momento — reagregar depois a
+    # partir da árvore atual daria um resultado diferente se a tarefa for
+    # movida/reparentada mais tarde.
+    cal = calendar_for_project(db, project)
+    rollups = _task_rollups(list(tasks), cal)
     snapshot = {
         "tasks": [
             {
@@ -44,6 +57,15 @@ def create_baseline(
                 "planned_end_date": _serialize(t.planned_end_date),
                 "estimated_hours": _serialize(t.estimated_hours),
                 "status": t.status.value,
+                **(
+                    {
+                        "rollup_start_date": _serialize(rollups[t.id]["start"]),
+                        "rollup_end_date": _serialize(rollups[t.id]["end"]),
+                        "rollup_estimated_hours": _serialize(rollups[t.id]["hours"]),
+                    }
+                    if t.id in rollups
+                    else {}
+                ),
             }
             for t in tasks
         ]

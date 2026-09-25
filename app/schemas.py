@@ -354,6 +354,20 @@ class ResourceCreate(BaseModel):
     calendar_id: str | None = None
 
 
+class ResourceUpdate(BaseModel):
+    """Todos os campos opcionais (PATCH parcial) — mesmo padrão de
+    TaskUpdate/ProjectUpdate. Sem isto, o único jeito de corrigir o
+    custo/hora ou a função de um recurso já cadastrado era apagar e
+    recriar (perdendo o vínculo de user_id único, já que POST /resources
+    recusa um segundo recurso pro mesmo usuário)."""
+
+    role_title: str | None = Field(default=None, min_length=1, max_length=120)
+    internal_cost_per_hour: Decimal | None = Field(default=None, gt=0)
+    billing_rate_per_hour: Decimal | None = Field(default=None, gt=0)
+    daily_capacity_hours: Decimal | None = Field(default=None, gt=0, le=24)
+    calendar_id: str | None = None
+
+
 class ResourceRead(ORMModel):
     id: str
     user_id: str
