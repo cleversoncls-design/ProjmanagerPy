@@ -56,7 +56,6 @@ export default function UsersPage() {
   const [passwordFormError, setPasswordFormError] = useState('')
   const [savingPassword, setSavingPassword] = useState(false)
 
-  const [deletingResourceTarget, setDeletingResourceTarget] = useState(null)
   const [deletingUserTarget, setDeletingUserTarget] = useState(null)
 
   function loadAll() {
@@ -248,33 +247,18 @@ export default function UsersPage() {
                       }}
                     />
                     {resourceByUserId[row.id] ? (
-                      <>
-                        <IconButton icon={BriefcaseIcon} label={t('Editar recurso')} onClick={() => openEditResourceModal(row)} />
-                        {/* Recurso do Administrador nunca é excluível por aqui — o resto
-                            (inclusive perfis de cliente) segue liberado, e a checagem de
-                            alocação/apontamento de horas no backend (DELETE /resources/{id})
-                            continua sendo a proteção de verdade contra apagar um recurso
-                            em uso. */}
-                        {row.role !== 'ADMIN' && (
-                          <IconButton
-                            icon={TrashIcon}
-                            label={t('Excluir recurso')}
-                            variant="danger"
-                            onClick={() => setDeletingResourceTarget({ row, resource: resourceByUserId[row.id] })}
-                          />
-                        )}
-                      </>
+                      <IconButton icon={BriefcaseIcon} label={t('Editar recurso')} onClick={() => openEditResourceModal(row)} />
                     ) : (
                       <IconButton icon={BriefcaseIcon} label={t('Vincular como recurso')} onClick={() => openLinkResourceModal(row)} />
                     )}
-                    {/* Excluir o USUÁRIO (não só o vínculo de recurso acima) — pra
-                        dar conta de um cadastro feito por engano, mesmo quando não
-                        chegou a virar recurso (ex.: um PM do cliente). Só o
-                        Administrador nunca pode ser excluído; qualquer outro perfil
-                        pode, e o backend (DELETE /users/{id}) é quem garante que não
-                        dá pra apagar um usuário que é gerente de projeto, autor de
-                        uma solicitação de mudança, ou dono de um recurso com
-                        alocação/horas já lançadas. */}
+                    {/* Excluir o usuário inteiro — não existe mais um "excluir
+                        recurso" em separado (removido a pedido: só a exclusão do
+                        usuário importa). Só o Administrador nunca pode ser
+                        excluído; qualquer outro perfil pode, e o backend (DELETE
+                        /users/{id}) é quem garante que não dá pra apagar um
+                        usuário que é gerente de projeto, autor de uma solicitação
+                        de mudança, ou dono de um recurso com alocação/horas já
+                        lançadas — ou seja, com alguma "movimentação". */}
                     {row.role !== 'ADMIN' && (
                       <IconButton
                         icon={TrashIcon}
@@ -471,17 +455,6 @@ export default function UsersPage() {
         </Modal>
       )}
 
-      {deletingResourceTarget && (
-        <ResourceDeleteModal
-          target={deletingResourceTarget}
-          onClose={() => setDeletingResourceTarget(null)}
-          onDeleted={() => {
-            setDeletingResourceTarget(null)
-            loadAll()
-          }}
-        />
-      )}
-
       {deletingUserTarget && (
         <UserDeleteModal
           target={deletingUserTarget}
@@ -496,60 +469,16 @@ export default function UsersPage() {
   )
 }
 
-/** Modal de confirmação pra excluir o vínculo de recurso de um usuário — a
- * API recusa (409) se o recurso estiver alocado em alguma tarefa
- * (TaskAssignment) ou já tiver apontamento de horas lançado (Timesheet),
- * já que as duas FKs são ondelete="CASCADE" e apagar sem essa checagem
- * destruiria alocações/horas de outras pessoas junto (ver DELETE
- * /resources/{id}). A mensagem de erro do backend já explica qual dos dois
- * casos é, então basta repassá-la. */
-function ResourceDeleteModal({ target, onClose, onDeleted }) {
-  const { t } = useLanguage()
-  const [deleting, setDeleting] = useState(false)
-  const [error, setError] = useState('')
-
-  async function handleDelete() {
-    setDeleting(true)
-    setError('')
-    try {
-      await resourcesApi.deleteResource(target.resource.id)
-      onDeleted()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setDeleting(false)
-    }
-  }
-
-  return (
-    <Modal title={t('Excluir recurso')} onClose={onClose}>
-      <div className="space-y-4">
-        <p className="text-sm text-[var(--text-secondary)]">
-          {t('Tem certeza que quer excluir o recurso de')} <span className="font-medium text-[var(--text-primary)]">{target.row.name}</span>{' '}
-          ({target.resource.role_title})? {t('Só é possível excluir um recurso que não esteja alocado em projetos ou tarefas.')}
-        </p>
-        <ErrorBanner message={error} />
-        <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            {t('Cancelar')}
-          </Button>
-          <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
-            {deleting ? t('Excluindo…') : t('Excluir')}
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
-/** Modal de confirmação pra excluir o USUÁRIO inteiro (login + cadastro) —
- * diferente do ResourceDeleteModal acima, que só remove o vínculo de
- * recurso. Cobre o caso de um cadastro feito por engano, mesmo quando o
+/** Modal de confirmação pra excluir o USUÁRIO inteiro (login + cadastro,
+ * junto com o recurso vinculado, se houver) — não existe mais um "excluir
+ * recurso" em separado (removido a pedido: só a exclusão do usuário
+ * importa). Cobre o caso de um cadastro feito por engano, mesmo quando o
  * usuário nunca chegou a virar recurso (ex.: um PM do cliente). A API
  * recusa (409) se o usuário for o Administrador, gerente de algum
  * projeto, autor de alguma solicitação de mudança, ou dono de um recurso
- * já alocado/com horas lançadas (ver DELETE /users/{id}) — a mensagem de
- * erro do backend já explica qual dos casos é. */
+ * já alocado/com horas lançadas — ou seja, com alguma "movimentação" (ver
+ * DELETE /users/{id}) — a mensagem de erro do backend já explica qual dos
+ * casos é. */
 function UserDeleteModal({ target, onClose, onDeleted }) {
   const { t } = useLanguage()
   const [deleting, setDeleting] = useState(false)
