@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
@@ -540,14 +541,61 @@ def _task_rollups(tasks: list[Task], cal: BusinessCalendar) -> dict[str, dict]:
     return rollups
 
 
+def _natural_sort_key(text: str) -> tuple:
+    """Chave de comparação "numérica por trecho" pra strings tipo WBS
+    (ex.: "1.2" < "1.10", não o contrário como daria a comparação de string
+    pura) — mesmo critério do `localeCompare(..., {numeric: true})` usado
+    em `buildOrderedTasks` no frontend (ver ProjectDetailPage.jsx)."""
+    return tuple(int(part) if part.isdigit() else part for part in re.split(r"(\d+)", text or ""))
+
+
+def order_tasks_hierarchically(tasks: list[Task]) -> list[Task]:
+    """Ordena tarefas na ordem "natural" da EAP/WBS: hierarquia
+    (parent_task_id) + ordem manual entre irmãs (sort_order, com wbs_code
+    como desempate) — igual ao `recalculate_wbs` usa pra renumerar e ao
+    `buildOrderedTasks` do frontend usa pra montar a grade de Tarefas.
+    Usada em qualquer lugar que precise listar tarefas nessa ordem sem
+    depender de `ORDER BY wbs_code` do banco (que é só comparação de
+    string — quebra a partir de 10 tarefas-irmãs, ex.: "1.10" antes de
+    "1.2"), como o Gantt e a exportação para Excel (ambos consomem
+    `task_schedule_rows`, ver abaixo)."""
+    by_parent: dict[str | None, list[Task]] = defaultdict(list)
+    for t in tasks:
+        by_parent[t.parent_task_id].append(t)
+    for siblings in by_parent.values():
+        siblings.sort(key=lambda t: (t.sort_order, _natural_sort_key(t.wbs_code)))
+
+    ordered: list[Task] = []
+
+    def visit(parent_id: str | None) -> None:
+        for t in by_parent.get(parent_id, []):
+            ordered.append(t)
+            visit(t.id)
+
+    visit(None)
+    # Defensivo: se alguma tarefa tiver parent_task_id "órfão" (não deveria
+    # acontecer — FK é sempre para outra tarefa do mesmo projeto — mas não
+    # pode sumir silenciosamente do Gantt/exportação se acontecer).
+    if len(ordered) != len(tasks):
+        seen = {t.id for t in ordered}
+        ordered.extend(t for t in tasks if t.id not in seen)
+    return ordered
+
+
 def task_schedule_rows(session: Session, project: Project) -> dict:
     """Monta a grade de cronograma (bolinha de status + linha base + %
     previsto por tarefa) usada por GET /projects/{id}/schedule — junta o
     que já existe em Task com o que precisa ser calculado sob demanda
     (nunca fica guardado em coluna, porque muda conforme status_date e o
-    baseline mais recente)."""
+    baseline mais recente).
+
+    As tarefas voltam na ordem hierárquica da EAP/WBS (ver
+    order_tasks_hierarchically) — GET /schedule alimenta tanto o Gantt
+    quanto a exportação para Excel (app/exports.py), e nenhum dos dois
+    reordena por conta própria."""
     status_date = project.status_date or date.today()
     tasks = list(session.scalars(select(Task).where(Task.project_id == project.id)).all())
+    tasks = order_tasks_hierarchically(tasks)
     dots = task_dot_colors(tasks, status_date)
     baseline_map = _latest_baseline_task_map(session, project.id)
     cal = calendar_for_project(session, project)

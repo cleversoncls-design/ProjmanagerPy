@@ -844,6 +844,52 @@ def test_export_tasks_xlsx_returns_workbook_with_task_rows(client, setup):
     assert rows_by_wbs[child["wbs_code"]][4] is not None  # Início (próprio)
 
 
+def test_schedule_and_export_order_tasks_by_wbs_hierarchy(client, setup):
+    """Regressão: GET /schedule (usado pelo Gantt) e a exportação p/ Excel
+    vinham na ordem "crua" do banco (sem ORDER BY nenhum em
+    task_schedule_rows) em vez da ordem hierárquica da EAP/WBS — criando as
+    tarefas fora de ordem (como qualquer uso real do sistema faz: ninguém
+    cadastra 1, 1.1, 1.1.1... em sequência perfeita) já era suficiente pra
+    embaralhar o Gantt e a planilha exportada. Ver services.py
+    (order_tasks_hierarchically)."""
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    project = setup["project_a"]
+    admin_headers = setup["admin_headers"]
+
+    def create(wbs_code, parent_id=None):
+        payload = {"name": f"Tarefa {wbs_code}", "wbs_code": wbs_code}
+        if parent_id:
+            payload["parent_task_id"] = parent_id
+        return client.post(f"/projects/{project.id}/tasks", json=payload, headers=admin_headers).json()
+
+    # Cadastradas fora de ordem de propósito — mesma bagunça relatada pelo
+    # usuário (ver captura de tela: 1.2.1, 1.1.1.1, 1, 1.1.1.2, 1.2.1.2,
+    # 1.1, 1.1.1, 1.2.1.1, 1.2).
+    root = create("1")
+    t11 = create("1.1", root["id"])
+    t111 = create("1.1.1", t11["id"])
+    t12 = create("1.2", root["id"])
+    t121 = create("1.2.1", t12["id"])
+    create("1.2.1.1", t121["id"])
+    create("1.2.1.2", t121["id"])
+    create("1.1.1.1", t111["id"])
+    create("1.1.1.2", t111["id"])
+
+    expected_order = ["1", "1.1", "1.1.1", "1.1.1.1", "1.1.1.2", "1.2", "1.2.1", "1.2.1.1", "1.2.1.2"]
+
+    schedule = client.get(f"/projects/{project.id}/schedule", headers=admin_headers).json()
+    assert [t["wbs_code"] for t in schedule["tasks"]] == expected_order
+
+    response = client.get(f"/projects/{project.id}/tasks/export.xlsx", headers=admin_headers)
+    workbook = load_workbook(BytesIO(response.content))
+    sheet = workbook.active
+    wbs_column = [row[0] for row in sheet.iter_rows(min_row=2, max_row=1 + len(expected_order), values_only=True)]
+    assert wbs_column == expected_order
+
+
 # ---------------------------------------------------------------------------
 # Fase 4: motor de agendamento (effort-driven, WBS, mover tarefa, calendário
 # de projeto/status date, estatísticas, bloqueio de usuário)
