@@ -120,7 +120,7 @@ export default function ProjectDetailPage() {
 
       {tab === 'overview' && <OverviewTab project={project} report={report} evm={evm} />}
       {tab === 'tasks' && <TasksTab projectId={projectId} canWrite={canWrite} onTaskCreated={loadProject} />}
-      {tab === 'gantt' && <GanttTab projectId={projectId} />}
+      {tab === 'gantt' && <GanttTab projectId={projectId} project={project} />}
 
       {showEditModal && (
         <ProjectEditModal
@@ -1601,30 +1601,146 @@ function ganttEnd(task) {
   return task.rollup_end_date ?? task.planned_end_date
 }
 
-/** Marcações de data pro grid do fundo do Gantt — o passo (dia/semana/
- * quinzena/mês) se ajusta ao intervalo total pra não virar uma parede de
- * rótulos quando o projeto passa de poucas semanas. */
-function buildDateTicks(rangeStartDate, rangeEndDate, totalDays) {
-  let stepDays
-  if (totalDays <= 14) stepDays = 1
-  else if (totalDays <= 45) stepDays = 7
-  else if (totalDays <= 120) stepDays = 14
-  else if (totalDays <= 400) stepDays = 30
-  else stepDays = 60
+const GANTT_LABEL_COL_PX = 220
+const GANTT_DAY_PX = 34
+const GANTT_ROW_PX = 30
+// Segunda-feira de referência (03/01/2000) só pra achar o índice de semana
+// ISO-like de qualquer data por subtração de datas — não é uma data real do
+// projeto, é só uma âncora fixa de cálculo.
+const GANTT_WEEK_ANCHOR_MS = Date.UTC(2000, 0, 3)
+const GANTT_MONTH_YEAR_FORMATTER = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 
-  const ticks = []
-  const stepMs = stepDays * 86_400_000
-  for (let time = rangeStartDate.getTime(); time <= rangeEndDate.getTime(); time += stepMs) {
-    const leftPercent = Math.min(100, Math.max(0, ((time - rangeStartDate.getTime()) / 86_400_000 / totalDays) * 100))
-    ticks.push({ dateStr: new Date(time).toISOString().slice(0, 10), leftPercent })
-  }
-  if (!ticks.length || ticks[ticks.length - 1].leftPercent < 99) {
-    ticks.push({ dateStr: rangeEndDate.toISOString().slice(0, 10), leftPercent: 100 })
-  }
-  return ticks
+/** Largura de cada coluna de SEMANA no modo "semana" do Gantt — diminui
+ * conforme o período cresce (pedido do usuário), pra régua não ficar
+ * absurdamente comprida; mesmo assim o contêiner rola horizontalmente
+ * quando ainda não cabe na tela. */
+function ganttWeekColumnPx(weeksCount) {
+  if (weeksCount <= 8) return 96
+  if (weeksCount <= 16) return 72
+  if (weeksCount <= 30) return 52
+  if (weeksCount <= 60) return 38
+  return 28
 }
 
-function GanttTab({ projectId }) {
+/** Monta a régua de datas do Gantt em PIXELS (não mais em %), pra permitir
+ * rolagem horizontal e duas granularidades de zoom:
+ * - período de até ~1 mês: uma coluna por DIA (sem mês/ano — isso fica na
+ *   régua de cima) com faixas alternadas identificando cada semana;
+ * - período maior: uma coluna por SEMANA (rótulo = data de início da
+ *   semana), coluna mais estreita quanto mais semanas o período tiver.
+ * A régua de mês/ano de cima é calculada à parte, em cima do mesmo
+ * pxPerDay — funciona igual nos dois modos, sem precisar saber qual é. */
+function buildGanttLayout(rangeStartDate, rangeEndDate, totalDays) {
+  const numDays = Math.round(totalDays) + 1
+  const mode = numDays <= 31 ? 'day' : 'week'
+
+  let pxPerDay
+  const units = []
+  if (mode === 'day') {
+    pxPerDay = GANTT_DAY_PX
+    for (let i = 0; i < numDays; i += 1) {
+      const time = rangeStartDate.getTime() + i * 86_400_000
+      const weekIndex = Math.floor((time - GANTT_WEEK_ANCHOR_MS) / (7 * 86_400_000))
+      units.push({
+        key: `d${i}`,
+        leftPx: i * pxPerDay,
+        widthPx: pxPerDay,
+        label: String(new Date(time).getUTCDate()).padStart(2, '0'),
+        title: formatDate(new Date(time).toISOString().slice(0, 10)),
+        shaded: weekIndex % 2 === 1,
+      })
+    }
+  } else {
+    const weeksCount = Math.ceil(numDays / 7)
+    const weekPx = ganttWeekColumnPx(weeksCount)
+    pxPerDay = weekPx / 7
+    for (let w = 0; w < weeksCount; w += 1) {
+      const startOffsetDays = w * 7
+      const daysInWeek = Math.min(7, numDays - startOffsetDays)
+      const weekStartTime = rangeStartDate.getTime() + startOffsetDays * 86_400_000
+      const weekEndTime = weekStartTime + (daysInWeek - 1) * 86_400_000
+      const weekStartStr = new Date(weekStartTime).toISOString().slice(0, 10)
+      units.push({
+        key: `w${w}`,
+        leftPx: startOffsetDays * pxPerDay,
+        widthPx: daysInWeek * pxPerDay,
+        label: `${String(new Date(weekStartTime).getUTCDate()).padStart(2, '0')}/${String(new Date(weekStartTime).getUTCMonth() + 1).padStart(2, '0')}`,
+        title: `${formatDate(weekStartStr)} – ${formatDate(new Date(weekEndTime).toISOString().slice(0, 10))}`,
+        shaded: w % 2 === 1,
+      })
+    }
+  }
+
+  const totalWidthPx = numDays * pxPerDay
+
+  // Régua de mês/ano — sempre calculada em dias, independente do modo
+  // dia/semana da régua de baixo.
+  const monthSpans = []
+  let cursor = new Date(rangeStartDate.getTime())
+  while (cursor.getTime() <= rangeEndDate.getTime()) {
+    const nextMonthStart = Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1)
+    const segmentEndTime = Math.min(nextMonthStart - 86_400_000, rangeEndDate.getTime())
+    const daysInSegment = Math.round((segmentEndTime - cursor.getTime()) / 86_400_000) + 1
+    const leftPx = Math.round((cursor.getTime() - rangeStartDate.getTime()) / 86_400_000) * pxPerDay
+    const label = GANTT_MONTH_YEAR_FORMATTER.format(cursor)
+    monthSpans.push({
+      key: cursor.toISOString().slice(0, 7),
+      leftPx,
+      widthPx: daysInSegment * pxPerDay,
+      label: label.charAt(0).toUpperCase() + label.slice(1),
+    })
+    cursor = new Date(nextMonthStart)
+  }
+
+  function pxFromDate(dateStr) {
+    const date = parseApiDate(dateStr)
+    return Math.round((date.getTime() - rangeStartDate.getTime()) / 86_400_000) * pxPerDay
+  }
+
+  function pxWidthBetween(startStr, endStr) {
+    const start = parseApiDate(startStr)
+    const end = parseApiDate(endStr)
+    const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1)
+    return Math.max(6, days * pxPerDay)
+  }
+
+  return { mode, pxPerDay, totalWidthPx, units, monthSpans, pxFromDate, pxWidthBetween }
+}
+
+/** Resolve "var(--nome)" pra cor de verdade (hex/rgb) lendo o tema atual —
+ * necessário pro export em PNG, que desenha num <canvas> e não entende
+ * variáveis CSS. O atributo de tema (data-theme) fica no próprio
+ * <html> (ver ThemeContext.jsx), então getComputedStyle nele já resolve
+ * claro/escuro corretamente. */
+function resolveGanttColor(cssVarExpr) {
+  if (typeof document === 'undefined') return cssVarExpr
+  const match = /var\((--[\w-]+)\)/.exec(cssVarExpr || '')
+  if (!match) return cssVarExpr
+  const value = getComputedStyle(document.documentElement).getPropertyValue(match[1]).trim()
+  return value || '#94a3b8'
+}
+
+function ganttRoundRect(ctx, x, y, w, h, r) {
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2))
+  ctx.beginPath()
+  ctx.moveTo(x + radius, y)
+  ctx.arcTo(x + w, y, x + w, y + h, radius)
+  ctx.arcTo(x + w, y + h, x, y + h, radius)
+  ctx.arcTo(x, y + h, x, y, radius)
+  ctx.arcTo(x, y, x + w, y, radius)
+  ctx.closePath()
+}
+
+function ganttTruncateForCanvas(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text
+  let truncated = text
+  while (truncated.length > 1 && ctx.measureText(`${truncated}…`).width > maxWidth) {
+    truncated = truncated.slice(0, -1)
+  }
+  return `${truncated}…`
+}
+
+function GanttTab({ projectId, project }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -1678,120 +1794,280 @@ function GanttTab({ projectId }) {
   const rangeEndDate = parseApiDate(effectiveEndStr)
   const totalDays = Math.max(1, (rangeEndDate.getTime() - rangeStartDate.getTime()) / 86_400_000)
 
-  function leftPercent(dateStr) {
-    const date = parseApiDate(dateStr)
-    return Math.min(100, Math.max(0, ((date.getTime() - rangeStartDate.getTime()) / 86_400_000 / totalDays) * 100))
-  }
-
-  function widthPercent(startStr, endStr) {
-    const start = parseApiDate(startStr)
-    const end = parseApiDate(endStr)
-    const days = Math.max(1, (end.getTime() - start.getTime()) / 86_400_000 + 1)
-    return Math.max(1.5, (days / totalDays) * 100)
-  }
-
-  const ticks = buildDateTicks(rangeStartDate, rangeEndDate, totalDays)
+  const layout = buildGanttLayout(rangeStartDate, rangeEndDate, totalDays)
 
   const predecessorCount = {}
   for (const dependency of data.dependencies) {
     predecessorCount[dependency.successor_task_id] = (predecessorCount[dependency.successor_task_id] || 0) + 1
   }
 
+  // Export em PNG: desenha a mesma régua/barras num <canvas> (não é uma
+  // foto do DOM) reaproveitando o layout já calculado acima, então fica
+  // consistente com o que está na tela em qualquer zoom (dia/semana).
+  function handleExportPng() {
+    const titleH = project ? 20 : 0
+    const monthRowH = 18
+    const unitRowH = 20
+    const headerH = titleH + monthRowH + unitRowH
+    const rowH = GANTT_ROW_PX
+    const legendH = 30
+    const padX = 16
+    const padY = 12
+    const width = GANTT_LABEL_COL_PX + layout.totalWidthPx + padX * 2
+    const height = headerH + data.tasks.length * rowH + legendH + padY * 2
+
+    const scale = 2 // resolução maior pra ficar nítido ao ampliar/imprimir
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.ceil(width * scale)
+    canvas.height = Math.ceil(height * scale)
+    const ctx = canvas.getContext('2d')
+    ctx.scale(scale, scale)
+
+    const surface = resolveGanttColor('var(--surface)')
+    const border = resolveGanttColor('var(--border)')
+    const grid = resolveGanttColor('var(--grid)')
+    const textSecondary = resolveGanttColor('var(--text-secondary)')
+    const textMuted = resolveGanttColor('var(--text-muted)')
+
+    ctx.fillStyle = surface
+    ctx.fillRect(0, 0, width, height)
+    ctx.translate(padX, padY)
+
+    if (project) {
+      ctx.fillStyle = textSecondary
+      ctx.font = '600 12px sans-serif'
+      ctx.textBaseline = 'middle'
+      ctx.textAlign = 'left'
+      ctx.fillText(
+        `${project.code} — ${project.name} · Gantt (${formatDate(effectiveStartStr)} – ${formatDate(effectiveEndStr)})`,
+        0,
+        titleH / 2,
+      )
+    }
+
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    ctx.font = '600 11px sans-serif'
+    ctx.fillStyle = textSecondary
+    layout.monthSpans.forEach((m) => {
+      ctx.fillText(m.label, GANTT_LABEL_COL_PX + m.leftPx + 4, titleH + monthRowH / 2)
+    })
+
+    ctx.strokeStyle = border
+    ctx.beginPath()
+    ctx.moveTo(0, titleH + monthRowH)
+    ctx.lineTo(width - padX * 2, titleH + monthRowH)
+    ctx.stroke()
+
+    ctx.font = '10px sans-serif'
+    layout.units.forEach((u) => {
+      const x = GANTT_LABEL_COL_PX + u.leftPx
+      if (u.shaded) {
+        ctx.fillStyle = grid
+        ctx.fillRect(x, titleH + monthRowH, u.widthPx, unitRowH)
+      }
+      ctx.strokeStyle = border
+      ctx.beginPath()
+      ctx.moveTo(x, titleH + monthRowH)
+      ctx.lineTo(x, headerH)
+      ctx.stroke()
+      ctx.fillStyle = textMuted
+      ctx.textAlign = 'center'
+      ctx.fillText(u.label, x + u.widthPx / 2, titleH + monthRowH + unitRowH / 2, u.widthPx - 2)
+    })
+
+    ctx.strokeStyle = border
+    ctx.beginPath()
+    ctx.moveTo(0, headerH)
+    ctx.lineTo(width - padX * 2, headerH)
+    ctx.stroke()
+
+    ctx.font = '11px sans-serif'
+    data.tasks.forEach((task, idx) => {
+      const y = headerH + idx * rowH
+      const start = ganttStart(task)
+      const end = ganttEnd(task)
+      const color = resolveGanttColor(TASK_TYPE_COLORS[task.task_type] || 'var(--text-muted)')
+
+      ctx.strokeStyle = border
+      layout.units.forEach((u) => {
+        const x = GANTT_LABEL_COL_PX + u.leftPx
+        ctx.beginPath()
+        ctx.moveTo(x, y)
+        ctx.lineTo(x, y + rowH)
+        ctx.stroke()
+      })
+
+      ctx.fillStyle = textSecondary
+      ctx.textAlign = 'left'
+      const label = `${task.wbs_code} ${task.name}`
+      ctx.fillText(ganttTruncateForCanvas(ctx, label, GANTT_LABEL_COL_PX - 8), 0, y + rowH / 2)
+
+      if (start && end) {
+        const left = GANTT_LABEL_COL_PX + layout.pxFromDate(start)
+        ctx.fillStyle = color
+        if (task.is_milestone) {
+          const cy = y + rowH / 2
+          const s = 5
+          ctx.save()
+          ctx.translate(left + layout.pxPerDay / 2, cy)
+          ctx.rotate(Math.PI / 4)
+          ctx.fillRect(-s, -s, s * 2, s * 2)
+          ctx.restore()
+        } else {
+          const w = layout.pxWidthBetween(start, end)
+          ganttRoundRect(ctx, left, y + rowH / 2 - 6, w, 12, 3)
+          ctx.fill()
+        }
+      }
+    })
+
+    const legendY = headerH + data.tasks.length * rowH + legendH / 2
+    ctx.font = '10px sans-serif'
+    ctx.textAlign = 'left'
+    let lx = 0
+    ;[
+      { label: 'Consultoria', color: resolveGanttColor(TASK_TYPE_COLORS.CONSULTING) },
+      { label: 'Gestão', color: resolveGanttColor(TASK_TYPE_COLORS.MANAGEMENT) },
+    ].forEach((item) => {
+      ctx.fillStyle = item.color
+      ctx.beginPath()
+      ctx.arc(lx + 5, legendY, 5, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = textSecondary
+      ctx.fillText(item.label, lx + 14, legendY)
+      lx += 14 + ctx.measureText(item.label).width + 18
+    })
+
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${project?.code || projectId}_gantt.png`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    }, 'image/png')
+  }
+
   return (
     <Card>
-      <div className="mb-3 flex flex-wrap items-end gap-2">
-        <FormField label="Início do período exibido">
-          <TextInput
-            type="date"
-            value={rangeOverride.start || rangeStartStr}
-            onChange={(event) => setRangeOverride((prev) => ({ ...prev, start: event.target.value }))}
-          />
-        </FormField>
-        <FormField label="Fim do período exibido">
-          <TextInput
-            type="date"
-            value={rangeOverride.end || rangeEndStr}
-            onChange={(event) => setRangeOverride((prev) => ({ ...prev, end: event.target.value }))}
-          />
-        </FormField>
-        {hasCustomRange && (
-          <Button variant="secondary" onClick={() => setRangeOverride({ start: '', end: '' })}>
-            Restaurar período do projeto
-          </Button>
-        )}
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <FormField label="Início do período exibido">
+            <TextInput
+              type="date"
+              value={rangeOverride.start || rangeStartStr}
+              onChange={(event) => setRangeOverride((prev) => ({ ...prev, start: event.target.value }))}
+            />
+          </FormField>
+          <FormField label="Fim do período exibido">
+            <TextInput
+              type="date"
+              value={rangeOverride.end || rangeEndStr}
+              onChange={(event) => setRangeOverride((prev) => ({ ...prev, end: event.target.value }))}
+            />
+          </FormField>
+          {hasCustomRange && (
+            <Button variant="secondary" onClick={() => setRangeOverride({ start: '', end: '' })}>
+              Restaurar período do projeto
+            </Button>
+          )}
+        </div>
+        <IconButton icon={DownloadIcon} label="Exportar PNG" onClick={handleExportPng} />
       </div>
-      <div className="flex items-center gap-3 overflow-hidden">
-        <span className="w-56 shrink-0" />
-        <div className="relative h-4 flex-1 text-xs text-[var(--text-muted)]">
-          {ticks.map((tick) => {
-            // Rótulo alinhado ao centro da marcação, exceto nas pontas do
-            // eixo: lá centralizar (-translate-x-1/2) jogaria metade do
-            // texto pra fora da faixa do gráfico ("desquadrado"). Na
-            // primeira marcação o texto cresce pra direita; na última,
-            // pra esquerda.
-            const isFirst = tick.leftPercent <= 0.5
-            const isLast = tick.leftPercent >= 99.5
-            const alignClass = isFirst ? '' : isLast ? '-translate-x-full' : '-translate-x-1/2'
-            return (
-              <span key={tick.dateStr} className={`absolute whitespace-nowrap ${alignClass}`} style={{ left: `${tick.leftPercent}%` }}>
-                {formatDate(tick.dateStr)}
-              </span>
-            )
-          })}
+
+      <div className="overflow-x-auto">
+        <div style={{ width: GANTT_LABEL_COL_PX + layout.totalWidthPx }}>
+          {/* Régua de mês/ano */}
+          <div className="flex">
+            <span className="sticky left-0 z-10 shrink-0 bg-[var(--surface)]" style={{ width: GANTT_LABEL_COL_PX }} />
+            <div className="relative h-5 text-xs font-semibold text-[var(--text-secondary)]" style={{ width: layout.totalWidthPx }}>
+              {layout.monthSpans.map((m) => (
+                <span key={m.key} className="absolute top-0 truncate whitespace-nowrap pl-1" style={{ left: m.leftPx, width: m.widthPx }}>
+                  {m.label}
+                </span>
+              ))}
+            </div>
+          </div>
+          {/* Régua de dias (período ≤ 1 mês) ou semanas (período maior) */}
+          <div className="flex border-b border-[var(--border)] pb-1">
+            <span className="sticky left-0 z-10 shrink-0 bg-[var(--surface)]" style={{ width: GANTT_LABEL_COL_PX }} />
+            <div className="relative h-5 text-[10px] text-[var(--text-muted)]" style={{ width: layout.totalWidthPx }}>
+              {layout.units.map((u) => (
+                <span
+                  key={u.key}
+                  className="absolute inset-y-0 flex items-center justify-center overflow-hidden border-l border-[var(--border)]"
+                  style={{ left: u.leftPx, width: u.widthPx, backgroundColor: u.shaded ? 'var(--grid)' : 'transparent' }}
+                  title={u.title}
+                >
+                  {u.label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-1 space-y-0.5">
+            {data.tasks.map((task) => {
+              const start = ganttStart(task)
+              const end = ganttEnd(task)
+              const hasDates = Boolean(start && end)
+              const color = TASK_TYPE_COLORS[task.task_type] || 'var(--text-muted)'
+              const preds = predecessorCount[task.id] || 0
+              return (
+                <div key={task.id} className="flex items-center">
+                  <span
+                    className="sticky left-0 z-10 shrink-0 truncate bg-[var(--surface)] pr-2 text-xs text-[var(--text-secondary)]"
+                    style={{ width: GANTT_LABEL_COL_PX }}
+                    title={task.name}
+                  >
+                    <span className="text-[var(--text-muted)]">{task.wbs_code}</span> {task.name}
+                    {preds > 0 && (
+                      <span className="text-[var(--text-muted)]">
+                        {' '}
+                        · {preds} predecessora{preds > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </span>
+                  <div className="relative" style={{ width: layout.totalWidthPx, height: GANTT_ROW_PX }}>
+                    {layout.units.map((u) => (
+                      <span
+                        key={u.key}
+                        className="absolute inset-y-0 border-l border-[var(--border)]"
+                        style={{ left: u.leftPx, width: u.widthPx, backgroundColor: u.shaded ? 'var(--grid)' : 'transparent' }}
+                      />
+                    ))}
+                    {hasDates ? (
+                      task.is_milestone ? (
+                        <span
+                          className="absolute top-1/2 h-3 w-3 -translate-y-1/2 -translate-x-1/2 rotate-45"
+                          style={{ left: layout.pxFromDate(start) + layout.pxPerDay / 2, backgroundColor: color }}
+                          title={`Marco: ${formatDate(start)}`}
+                        />
+                      ) : (
+                        <span
+                          className="absolute top-1/2 h-4 -translate-y-1/2 rounded"
+                          style={{
+                            left: layout.pxFromDate(start),
+                            width: layout.pxWidthBetween(start, end),
+                            backgroundColor: color,
+                          }}
+                          title={`${formatDate(start)} – ${formatDate(end)}`}
+                        />
+                      )
+                    ) : (
+                      <span className="absolute inset-y-0 left-2 flex items-center text-xs text-[var(--text-muted)]">sem datas</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
-      <div className="space-y-2.5">
-        {data.tasks.map((task) => {
-          const start = ganttStart(task)
-          const end = ganttEnd(task)
-          const hasDates = Boolean(start && end)
-          const color = TASK_TYPE_COLORS[task.task_type] || 'var(--text-muted)'
-          const preds = predecessorCount[task.id] || 0
-          return (
-            <div key={task.id} className="flex items-center gap-3">
-              <span className="w-56 shrink-0 truncate text-xs text-[var(--text-secondary)]" title={task.name}>
-                <span className="text-[var(--text-muted)]">{task.wbs_code}</span> {task.name}
-                {preds > 0 && (
-                  <span className="text-[var(--text-muted)]">
-                    {' '}
-                    · {preds} predecessora{preds > 1 ? 's' : ''}
-                  </span>
-                )}
-              </span>
-              <div className="relative h-6 flex-1 rounded-md bg-[var(--grid)]/50">
-                {ticks.map((tick) => (
-                  <span
-                    key={tick.dateStr}
-                    className="absolute inset-y-0 w-px bg-[var(--border)]"
-                    style={{ left: `${tick.leftPercent}%` }}
-                  />
-                ))}
-                {hasDates ? (
-                  task.is_milestone ? (
-                    <span
-                      className="absolute top-1/2 h-3 w-3 -translate-y-1/2 -translate-x-1/2 rotate-45"
-                      style={{ left: `${leftPercent(start)}%`, backgroundColor: color }}
-                      title={`Marco: ${formatDate(start)}`}
-                    />
-                  ) : (
-                    <span
-                      className="absolute top-1/2 h-4 -translate-y-1/2 rounded"
-                      style={{
-                        left: `${leftPercent(start)}%`,
-                        width: `${widthPercent(start, end)}%`,
-                        backgroundColor: color,
-                      }}
-                      title={`${formatDate(start)} – ${formatDate(end)}`}
-                    />
-                  )
-                ) : (
-                  <span className="absolute inset-y-0 left-2 flex items-center text-xs text-[var(--text-muted)]">sem datas</span>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
+
       <div className="mt-5 flex items-center gap-4 border-t border-[var(--border)] pt-3 text-xs text-[var(--text-secondary)]">
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: TASK_TYPE_COLORS.CONSULTING }} />

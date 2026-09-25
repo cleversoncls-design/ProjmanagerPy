@@ -325,10 +325,10 @@ export default function UsersPage() {
               <TextInput required value={resourceForm.role_title} onChange={updateResourceField('role_title')} />
             </FormField>
             <div className="grid grid-cols-2 gap-4">
-              <FormField label="Custo interno (R$/h)" required>
+              <FormField label="Custo interno (US$/h)" required>
                 <TextInput type="number" min="0" step="0.01" required value={resourceForm.internal_cost_per_hour} onChange={updateResourceField('internal_cost_per_hour')} />
               </FormField>
-              <FormField label="Valor de faturamento (R$/h)" required>
+              <FormField label="Valor de faturamento (US$/h)" required>
                 <TextInput type="number" min="0" step="0.01" required value={resourceForm.billing_rate_per_hour} onChange={updateResourceField('billing_rate_per_hour')} />
               </FormField>
             </div>
