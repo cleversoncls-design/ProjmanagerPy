@@ -7,10 +7,12 @@ import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Table from '../components/Table'
 import Button from '../components/Button'
+import IconButton from '../components/IconButton'
 import Modal from '../components/Modal'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
 import StatusPill from '../components/StatusPill'
+import { BriefcaseIcon, KeyIcon, PencilIcon, TrashIcon } from '../components/icons'
 import { FormField, TextInput, Select } from '../components/FormField'
 import { formatCurrency } from '../utils/format'
 import { USER_STATUS_TONE } from '../utils/labels'
@@ -53,6 +55,8 @@ export default function UsersPage() {
   const [newPassword, setNewPassword] = useState('')
   const [passwordFormError, setPasswordFormError] = useState('')
   const [savingPassword, setSavingPassword] = useState(false)
+
+  const [deletingResourceTarget, setDeletingResourceTarget] = useState(null)
 
   function loadAll() {
     setLoading(true)
@@ -231,29 +235,29 @@ export default function UsersPage() {
                 header: '',
                 align: 'right',
                 render: (row) => (
-                  <div className="flex justify-end gap-3">
-                    <button type="button" onClick={() => openEditModal(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
-                      {t('Editar')}
-                    </button>
-                    <button
-                      type="button"
+                  <div className="flex justify-end gap-1.5">
+                    <IconButton icon={PencilIcon} label={t('Editar')} onClick={() => openEditModal(row)} />
+                    <IconButton
+                      icon={KeyIcon}
+                      label={t('Redefinir senha')}
                       onClick={() => {
                         setPasswordTarget(row)
                         setNewPassword('')
                         setPasswordFormError('')
                       }}
-                      className="text-xs font-medium text-[var(--series-1)] hover:underline"
-                    >
-                      {t('Redefinir senha')}
-                    </button>
+                    />
                     {resourceByUserId[row.id] ? (
-                      <button type="button" onClick={() => openEditResourceModal(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
-                        {t('Editar recurso')}
-                      </button>
+                      <>
+                        <IconButton icon={BriefcaseIcon} label={t('Editar recurso')} onClick={() => openEditResourceModal(row)} />
+                        <IconButton
+                          icon={TrashIcon}
+                          label={t('Excluir recurso')}
+                          variant="danger"
+                          onClick={() => setDeletingResourceTarget({ row, resource: resourceByUserId[row.id] })}
+                        />
+                      </>
                     ) : (
-                      <button type="button" onClick={() => openLinkResourceModal(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
-                        {t('Vincular como recurso')}
-                      </button>
+                      <IconButton icon={BriefcaseIcon} label={t('Vincular como recurso')} onClick={() => openLinkResourceModal(row)} />
                     )}
                   </div>
                 ),
@@ -442,6 +446,63 @@ export default function UsersPage() {
           </form>
         </Modal>
       )}
+
+      {deletingResourceTarget && (
+        <ResourceDeleteModal
+          target={deletingResourceTarget}
+          onClose={() => setDeletingResourceTarget(null)}
+          onDeleted={() => {
+            setDeletingResourceTarget(null)
+            loadAll()
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/** Modal de confirmação pra excluir o vínculo de recurso de um usuário — a
+ * API recusa (409) se o recurso estiver alocado em alguma tarefa
+ * (TaskAssignment) ou já tiver apontamento de horas lançado (Timesheet),
+ * já que as duas FKs são ondelete="CASCADE" e apagar sem essa checagem
+ * destruiria alocações/horas de outras pessoas junto (ver DELETE
+ * /resources/{id}). A mensagem de erro do backend já explica qual dos dois
+ * casos é, então basta repassá-la. */
+function ResourceDeleteModal({ target, onClose, onDeleted }) {
+  const { t } = useLanguage()
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleDelete() {
+    setDeleting(true)
+    setError('')
+    try {
+      await resourcesApi.deleteResource(target.resource.id)
+      onDeleted()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Modal title={t('Excluir recurso')} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--text-secondary)]">
+          {t('Tem certeza que quer excluir o recurso de')} <span className="font-medium text-[var(--text-primary)]">{target.row.name}</span>{' '}
+          ({target.resource.role_title})? {t('Só é possível excluir um recurso que não esteja alocado em projetos ou tarefas.')}
+        </p>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
+            {deleting ? t('Excluindo…') : t('Excluir')}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   )
 }

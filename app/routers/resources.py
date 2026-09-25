@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import require_roles
 from ..i18n import t as translate
-from ..models import Calendar, Resource, User, UserRole
+from ..models import Calendar, Resource, TaskAssignment, Timesheet, User, UserRole
 from ..schemas import ResourceCreate, ResourceRead, ResourceUpdate, ResourceUtilizationRow
 from ..services import resource_utilization
 
@@ -118,3 +118,33 @@ def update_resource(
     db.commit()
     db.refresh(resource)
     return resource
+
+
+@router.delete("/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_resource(
+    resource_id: str,
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    db: Session = Depends(get_db),
+) -> None:
+    """Só permite apagar um recurso que nunca foi alocado em nenhuma tarefa
+    nem tem apontamento de horas registrado. As duas FKs que apontam pra cá
+    (TaskAssignment.resource_id, Timesheet.resource_id) são
+    ondelete="CASCADE" — sem esta checagem, apagar o recurso apagaria
+    silenciosamente alocações em tarefas e horas já lançadas (inclusive de
+    projetos fechados), então a checagem vem antes do DELETE em vez de
+    confiar só na constraint do banco."""
+    resource = db.get(Resource, resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail=translate("Recurso não encontrado", user.language))
+    if db.scalar(select(TaskAssignment).where(TaskAssignment.resource_id == resource_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Recurso está alocado em uma ou mais tarefas — remova as alocações antes de excluir", user.language),
+        )
+    if db.scalar(select(Timesheet).where(Timesheet.resource_id == resource_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Recurso tem apontamento de horas em projetos/tarefas — não pode ser excluído", user.language),
+        )
+    db.delete(resource)
+    db.commit()
