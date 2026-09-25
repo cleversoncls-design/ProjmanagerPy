@@ -54,6 +54,8 @@ _ES: dict[str, str] = {
     "Recurso já alocado nesta tarefa": "Recurso ya asignado a esta tarea",
     "Recurso não encontrado": "Recurso no encontrado",
     "Recurso não está alocado nesta tarefa": "El recurso no está asignado a esta tarea",
+    "Recurso está alocado em uma ou mais tarefas — remova as alocações antes de excluir": "El recurso está asignado a una o más tareas — quite las asignaciones antes de eliminarlo",
+    "Recurso tem apontamento de horas em projetos/tarefas — não pode ser excluído": "El recurso tiene horas registradas en proyectos/tareas — no se puede eliminar",
     "Risco não encontrado": "Riesgo no encontrado",
     "Solicitação de mudança não encontrada": "Solicitud de cambio no encontrada",
     "Solicitação não encontrada": "Solicitud no encontrada",

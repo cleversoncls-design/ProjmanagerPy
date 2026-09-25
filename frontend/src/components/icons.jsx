@@ -168,3 +168,13 @@ export const ColumnsIcon = (props) => (
     <path d="M9.5 4.5v15M14.5 4.5v15" />
   </Icon>
 )
+
+// Ação "Redefinir senha" por linha (tela de Usuários) — substitui o botão
+// de texto, mesmo padrão de ícone+title/aria-label do IconButton.
+export const KeyIcon = (props) => (
+  <Icon {...props}>
+    <circle cx="8" cy="15" r="4" />
+    <path d="M11 12 19.5 3.5" />
+    <path d="M16.5 6.5 19 9M14 9l2 2" />
+  </Icon>
+)
