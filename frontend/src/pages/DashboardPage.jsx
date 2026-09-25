@@ -10,14 +10,8 @@ import Table from '../components/Table'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
 import { formatCurrency, formatDate, formatPercent } from '../utils/format'
-import {
-  PROJECT_STATUS_LABELS,
-  PROJECT_STATUS_TONE,
-  TASK_STATUS_COLORS,
-  TASK_STATUS_LABELS,
-  TASK_TYPE_COLORS,
-  TASK_TYPE_LABELS,
-} from '../utils/labels'
+import { PROJECT_STATUS_TONE, TASK_STATUS_COLORS, TASK_TYPE_COLORS } from '../utils/labels'
+import { useLanguage } from '../context/LanguageContext'
 
 // Ordenado por valor para leitura mais fácil (maior primeiro) — a cor de
 // cada categoria vem de um mapa fixo (colorMap), nunca da posição aqui, então
@@ -29,6 +23,7 @@ function toBarItems(counts, labelMap, colorMap) {
 }
 
 export default function DashboardPage() {
+  const { labels } = useLanguage()
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -70,14 +65,14 @@ export default function DashboardPage() {
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Card title="Tarefas por status">
               {data.tasks_total > 0 ? (
-                <CategoryBars items={toBarItems(data.tasks_by_status, TASK_STATUS_LABELS, TASK_STATUS_COLORS)} />
+                <CategoryBars items={toBarItems(data.tasks_by_status, labels.TASK_STATUS_LABELS, TASK_STATUS_COLORS)} />
               ) : (
                 <p className="text-sm text-[var(--text-muted)]">Nenhuma tarefa cadastrada ainda.</p>
               )}
             </Card>
             <Card title="Tarefas por tipo">
               {data.tasks_total > 0 ? (
-                <CategoryBars items={toBarItems(data.tasks_by_type, TASK_TYPE_LABELS, TASK_TYPE_COLORS)} />
+                <CategoryBars items={toBarItems(data.tasks_by_type, labels.TASK_TYPE_LABELS, TASK_TYPE_COLORS)} />
               ) : (
                 <p className="text-sm text-[var(--text-muted)]">Nenhuma tarefa cadastrada ainda.</p>
               )}
@@ -99,7 +94,7 @@ export default function DashboardPage() {
                 {
                   key: 'status',
                   header: 'Status',
-                  render: (row) => <StatusPill label={PROJECT_STATUS_LABELS[row.status] || row.status} tone={PROJECT_STATUS_TONE[row.status]} />,
+                  render: (row) => <StatusPill label={labels.PROJECT_STATUS_LABELS[row.status] || row.status} tone={PROJECT_STATUS_TONE[row.status]} />,
                 },
                 { key: 'percent_complete', header: '% concluído', align: 'right', render: (row) => formatPercent(row.percent_complete) },
                 { key: 'tasks_remaining', header: 'Tarefas restantes', align: 'right' },

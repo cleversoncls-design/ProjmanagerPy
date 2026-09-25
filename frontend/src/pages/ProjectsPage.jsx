@@ -15,7 +15,8 @@ import ErrorBanner from '../components/ErrorBanner'
 import StatusPill from '../components/StatusPill'
 import { FormField, TextInput, Select } from '../components/FormField'
 import { formatCurrency, formatPercent } from '../utils/format'
-import { MANAGEMENT_ROLES, PROJECT_STATUS_LABELS, PROJECT_STATUS_TONE } from '../utils/labels'
+import { MANAGEMENT_ROLES, PROJECT_STATUS_TONE } from '../utils/labels'
+import { useLanguage } from '../context/LanguageContext'
 
 const EMPTY_FORM = {
   client_id: '',
@@ -32,6 +33,7 @@ const EMPTY_FORM = {
 
 export default function ProjectsPage() {
   const { user } = useAuth()
+  const { labels } = useLanguage()
   const canCreate = MANAGEMENT_ROLES.includes(user.role)
 
   const [rows, setRows] = useState([])
@@ -123,7 +125,7 @@ export default function ProjectsPage() {
               {
                 key: 'status',
                 header: 'Status',
-                render: (row) => <StatusPill label={PROJECT_STATUS_LABELS[row.status] || row.status} tone={PROJECT_STATUS_TONE[row.status]} />,
+                render: (row) => <StatusPill label={labels.PROJECT_STATUS_LABELS[row.status] || row.status} tone={PROJECT_STATUS_TONE[row.status]} />,
               },
               { key: 'percent_complete', header: '% concluído', align: 'right', render: (row) => formatPercent(row.percent_complete) },
               { key: 'tasks_remaining', header: 'Tarefas restantes', align: 'right' },

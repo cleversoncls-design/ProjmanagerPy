@@ -437,6 +437,32 @@ def test_update_resource_changes_role_and_cost(client, setup):
     assert bad_calendar.status_code == 404
 
 
+def test_user_can_change_own_language_without_admin_role(client, setup):
+    """PATCH /users/me — autoatendimento de idioma: qualquer usuário logado
+    troca o próprio idioma, sem depender de um ADMIN editar o cadastro
+    (diferente de PATCH /users/{id}, restrito a ADMIN)."""
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    me = client.get("/users/me", headers=consultant_headers).json()
+    assert me["language"] == "pt-BR"
+
+    updated = client.patch("/users/me", json={"language": "es"}, headers=consultant_headers)
+    assert updated.status_code == 200
+    assert updated.json()["language"] == "es"
+
+    me_again = client.get("/users/me", headers=consultant_headers).json()
+    assert me_again["language"] == "es"
+
+    # Mensagens de erro passam a vir em espanhol para este usuário.
+    bad_project = client.post(
+        "/timesheets",
+        json={"task_id": "id-inexistente", "date": "2026-01-01", "hours_spent": "1"},
+        headers=consultant_headers,
+    )
+    assert bad_project.status_code == 422
+    assert "recurso" in bad_project.json()["detail"].lower()
+
+
 def test_adhoc_timesheet_without_task_or_project(client, setup):
     """Apontamento avulso (padrão Clockify/Toggl): sem task_id, sem exigir
     TaskAssignment prévio. project_id é opcional para alocar a hora avulsa

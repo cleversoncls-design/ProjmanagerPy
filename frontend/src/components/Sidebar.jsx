@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useLanguage } from '../context/LanguageContext'
 import { MANAGEMENT_ROLES } from '../utils/labels'
 import logo from '../assets/resultar-logo.png'
 import { BriefcaseIcon, BuildingIcon, CalendarIcon, HomeIcon, UsersIcon } from './icons'
@@ -26,6 +27,7 @@ const WIDTH_COLLAPSED = 76
  * junto, em tempo real, como o resto da tela. */
 export default function Sidebar() {
   const { user } = useAuth()
+  const { t } = useLanguage()
   const items = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(user.role))
   const [expanded, setExpanded] = useState(false)
 
@@ -59,7 +61,7 @@ export default function Sidebar() {
               className="px-2.5 pb-1.5 text-[10px] font-extrabold uppercase tracking-wider"
               style={{ color: 'var(--nav-fg-muted)' }}
             >
-              Workspace
+              {t('Workspace')}
             </p>
           )}
           <nav className="space-y-1">
@@ -80,7 +82,7 @@ export default function Sidebar() {
                         className="ml-3 flex-1 text-[13px] font-semibold whitespace-nowrap"
                         style={{ color: isActive ? 'var(--nav-fg-strong)' : 'var(--nav-fg)' }}
                       >
-                        {item.label}
+                        {t(item.label)}
                       </span>
                     )}
                   </>

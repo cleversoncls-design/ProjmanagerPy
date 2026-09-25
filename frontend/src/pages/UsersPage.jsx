@@ -13,7 +13,8 @@ import ErrorBanner from '../components/ErrorBanner'
 import StatusPill from '../components/StatusPill'
 import { FormField, TextInput, Select } from '../components/FormField'
 import { formatCurrency } from '../utils/format'
-import { ROLE_LABELS, USER_STATUS_LABELS, USER_STATUS_TONE } from '../utils/labels'
+import { USER_STATUS_TONE } from '../utils/labels'
+import { useLanguage } from '../context/LanguageContext'
 
 const EXTERNAL_ROLES = ['CLIENT_PM', 'CLIENT_USER']
 
@@ -21,6 +22,7 @@ const EMPTY_USER_FORM = { name: '', email: '', password: '', role: 'CONSULTANT',
 const EMPTY_RESOURCE_FORM = { role_title: '', internal_cost_per_hour: '', billing_rate_per_hour: '', daily_capacity_hours: '8', calendar_id: '' }
 
 export default function UsersPage() {
+  const { labels } = useLanguage()
   const [users, setUsers] = useState([])
   const [resources, setResources] = useState([])
   const [calendars, setCalendars] = useState([])
@@ -208,11 +210,11 @@ export default function UsersPage() {
             columns={[
               { key: 'name', header: 'Nome' },
               { key: 'email', header: 'E-mail' },
-              { key: 'role', header: 'Perfil', render: (row) => <StatusPill label={ROLE_LABELS[row.role] || row.role} tone="muted" /> },
+              { key: 'role', header: 'Perfil', render: (row) => <StatusPill label={labels.ROLE_LABELS[row.role] || row.role} tone="muted" /> },
               {
                 key: 'status',
                 header: 'Situação',
-                render: (row) => <StatusPill label={USER_STATUS_LABELS[row.status] || row.status} tone={USER_STATUS_TONE[row.status] || 'muted'} />,
+                render: (row) => <StatusPill label={labels.USER_STATUS_LABELS[row.status] || row.status} tone={USER_STATUS_TONE[row.status] || 'muted'} />,
               },
               { key: 'client', header: 'Cliente', render: (row) => (row.client_id ? clientById[row.client_id]?.legal_name || '—' : '—') },
               {
@@ -278,7 +280,7 @@ export default function UsersPage() {
             </FormField>
             <FormField label="Perfil" required>
               <Select required value={userForm.role} onChange={updateUserField('role')}>
-                {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                {Object.entries(labels.ROLE_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
                   </option>
@@ -377,7 +379,7 @@ export default function UsersPage() {
             </FormField>
             <FormField label="Perfil" required>
               <Select required value={editForm.role} onChange={updateEditField('role')}>
-                {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                {Object.entries(labels.ROLE_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
                   </option>
@@ -398,7 +400,7 @@ export default function UsersPage() {
             )}
             <FormField label="Situação" required hint="Bloqueado impede login imediatamente.">
               <Select required value={editForm.status} onChange={updateEditField('status')}>
-                {Object.entries(USER_STATUS_LABELS).map(([value, label]) => (
+                {Object.entries(labels.USER_STATUS_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
                   </option>

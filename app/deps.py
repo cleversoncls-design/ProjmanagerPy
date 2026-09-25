@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from .database import get_db
+from .i18n import request_language, t
 from .models import Project, User, UserRole, UserStatus
 from .security import decode_access_token
 
@@ -15,6 +16,7 @@ EXTERNAL_ROLES = {UserRole.CLIENT_PM, UserRole.CLIENT_USER}
 
 
 def get_current_user(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     db: Session = Depends(get_db),
 ) -> User:
@@ -27,7 +29,7 @@ def get_current_user(
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token de acesso ausente",
+            detail=t("Token de acesso ausente", request_language(request)),
             headers={"WWW-Authenticate": "Bearer"},
         )
     token = authorization.split(" ", 1)[1].strip()
@@ -36,12 +38,13 @@ def get_current_user(
     except jwt.PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido ou expirado",
+            detail=t("Token inválido ou expirado", request_language(request)),
             headers={"WWW-Authenticate": "Bearer"},
         )
     user = db.get(User, user_id)
     if not user or user.status != UserStatus.ACTIVE:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário inválido ou inativo")
+        lang = user.language if user else request_language(request)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=t("Usuário inválido ou inativo", lang))
     return user
 
 
@@ -50,7 +53,7 @@ def require_roles(*roles: UserRole):
 
     def dependency(user: User = Depends(get_current_user)) -> User:
         if user.role not in roles:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Perfil sem permissão para esta operação")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=t("Perfil sem permissão para esta operação", user.language))
         return user
 
     return dependency
@@ -73,6 +76,6 @@ def require_project_access(project: Project, user: User, write: bool = False) ->
     escrita nunca era aplicada.)
     """
     if user.role in EXTERNAL_ROLES and project.client_id != user.client_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Projeto fora do escopo do cliente")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=t("Projeto fora do escopo do cliente", user.language))
     if write and user.role == UserRole.CLIENT_USER:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Perfil sem permissão de escrita")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=t("Perfil sem permissão de escrita", user.language))

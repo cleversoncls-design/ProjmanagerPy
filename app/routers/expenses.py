@@ -6,16 +6,17 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user, require_project_access
+from ..i18n import t as translate
 from ..models import Project, ProjectExpense, User
 from ..schemas import ProjectExpenseCreate, ProjectExpenseRead
 
 router = APIRouter(prefix="/projects/{project_id}/expenses", tags=["expenses"])
 
 
-def _get_project_or_404(db: Session, project_id: str) -> Project:
+def _get_project_or_404(db: Session, project_id: str, lang: str) -> Project:
     project = db.get(Project, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", lang))
     return project
 
 
@@ -26,7 +27,7 @@ def create_expense(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ProjectExpense:
-    project = _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id, user.language)
     require_project_access(project, user, write=True)
     expense = ProjectExpense(project_id=project_id, **data.model_dump())
     db.add(expense)
@@ -37,6 +38,6 @@ def create_expense(
 
 @router.get("", response_model=list[ProjectExpenseRead])
 def list_expenses(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[ProjectExpense]:
-    project = _get_project_or_404(db, project_id)
+    project = _get_project_or_404(db, project_id, user.language)
     require_project_access(project, user)
     return list(db.scalars(select(ProjectExpense).where(ProjectExpense.project_id == project_id)).all())

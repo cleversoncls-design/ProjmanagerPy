@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..audit import record_audit
 from ..database import get_db
 from ..deps import get_current_user, require_project_access, require_roles
+from ..i18n import t as translate
 from ..models import (
     AuditAction,
     Project,
@@ -63,7 +64,7 @@ def _recalculate_actual_hours(db: Session, task_id: str | None) -> None:
 def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Timesheet:
     resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
     if not resource:
-        raise HTTPException(status_code=422, detail="Usuário não possui recurso habilitado")
+        raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
 
     task: Task | None = None
     project: Project | None = None
@@ -71,17 +72,17 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
     if data.task_id:
         task = db.get(Task, data.task_id)
         if not task:
-            raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+            raise HTTPException(status_code=404, detail=translate("Tarefa não encontrada", user.language))
         project = db.get(Project, task.project_id)
         require_project_access(project, user, write=True)
         if project.status != ProjectStatus.ACTIVE:
-            raise HTTPException(status_code=422, detail="Só é possível apontar horas em projetos ativos")
+            raise HTTPException(status_code=422, detail=translate("Só é possível apontar horas em projetos ativos", user.language))
 
         assignment = db.scalar(
             select(TaskAssignment).where(TaskAssignment.task_id == task.id, TaskAssignment.resource_id == resource.id)
         )
         if not assignment:
-            raise HTTPException(status_code=403, detail="Recurso não está alocado nesta tarefa")
+            raise HTTPException(status_code=403, detail=translate("Recurso não está alocado nesta tarefa", user.language))
 
         duplicate = db.scalar(
             select(Timesheet).where(
@@ -91,17 +92,17 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
             )
         )
         if duplicate:
-            raise HTTPException(status_code=409, detail="Já existe um apontamento deste recurso nesta tarefa para esta data")
+            raise HTTPException(status_code=409, detail=translate("Já existe um apontamento deste recurso nesta tarefa para esta data", user.language))
     elif data.project_id:
         # Apontamento avulso (sem task na EAP) mas alocado a um projeto —
         # ex.: reunião com o cliente, suporte pontual. Continua exigindo
         # escopo/escrita e projeto ativo, só dispensa TaskAssignment.
         project = db.get(Project, data.project_id)
         if not project:
-            raise HTTPException(status_code=404, detail="Projeto não encontrado")
+            raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
         require_project_access(project, user, write=True)
         if project.status != ProjectStatus.ACTIVE:
-            raise HTTPException(status_code=422, detail="Só é possível apontar horas em projetos ativos")
+            raise HTTPException(status_code=422, detail=translate("Só é possível apontar horas em projetos ativos", user.language))
     # else: hora administrativa interna (sem task nem projeto) — qualquer
     # recurso autenticado pode lançar, sem checagem de escopo de cliente.
 
@@ -137,11 +138,11 @@ def list_timesheets(
     elif project_id:
         project = db.get(Project, project_id)
         if not project:
-            raise HTTPException(status_code=404, detail="Projeto não encontrado")
+            raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
         require_project_access(project, user)
         stmt = stmt.where(or_(Task.project_id == project_id, Timesheet.project_id == project_id))
     else:
-        raise HTTPException(status_code=422, detail="Informe project_id ou task_id")
+        raise HTTPException(status_code=422, detail=translate("Informe project_id ou task_id", user.language))
     return list(db.scalars(stmt).all())
 
 
@@ -154,7 +155,7 @@ def update_timesheet_status(
 ) -> Timesheet:
     entry = db.get(Timesheet, timesheet_id)
     if not entry:
-        raise HTTPException(status_code=404, detail="Apontamento não encontrado")
+        raise HTTPException(status_code=404, detail=translate("Apontamento não encontrado", user.language))
     entry.status = data.status
     _recalculate_actual_hours(db, entry.task_id)
     record_audit(

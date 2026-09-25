@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 from ..audit import record_audit
 from ..database import get_db
 from ..deps import get_current_user, require_roles
+from ..i18n import t as translate
 from ..models import AuditAction, Client, User, UserRole
-from ..schemas import UserCreate, UserPasswordReset, UserRead, UserUpdate
+from ..schemas import UserCreate, UserPasswordReset, UserRead, UserSelfUpdate, UserUpdate
 from ..security import hash_password
 
 router = APIRouter(tags=["users"])
@@ -17,15 +18,15 @@ router = APIRouter(tags=["users"])
 @router.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def create_user(
     data: UserCreate,
-    _: User = Depends(require_roles(UserRole.ADMIN)),
+    admin_user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ) -> User:
     if data.role in {UserRole.CLIENT_PM, UserRole.CLIENT_USER} and not data.client_id:
-        raise HTTPException(status_code=422, detail="Perfis de cliente exigem client_id")
+        raise HTTPException(status_code=422, detail=translate("Perfis de cliente exigem client_id", admin_user.language))
     if data.client_id and not db.get(Client, data.client_id):
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        raise HTTPException(status_code=404, detail=translate("Cliente não encontrado", admin_user.language))
     if db.scalar(select(User).where(User.email == data.email)):
-        raise HTTPException(status_code=409, detail="Já existe um usuário com este e-mail")
+        raise HTTPException(status_code=409, detail=translate("Já existe um usuário com este e-mail", admin_user.language))
     user = User(
         name=data.name,
         email=data.email,
@@ -41,6 +42,20 @@ def create_user(
 
 @router.get("/users/me", response_model=UserRead)
 def read_current_user(current_user: User = Depends(get_current_user)) -> User:
+    return current_user
+
+
+@router.patch("/users/me", response_model=UserRead)
+def update_my_language(
+    data: UserSelfUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    """Autoatendimento de idioma — qualquer usuário logado pode trocar,
+    sem depender de um ADMIN editar o cadastro (PATCH /users/{id})."""
+    current_user.language = data.language
+    db.commit()
+    db.refresh(current_user)
     return current_user
 
 
@@ -76,14 +91,14 @@ def update_user(
     routers/auth.py, que já checavam `status != ACTIVE`)."""
     user = db.get(User, user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+        raise HTTPException(status_code=404, detail=translate("Usuário não encontrado", current_user.language))
     changes = data.model_dump(exclude_unset=True)
     if "role" in changes and changes["role"] in {UserRole.CLIENT_PM, UserRole.CLIENT_USER}:
         effective_client_id = changes.get("client_id", user.client_id)
         if not effective_client_id:
-            raise HTTPException(status_code=422, detail="Perfis de cliente exigem client_id")
+            raise HTTPException(status_code=422, detail=translate("Perfis de cliente exigem client_id", current_user.language))
     if "client_id" in changes and changes["client_id"] and not db.get(Client, changes["client_id"]):
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        raise HTTPException(status_code=404, detail=translate("Cliente não encontrado", current_user.language))
     for field, value in changes.items():
         setattr(user, field, value)
     if changes:
@@ -102,7 +117,7 @@ def reset_user_password(
 ) -> None:
     user = db.get(User, user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+        raise HTTPException(status_code=404, detail=translate("Usuário não encontrado", current_user.language))
     user.password_hash = hash_password(data.new_password)
     record_audit(db, entity_type="user", entity_id=user.id, action=AuditAction.UPDATE, user_id=current_user.id, details={"action": "password_reset"})
     db.commit()

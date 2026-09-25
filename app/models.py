@@ -31,6 +31,16 @@ class UserStatus(StrEnum):
     BLOCKED = "BLOCKED"
 
 
+class Language(StrEnum):
+    """Idioma da interface e das mensagens de erro da API — hoje só
+    Português (padrão) e Espanhol. Fica no cadastro do usuário (não no
+    navegador) pra seguir o usuário entre dispositivos, ver
+    routers/users.py PATCH /users/me."""
+
+    PT_BR = "pt-BR"
+    ES = "es"
+
+
 class IntakeStatus(StrEnum):
     SUBMITTED = "SUBMITTED"
     UNDER_REVIEW = "UNDER_REVIEW"
@@ -130,6 +140,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(nullable=False)
     status: Mapped[UserStatus] = mapped_column(nullable=False, default=UserStatus.ACTIVE)
+    language: Mapped[Language] = mapped_column(nullable=False, default=Language.PT_BR)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     client: Mapped[Client | None] = relationship(back_populates="users")

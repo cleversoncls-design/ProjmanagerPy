@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user, require_project_access
+from ..i18n import t as translate
 from ..models import Baseline, Project, Task, User
 from ..schemas import BaselineCreate, BaselineRead
 from ..services import _task_rollups, calendar_for_project
@@ -32,7 +33,7 @@ def create_baseline(
 ) -> Baseline:
     project = db.get(Project, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
     require_project_access(project, user, write=True)
     tasks = db.scalars(select(Task).where(Task.project_id == project_id)).all()
     # Tarefa-pai (WBS) nunca tem planned_start_date/planned_end_date/
@@ -81,6 +82,6 @@ def create_baseline(
 def list_baselines(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[Baseline]:
     project = db.get(Project, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
     require_project_access(project, user)
     return list(db.scalars(select(Baseline).where(Baseline.project_id == project_id)).all())

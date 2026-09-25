@@ -9,6 +9,7 @@ import * as usersApi from '../api/users'
 import * as resourcesApi from '../api/resources'
 import * as calendarsApi from '../api/calendars'
 import { useAuth } from '../context/AuthContext'
+import { useLanguage } from '../context/LanguageContext'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import StatTile from '../components/StatTile'
@@ -25,18 +26,12 @@ import { FormField, TextInput, Select, TextArea } from '../components/FormField'
 import { ColumnsIcon, DownloadIcon, FlagIcon, HashIcon, MoveIcon, PencilIcon, PlusIcon, RefreshIcon, TrashIcon } from '../components/icons'
 import { formatCurrency, formatDate, formatIndex, formatNumber, formatPercent, parseApiDate } from '../utils/format'
 import {
-  APPROVAL_STATUS_LABELS,
   APPROVAL_STATUS_TONE,
-  DEPENDENCY_TYPE_LABELS,
-  DEPENDENCY_TYPE_SHORT,
   MANAGEMENT_ROLES,
-  PROJECT_STATUS_LABELS,
   PROJECT_STATUS_TONE,
   TASK_STATUS_COLORS,
-  TASK_STATUS_LABELS,
   TASK_STATUS_TONE,
   TASK_TYPE_COLORS,
-  TASK_TYPE_LABELS,
 } from '../utils/labels'
 
 const TABS = [
@@ -48,6 +43,7 @@ const TABS = [
 export default function ProjectDetailPage() {
   const { projectId } = useParams()
   const { user } = useAuth()
+  const { labels } = useLanguage()
   const canWrite = MANAGEMENT_ROLES.includes(user.role)
 
   const [project, setProject] = useState(null)
@@ -88,7 +84,7 @@ export default function ProjectDetailPage() {
         subtitle={client ? client.legal_name : undefined}
         action={
           <div className="flex items-center gap-2">
-            <StatusPill label={PROJECT_STATUS_LABELS[project.status] || project.status} tone={PROJECT_STATUS_TONE[project.status]} />
+            <StatusPill label={labels.PROJECT_STATUS_LABELS[project.status] || project.status} tone={PROJECT_STATUS_TONE[project.status]} />
             <Button variant="secondary" onClick={() => setShowStatsModal(true)}>
               Estatísticas
             </Button>
@@ -174,7 +170,7 @@ function OverviewTab({ project, report, evm }) {
               items={Object.entries(report.tasks_by_status).map(([key, value]) => ({
                 key,
                 value,
-                label: TASK_STATUS_LABELS[key] || key,
+                label: labels.TASK_STATUS_LABELS[key] || key,
                 color: TASK_STATUS_COLORS[key],
               }))}
             />
@@ -204,7 +200,7 @@ function OverviewTab({ project, report, evm }) {
                   ]}
                   rows={Object.entries(byType).map(([key, value]) => ({
                     id: key,
-                    type: TASK_TYPE_LABELS[key] || key,
+                    type: labels.TASK_TYPE_LABELS[key] || key,
                     hours: formatNumber(value.hours),
                     cost: formatCurrency(value.cost),
                   }))}
@@ -298,7 +294,7 @@ function ProjectEditModal({ project, onClose, onSaved }) {
         <div className="grid grid-cols-2 gap-4">
           <FormField label="Status" required>
             <Select required value={form.status} onChange={updateField('status')}>
-              {Object.entries(PROJECT_STATUS_LABELS).map(([value, label]) => (
+              {Object.entries(labels.PROJECT_STATUS_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
@@ -958,7 +954,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
           .map((dep) => {
             const pred = taskById[dep.predecessor_task_id]
             const lag = dep.lag_days ? ` ${dep.lag_days > 0 ? '+' : ''}${dep.lag_days}d` : ''
-            return `${pred ? pred.wbs_code : '?'} (${DEPENDENCY_TYPE_SHORT[dep.dependency_type] || dep.dependency_type}${lag})`
+            return `${pred ? pred.wbs_code : '?'} (${labels.DEPENDENCY_TYPE_SHORT[dep.dependency_type] || dep.dependency_type}${lag})`
           })
           .join(', ')
       },
@@ -998,12 +994,12 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     status: {
       key: 'status',
       header: 'Status',
-      render: (row) => <StatusPill label={TASK_STATUS_LABELS[row.status] || row.status} tone={TASK_STATUS_TONE[row.status]} />,
+      render: (row) => <StatusPill label={labels.TASK_STATUS_LABELS[row.status] || row.status} tone={TASK_STATUS_TONE[row.status]} />,
     },
     client_approval_status: {
       key: 'client_approval_status',
       header: 'Aprovação do cliente',
-      render: (row) => <StatusPill label={APPROVAL_STATUS_LABELS[row.client_approval_status]} tone={APPROVAL_STATUS_TONE[row.client_approval_status]} />,
+      render: (row) => <StatusPill label={labels.APPROVAL_STATUS_LABELS[row.client_approval_status]} tone={APPROVAL_STATUS_TONE[row.client_approval_status]} />,
     },
   }
 
@@ -1343,7 +1339,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           ) : (
             <FormField label="Status">
               <Select value={form.status} onChange={updateField('status')}>
-                {Object.entries(TASK_STATUS_LABELS).map(([value, label]) => (
+                {Object.entries(labels.TASK_STATUS_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
                   </option>
@@ -1411,7 +1407,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
                   return (
                     <li key={dep.id} className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm">
                       <span>
-                        {pred ? `${pred.wbs_code} — ${pred.name}` : dep.predecessor_task_id} · {DEPENDENCY_TYPE_LABELS[dep.dependency_type] || dep.dependency_type}
+                        {pred ? `${pred.wbs_code} — ${pred.name}` : dep.predecessor_task_id} · {labels.DEPENDENCY_TYPE_LABELS[dep.dependency_type] || dep.dependency_type}
                         {dep.lag_days ? ` · ${dep.lag_days > 0 ? '+' : ''}${dep.lag_days}d` : ''}
                       </span>
                       <button type="button" onClick={() => handleRemoveDependency(dep.id)} className="text-xs text-[var(--status-critical)] hover:underline">
@@ -1435,7 +1431,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
               </FormField>
               <FormField label="Tipo">
                 <Select value={depForm.dependency_type} onChange={(event) => setDepForm((prev) => ({ ...prev, dependency_type: event.target.value }))}>
-                  {Object.entries(DEPENDENCY_TYPE_LABELS).map(([value, label]) => (
+                  {Object.entries(labels.DEPENDENCY_TYPE_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
                     </option>
