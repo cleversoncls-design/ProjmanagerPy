@@ -5,21 +5,23 @@
  * longos que, quebrando em várias linhas, inflam a altura da linha inteira
  * — com `nowrap` a coluna só fica mais larga e o scroll horizontal do
  * container, que já existe, resolve).
- * `dense` (na tabela) reduz o padding vertical das linhas — usado em
- * grades longas (ex.: tarefas) onde ver mais linhas por tela importa mais
- * que o respiro extra das tabelas comuns; o padrão continua confortável.
+ * `dense` (na tabela) reduz o padding vertical das linhas e a fonte (de
+ * text-sm/14px pra text-xs/12px) — usado em grades longas (ex.: tarefas)
+ * onde ver mais linhas por tela importa mais que o respiro extra das
+ * tabelas comuns; o padrão continua confortável.
  */
 export default function Table({ columns, rows, getRowKey, emptyMessage = 'Nenhum registro encontrado.', dense = false }) {
   if (!rows || rows.length === 0) {
     return <p className="py-8 text-center text-sm text-[var(--text-muted)]">{emptyMessage}</p>
   }
 
-  const headerPadding = dense ? 'px-2 py-1' : 'px-3 py-2'
-  const cellPadding = dense ? 'px-2 py-0.5' : 'px-3 py-2.5'
+  const headerPadding = dense ? 'px-2 py-0.5' : 'px-3 py-2'
+  const cellPadding = dense ? 'px-2 py-0' : 'px-3 py-2.5'
+  const bodyText = dense ? 'text-xs' : 'text-sm'
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-sm">
+      <table className={`w-full border-collapse ${bodyText}`}>
         <thead>
           <tr className="border-b border-[var(--border)]">
             {columns.map((column) => (

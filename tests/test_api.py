@@ -408,6 +408,35 @@ def test_resource_can_be_linked_to_a_calendar(client, setup):
     assert missing_calendar.status_code == 404
 
 
+def test_update_resource_changes_role_and_cost(client, setup):
+    admin_headers = setup["admin_headers"]
+    resource = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    ).json()
+
+    updated = client.patch(
+        f"/resources/{resource['id']}",
+        json={"role_title": "Consultor sênior", "internal_cost_per_hour": "65"},
+        headers=admin_headers,
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["role_title"] == "Consultor sênior"
+    assert float(body["internal_cost_per_hour"]) == 65.0
+    # Campos não enviados no PATCH continuam com o valor original.
+    assert float(body["billing_rate_per_hour"]) == 100.0
+
+    bad_calendar = client.patch(f"/resources/{resource['id']}", json={"calendar_id": "id-inexistente"}, headers=admin_headers)
+    assert bad_calendar.status_code == 404
+
+
 def test_adhoc_timesheet_without_task_or_project(client, setup):
     """Apontamento avulso (padrão Clockify/Toggl): sem task_id, sem exigir
     TaskAssignment prévio. project_id é opcional para alocar a hora avulsa
@@ -988,6 +1017,63 @@ def test_delete_dependency_removes_predecessor_link(client, setup):
 
     remaining = client.get(f"/tasks/{succ['id']}/dependencies", headers=admin_headers)
     assert remaining.json() == []
+
+
+def test_delete_task_succeeds_without_children_or_timesheets(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(f"/projects/{project_id}/tasks", json={"name": "Descartável", "wbs_code": "9"}, headers=admin_headers).json()
+
+    delete = client.delete(f"/tasks/{task['id']}", headers=admin_headers)
+    assert delete.status_code == 204
+
+    missing = client.get(f"/tasks/{task['id']}", headers=admin_headers)
+    assert missing.status_code == 404
+
+
+def test_delete_task_blocked_when_it_has_children(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    parent = client.post(f"/projects/{project_id}/tasks", json={"name": "Pai", "wbs_code": "9"}, headers=admin_headers).json()
+    client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Filho", "wbs_code": "9.1", "parent_task_id": parent["id"]},
+        headers=admin_headers,
+    )
+
+    delete = client.delete(f"/tasks/{parent['id']}", headers=admin_headers)
+    assert delete.status_code == 409
+
+
+def test_delete_task_blocked_when_it_has_timesheet_entries(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(f"/projects/{project_id}/tasks", json={"name": "Com apontamento", "wbs_code": "9"}, headers=admin_headers).json()
+    resource = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    ).json()
+    client.post(
+        f"/tasks/{task['id']}/assignments",
+        json={"resource_id": resource["id"], "allocated_hours": "20"},
+        headers=admin_headers,
+    )
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    logged = client.post(
+        "/timesheets",
+        json={"task_id": task["id"], "date": "2026-08-24", "hours_spent": "4"},
+        headers=consultant_headers,
+    )
+    assert logged.status_code == 201
+
+    delete = client.delete(f"/tasks/{task['id']}", headers=admin_headers)
+    assert delete.status_code == 409
 
 
 def test_admin_can_reset_user_password(client, setup):

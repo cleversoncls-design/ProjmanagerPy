@@ -14,6 +14,7 @@ import Card from '../components/Card'
 import StatTile from '../components/StatTile'
 import Table from '../components/Table'
 import Button from '../components/Button'
+import IconButton from '../components/IconButton'
 import Modal from '../components/Modal'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
@@ -21,6 +22,7 @@ import StatusPill from '../components/StatusPill'
 import StatusDot from '../components/StatusDot'
 import CategoryBars from '../components/CategoryBars'
 import { FormField, TextInput, Select, TextArea } from '../components/FormField'
+import { ColumnsIcon, DownloadIcon, FlagIcon, HashIcon, MoveIcon, PencilIcon, PlusIcon, RefreshIcon, TrashIcon } from '../components/icons'
 import { formatCurrency, formatDate, formatIndex, formatNumber, formatPercent, parseApiDate } from '../utils/format'
 import {
   APPROVAL_STATUS_LABELS,
@@ -602,6 +604,186 @@ function buildOrderedTasks(tasks) {
   return ordered
 }
 
+// Colunas "do meio" da grade de Tarefas (entre o nome da tarefa e as ações
+// da linha) que o usuário pode reordenar/esconder — da mesma forma que o
+// pedido descreveu: "de duração até aprovação do cliente". WBS/nome (fixas
+// no início) e a coluna de ações (fixa no fim) não entram aqui.
+const TASK_COLUMN_LABELS = {
+  duration_days: 'Duração',
+  estimated_hours: 'Trabalho',
+  planned_start_date: 'Início',
+  planned_end_date: 'Fim',
+  resources: 'Recursos',
+  predecessors: 'Predecessora(s)',
+  progress_percentage: '% realizado',
+  planned_percent_complete: '% previsto',
+  spi: 'SPI',
+  cpi: 'CPI',
+  baseline: 'Linha base (início)',
+  status: 'Status',
+  client_approval_status: 'Aprovação do cliente',
+}
+const DEFAULT_TASK_COLUMN_ORDER = Object.keys(TASK_COLUMN_LABELS)
+const TASK_COLUMN_PREFS_KEY = 'pmpy_task_columns_v1'
+
+/** Preferência de colunas é só visual e por navegador (não há conceito de
+ * "layout da tela" no backend, e não precisaria — é o gerente de projeto
+ * ajustando a PRÓPRIA tela) — localStorage, com fallback silencioso pro
+ * padrão se o navegador bloquear/limpar o storage. */
+function loadTaskColumnPrefs() {
+  try {
+    const raw = localStorage.getItem(TASK_COLUMN_PREFS_KEY)
+    if (!raw) return { order: DEFAULT_TASK_COLUMN_ORDER, hidden: [] }
+    const parsed = JSON.parse(raw)
+    const savedOrder = Array.isArray(parsed.order) ? parsed.order.filter((k) => TASK_COLUMN_LABELS[k]) : []
+    // Colunas novas (adicionadas depois que o usuário salvou a preferência)
+    // entram no fim, em vez de sumirem da tela sem explicação.
+    const order = [...savedOrder, ...DEFAULT_TASK_COLUMN_ORDER.filter((k) => !savedOrder.includes(k))]
+    const hidden = Array.isArray(parsed.hidden) ? parsed.hidden.filter((k) => TASK_COLUMN_LABELS[k]) : []
+    return { order, hidden }
+  } catch {
+    return { order: DEFAULT_TASK_COLUMN_ORDER, hidden: [] }
+  }
+}
+
+function saveTaskColumnPrefs(prefs) {
+  try {
+    localStorage.setItem(TASK_COLUMN_PREFS_KEY, JSON.stringify(prefs))
+  } catch {
+    // Storage bloqueado/cheio: a preferência só não sobrevive a um reload,
+    // não impede o uso da tela.
+  }
+}
+
+/** Modal "Colunas" — reordena (subir/descer) e mostra/esconde as colunas
+ * do meio da grade de Tarefas, pra cada gerente de projeto montar a visão
+ * que importa pro que está fazendo, sem depender de scroll horizontal pra
+ * achar a coluna certa. */
+function ColumnsModal({ order, hidden, onClose, onSave }) {
+  const [draftOrder, setDraftOrder] = useState(order)
+  const [draftHidden, setDraftHidden] = useState(new Set(hidden))
+
+  function move(index, delta) {
+    const target = index + delta
+    if (target < 0 || target >= draftOrder.length) return
+    const next = [...draftOrder]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    setDraftOrder(next)
+  }
+
+  function toggle(key) {
+    setDraftHidden((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  return (
+    <Modal title="Colunas da grade de tarefas" onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--text-secondary)]">
+          Escolha quais colunas aparecem e em que ordem — WBS, nome da tarefa e as ações da linha ficam sempre
+          fixas nas pontas.
+        </p>
+        <ul className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
+          {draftOrder.map((key, index) => (
+            <li key={key} className="flex items-center gap-3 px-3 py-2">
+              <label className="flex flex-1 items-center gap-2 text-sm text-[var(--text-primary)]">
+                <input type="checkbox" checked={!draftHidden.has(key)} onChange={() => toggle(key)} />
+                {TASK_COLUMN_LABELS[key]}
+              </label>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  disabled={index === 0}
+                  onClick={() => move(index, -1)}
+                  className="rounded px-1.5 py-0.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--page)] disabled:opacity-30"
+                  title="Mover para cima"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  disabled={index === draftOrder.length - 1}
+                  onClick={() => move(index, 1)}
+                  className="rounded px-1.5 py-0.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--page)] disabled:opacity-30"
+                  title="Mover para baixo"
+                >
+                  ↓
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="flex justify-between gap-2 pt-1">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setDraftOrder(DEFAULT_TASK_COLUMN_ORDER)
+              setDraftHidden(new Set())
+            }}
+          >
+            Restaurar padrão
+          </Button>
+          <div className="flex gap-2">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => onSave({ order: draftOrder, hidden: [...draftHidden] })}>
+              Salvar
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/** Modal de confirmação pra apagar uma tarefa — a API recusa (409) quando
+ * ela tem filhas na EAP ou já tem apontamento de horas lançado (ver
+ * DELETE /tasks/{id}); a mensagem de erro do backend já explica qual dos
+ * dois casos é, então basta repassá-la. */
+function DeleteTaskModal({ task, onClose, onDeleted }) {
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleDelete() {
+    setDeleting(true)
+    setError('')
+    try {
+      await tasksApi.deleteTask(task.id)
+      onDeleted()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Modal title="Apagar tarefa" onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--text-secondary)]">
+          Tem certeza que quer apagar <span className="font-medium text-[var(--text-primary)]">{task.wbs_code} {task.name}</span>?
+          Essa ação não pode ser desfeita.
+        </p>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
+            {deleting ? 'Apagando…' : 'Apagar'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 function TasksTab({ projectId, canWrite, onTaskCreated }) {
   const [schedule, setSchedule] = useState(null)
   const [resources, setResources] = useState([])
@@ -615,7 +797,10 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
   const [movingTask, setMovingTask] = useState(null)
+  const [deletingTask, setDeletingTask] = useState(null)
   const [showBaselineModal, setShowBaselineModal] = useState(false)
+  const [showColumnsModal, setShowColumnsModal] = useState(false)
+  const [columnPrefs, setColumnPrefs] = useState(loadTaskColumnPrefs)
 
   function loadSchedule() {
     setLoading(true)
@@ -700,6 +885,17 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     loadSchedule()
   }
 
+  function handleTaskDeleted() {
+    setDeletingTask(null)
+    loadSchedule()
+  }
+
+  function handleSaveColumnPrefs(prefs) {
+    setColumnPrefs(prefs)
+    saveTaskColumnPrefs(prefs)
+    setShowColumnsModal(false)
+  }
+
   function closeModal() {
     setShowModal(false)
     setEditingTask(null)
@@ -711,6 +907,104 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     setEditingTask(null)
     loadSchedule()
     onTaskCreated?.()
+  }
+
+  // Definições das colunas "do meio" (customizáveis — ver ColumnsModal),
+  // indexadas pela mesma chave usada em TASK_COLUMN_LABELS/columnPrefs.
+  // Tarefa-pai (tem filhas) não tem Duração/Trabalho/Início/Fim próprios
+  // úteis — o motor de agendamento só escreve nesses campos em
+  // tarefas-folha. O backend manda o agregado das descendentes em
+  // rollup_* (services._task_rollups); aqui é só preferir esse valor
+  // quando ele vier preenchido, caindo pro campo cru da tarefa (folha) senão.
+  const middleColumnDefs = {
+    duration_days: {
+      key: 'duration_days',
+      header: 'Duração',
+      align: 'right',
+      render: (row) => `${formatNumber(row.rollup_duration_days ?? row.duration_days)} d`,
+    },
+    estimated_hours: {
+      key: 'estimated_hours',
+      header: 'Trabalho',
+      align: 'right',
+      render: (row) => `${formatNumber(row.rollup_estimated_hours ?? row.estimated_hours)} h`,
+    },
+    planned_start_date: {
+      key: 'planned_start_date',
+      header: 'Início',
+      render: (row) => formatDate(row.rollup_start_date ?? row.planned_start_date),
+    },
+    planned_end_date: {
+      key: 'planned_end_date',
+      header: 'Fim',
+      render: (row) => formatDate(row.rollup_end_date ?? row.planned_end_date),
+    },
+    resources: {
+      key: 'resources',
+      header: 'Recursos',
+      render: (row) => {
+        const assignments = assignmentsByTask[row.id] || []
+        if (assignments.length === 0) return <span className="text-[var(--text-muted)]">—</span>
+        return assignments.map((a) => resourceLabel(a.resource_id)).join(', ')
+      },
+    },
+    predecessors: {
+      key: 'predecessors',
+      header: 'Predecessora(s)',
+      render: (row) => {
+        const deps = predecessorsBySuccessor.get(row.id) || []
+        if (deps.length === 0) return <span className="text-[var(--text-muted)]">Nenhuma</span>
+        return deps
+          .map((dep) => {
+            const pred = taskById[dep.predecessor_task_id]
+            const lag = dep.lag_days ? ` ${dep.lag_days > 0 ? '+' : ''}${dep.lag_days}d` : ''
+            return `${pred ? pred.wbs_code : '?'} (${DEPENDENCY_TYPE_SHORT[dep.dependency_type] || dep.dependency_type}${lag})`
+          })
+          .join(', ')
+      },
+    },
+    progress_percentage: {
+      key: 'progress_percentage',
+      header: '% realizado',
+      align: 'right',
+      render: (row) => formatPercent(row.progress_percentage),
+    },
+    planned_percent_complete: {
+      key: 'planned_percent_complete',
+      header: '% previsto',
+      align: 'right',
+      render: (row) => formatPercent(row.planned_percent_complete),
+    },
+    spi: { key: 'spi', header: 'SPI', align: 'right', render: (row) => formatIndex(row.spi) },
+    cpi: { key: 'cpi', header: 'CPI', align: 'right', render: (row) => formatIndex(row.cpi) },
+    baseline: {
+      key: 'baseline',
+      header: 'Linha base (início)',
+      // Só a data de início importa aqui (o que o usuário quer comparar é
+      // "começou quando devia?") — fim e trabalho da linha base continuam
+      // disponíveis no título/tooltip pra quem precisar, sem poluir a
+      // coluna com um intervalo inteiro.
+      render: (row) =>
+        row.baseline_start_date ? (
+          <span
+            title={`Fim na linha base: ${formatDate(row.baseline_end_date)} · Trabalho na linha base: ${row.baseline_estimated_hours ? `${formatNumber(row.baseline_estimated_hours)}h` : '—'}`}
+          >
+            {formatDate(row.baseline_start_date)}
+          </span>
+        ) : (
+          <span className="text-[var(--text-muted)]">—</span>
+        ),
+    },
+    status: {
+      key: 'status',
+      header: 'Status',
+      render: (row) => <StatusPill label={TASK_STATUS_LABELS[row.status] || row.status} tone={TASK_STATUS_TONE[row.status]} />,
+    },
+    client_approval_status: {
+      key: 'client_approval_status',
+      header: 'Aprovação do cliente',
+      render: (row) => <StatusPill label={APPROVAL_STATUS_LABELS[row.client_approval_status]} tone={APPROVAL_STATUS_TONE[row.client_approval_status]} />,
+    },
   }
 
   const columns = [
@@ -727,65 +1021,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
         </span>
       ),
     },
-    // Tarefa-pai (tem filhas) não tem Duração/Trabalho/Início/Fim próprios
-    // úteis — o motor de agendamento só escreve nesses campos em
-    // tarefas-folha. O backend manda o agregado das descendentes em
-    // rollup_* (services._task_rollups); aqui é só preferir esse valor
-    // quando ele vier preenchido, caindo pro campo cru da tarefa (folha) senão.
-    { key: 'duration_days', header: 'Duração', align: 'right', render: (row) => `${formatNumber(row.rollup_duration_days ?? row.duration_days)} d` },
-    { key: 'estimated_hours', header: 'Trabalho', align: 'right', render: (row) => `${formatNumber(row.rollup_estimated_hours ?? row.estimated_hours)} h` },
-    { key: 'planned_start_date', header: 'Início', render: (row) => formatDate(row.rollup_start_date ?? row.planned_start_date) },
-    { key: 'planned_end_date', header: 'Fim', render: (row) => formatDate(row.rollup_end_date ?? row.planned_end_date) },
-    {
-      key: 'resources',
-      header: 'Recursos',
-      render: (row) => {
-        const assignments = assignmentsByTask[row.id] || []
-        if (assignments.length === 0) return <span className="text-[var(--text-muted)]">—</span>
-        return assignments.map((a) => resourceLabel(a.resource_id)).join(', ')
-      },
-    },
-    {
-      key: 'predecessors',
-      header: 'Predecessora(s)',
-      render: (row) => {
-        const deps = predecessorsBySuccessor.get(row.id) || []
-        if (deps.length === 0) return <span className="text-[var(--text-muted)]">Nenhuma</span>
-        return deps
-          .map((dep) => {
-            const pred = taskById[dep.predecessor_task_id]
-            const lag = dep.lag_days ? ` ${dep.lag_days > 0 ? '+' : ''}${dep.lag_days}d` : ''
-            return `${pred ? pred.wbs_code : '?'} (${DEPENDENCY_TYPE_SHORT[dep.dependency_type] || dep.dependency_type}${lag})`
-          })
-          .join(', ')
-      },
-    },
-    { key: 'progress_percentage', header: '% realizado', align: 'right', render: (row) => formatPercent(row.progress_percentage) },
-    { key: 'planned_percent_complete', header: '% previsto', align: 'right', render: (row) => formatPercent(row.planned_percent_complete) },
-    { key: 'spi', header: 'SPI', align: 'right', render: (row) => formatIndex(row.spi) },
-    { key: 'cpi', header: 'CPI', align: 'right', render: (row) => formatIndex(row.cpi) },
-    {
-      key: 'baseline',
-      header: 'Linha base',
-      render: (row) =>
-        row.baseline_start_date || row.baseline_end_date ? (
-          <span title={`Trabalho na linha base: ${row.baseline_estimated_hours ? `${formatNumber(row.baseline_estimated_hours)}h` : '—'}`}>
-            {formatDate(row.baseline_start_date)} – {formatDate(row.baseline_end_date)}
-          </span>
-        ) : (
-          <span className="text-[var(--text-muted)]">—</span>
-        ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (row) => <StatusPill label={TASK_STATUS_LABELS[row.status] || row.status} tone={TASK_STATUS_TONE[row.status]} />,
-    },
-    {
-      key: 'client_approval_status',
-      header: 'Aprovação do cliente',
-      render: (row) => <StatusPill label={APPROVAL_STATUS_LABELS[row.client_approval_status]} tone={APPROVAL_STATUS_TONE[row.client_approval_status]} />,
-    },
+    ...columnPrefs.order.filter((key) => !columnPrefs.hidden.includes(key)).map((key) => middleColumnDefs[key]),
   ]
 
   if (canWrite) {
@@ -794,20 +1030,17 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
       header: '',
       align: 'right',
       render: (row) => (
-        <div className="flex justify-end gap-3">
-          <button
-            type="button"
+        <div className="flex justify-end gap-1.5">
+          <IconButton
+            icon={PencilIcon}
+            label="Editar tarefa"
             onClick={() => {
               setEditingTask(row)
               setShowModal(true)
             }}
-            className="text-xs font-medium text-[var(--series-1)] hover:underline"
-          >
-            Editar
-          </button>
-          <button type="button" onClick={() => setMovingTask(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
-            Mover
-          </button>
+          />
+          <IconButton icon={MoveIcon} label="Mover tarefa" onClick={() => setMovingTask(row)} />
+          <IconButton icon={TrashIcon} label="Apagar tarefa" variant="danger" onClick={() => setDeletingTask(row)} />
         </div>
       ),
     })
@@ -826,31 +1059,35 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
             </Button>
           )}
         </form>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
+          <IconButton icon={ColumnsIcon} label="Colunas" onClick={() => setShowColumnsModal(true)} />
           {/* Exportar não depende de canWrite: é leitura, então também fica
               disponível para perfis externos (CLIENT_PM/CLIENT_USER). */}
-          <Button variant="secondary" disabled={Boolean(busyMessage)} onClick={handleExport}>
-            Exportar (Excel)
-          </Button>
+          <IconButton icon={DownloadIcon} label="Exportar (Excel)" disabled={Boolean(busyMessage)} onClick={handleExport} />
           {canWrite && (
             <>
-              <Button variant="secondary" disabled={Boolean(busyMessage)} onClick={() => setShowBaselineModal(true)}>
-                Salvar linha de base
-              </Button>
-              <Button variant="secondary" disabled={Boolean(busyMessage)} onClick={() => withBusy('Recalculando WBS/EAP…', () => tasksApi.recalculateWbs(projectId))}>
-                Recalcular WBS/EAP
-              </Button>
-              <Button variant="secondary" disabled={Boolean(busyMessage)} onClick={() => withBusy('Recalculando datas do projeto…', () => tasksApi.rescheduleProject(projectId))}>
-                Recalcular tudo
-              </Button>
-              <Button
+              <IconButton icon={FlagIcon} label="Salvar linha de base" disabled={Boolean(busyMessage)} onClick={() => setShowBaselineModal(true)} />
+              <IconButton
+                icon={HashIcon}
+                label="Recalcular WBS/EAP"
+                disabled={Boolean(busyMessage)}
+                onClick={() => withBusy('Recalculando WBS/EAP…', () => tasksApi.recalculateWbs(projectId))}
+              />
+              <IconButton
+                icon={RefreshIcon}
+                label="Recalcular tudo"
+                disabled={Boolean(busyMessage)}
+                onClick={() => withBusy('Recalculando datas do projeto…', () => tasksApi.rescheduleProject(projectId))}
+              />
+              <IconButton
+                icon={PlusIcon}
+                label="Nova tarefa"
+                variant="primary"
                 onClick={() => {
                   setEditingTask(null)
                   setShowModal(true)
                 }}
-              >
-                Nova tarefa
-              </Button>
+              />
             </>
           )}
         </div>
@@ -867,6 +1104,19 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
       )}
 
       {showBaselineModal && <BaselineModal projectId={projectId} onClose={() => setShowBaselineModal(false)} onSaved={handleBaselineSaved} />}
+
+      {showColumnsModal && (
+        <ColumnsModal
+          order={columnPrefs.order}
+          hidden={columnPrefs.hidden}
+          onClose={() => setShowColumnsModal(false)}
+          onSave={handleSaveColumnPrefs}
+        />
+      )}
+
+      {deletingTask && (
+        <DeleteTaskModal task={deletingTask} onClose={() => setDeletingTask(null)} onDeleted={handleTaskDeleted} />
+      )}
 
       {showModal && (
         <TaskFormModal
@@ -1378,6 +1628,10 @@ function GanttTab({ projectId }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  // Período exibido no Gantt: por padrão é o intervalo natural (min/max das
+  // datas das tarefas), mas o usuário pode alargar pra ver um período maior
+  // (ex.: enxergar folga antes do início ou depois do fim do projeto).
+  const [rangeOverride, setRangeOverride] = useState({ start: '', end: '' })
 
   useEffect(() => {
     let active = true
@@ -1410,8 +1664,18 @@ function GanttTab({ projectId }) {
 
   const rangeStartStr = scheduled.reduce((min, t) => (ganttStart(t) < min ? ganttStart(t) : min), ganttStart(scheduled[0]))
   const rangeEndStr = scheduled.reduce((max, t) => (ganttEnd(t) > max ? ganttEnd(t) : max), ganttEnd(scheduled[0]))
-  const rangeStartDate = parseApiDate(rangeStartStr)
-  const rangeEndDate = parseApiDate(rangeEndStr)
+
+  // Override do usuário: só é aplicado se formar um intervalo válido
+  // (início <= fim) — string ISO (YYYY-MM-DD) compara lexicograficamente
+  // igual a data, então dá pra validar sem parsear. Um override inválido
+  // (ex.: campo em branco por causa de digitação incompleta) cai de volta
+  // pro intervalo natural em vez de quebrar o gráfico.
+  const effectiveStartStr = rangeOverride.start && rangeOverride.start <= (rangeOverride.end || rangeEndStr) ? rangeOverride.start : rangeStartStr
+  const effectiveEndStr = rangeOverride.end && (rangeOverride.start || rangeStartStr) <= rangeOverride.end ? rangeOverride.end : rangeEndStr
+  const hasCustomRange = effectiveStartStr !== rangeStartStr || effectiveEndStr !== rangeEndStr
+
+  const rangeStartDate = parseApiDate(effectiveStartStr)
+  const rangeEndDate = parseApiDate(effectiveEndStr)
   const totalDays = Math.max(1, (rangeEndDate.getTime() - rangeStartDate.getTime()) / 86_400_000)
 
   function leftPercent(dateStr) {
@@ -1435,18 +1699,45 @@ function GanttTab({ projectId }) {
 
   return (
     <Card>
-      <div className="flex items-center gap-3">
+      <div className="mb-3 flex flex-wrap items-end gap-2">
+        <FormField label="Início do período exibido">
+          <TextInput
+            type="date"
+            value={rangeOverride.start || rangeStartStr}
+            onChange={(event) => setRangeOverride((prev) => ({ ...prev, start: event.target.value }))}
+          />
+        </FormField>
+        <FormField label="Fim do período exibido">
+          <TextInput
+            type="date"
+            value={rangeOverride.end || rangeEndStr}
+            onChange={(event) => setRangeOverride((prev) => ({ ...prev, end: event.target.value }))}
+          />
+        </FormField>
+        {hasCustomRange && (
+          <Button variant="secondary" onClick={() => setRangeOverride({ start: '', end: '' })}>
+            Restaurar período do projeto
+          </Button>
+        )}
+      </div>
+      <div className="flex items-center gap-3 overflow-hidden">
         <span className="w-56 shrink-0" />
         <div className="relative h-4 flex-1 text-xs text-[var(--text-muted)]">
-          {ticks.map((tick) => (
-            <span
-              key={tick.dateStr}
-              className="absolute -translate-x-1/2 whitespace-nowrap"
-              style={{ left: `${tick.leftPercent}%` }}
-            >
-              {formatDate(tick.dateStr)}
-            </span>
-          ))}
+          {ticks.map((tick) => {
+            // Rótulo alinhado ao centro da marcação, exceto nas pontas do
+            // eixo: lá centralizar (-translate-x-1/2) jogaria metade do
+            // texto pra fora da faixa do gráfico ("desquadrado"). Na
+            // primeira marcação o texto cresce pra direita; na última,
+            // pra esquerda.
+            const isFirst = tick.leftPercent <= 0.5
+            const isLast = tick.leftPercent >= 99.5
+            const alignClass = isFirst ? '' : isLast ? '-translate-x-full' : '-translate-x-1/2'
+            return (
+              <span key={tick.dateStr} className={`absolute whitespace-nowrap ${alignClass}`} style={{ left: `${tick.leftPercent}%` }}>
+                {formatDate(tick.dateStr)}
+              </span>
+            )
+          })}
         </div>
       </div>
       <div className="space-y-2.5">

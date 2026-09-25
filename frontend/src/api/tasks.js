@@ -16,6 +16,10 @@ export function moveTask(taskId, payload) {
   return api.post(`/tasks/${taskId}/move`, payload)
 }
 
+export function deleteTask(taskId) {
+  return api.del(`/tasks/${taskId}`)
+}
+
 export function recalculateWbs(projectId) {
   return api.post(`/projects/${projectId}/tasks/recalculate-wbs`, {})
 }

@@ -34,6 +34,10 @@ export default function UsersPage() {
   const [savingUser, setSavingUser] = useState(false)
 
   const [resourceTarget, setResourceTarget] = useState(null)
+  // Presente = editando o recurso já vinculado a resourceTarget; null =
+  // vinculando um recurso novo (POST). Mesmo modal/form pros dois casos —
+  // só muda o título e se salvar chama create ou update.
+  const [editingResourceId, setEditingResourceId] = useState(null)
   const [resourceForm, setResourceForm] = useState(EMPTY_RESOURCE_FORM)
   const [resourceFormError, setResourceFormError] = useState('')
   const [savingResource, setSavingResource] = useState(false)
@@ -94,21 +98,47 @@ export default function UsersPage() {
     return (event) => setResourceForm((prev) => ({ ...prev, [field]: event.target.value }))
   }
 
-  async function handleCreateResource(event) {
+  function openLinkResourceModal(row) {
+    setResourceTarget(row)
+    setEditingResourceId(null)
+    setResourceForm(EMPTY_RESOURCE_FORM)
+    setResourceFormError('')
+  }
+
+  function openEditResourceModal(row) {
+    const resource = resourceByUserId[row.id]
+    if (!resource) return
+    setResourceTarget(row)
+    setEditingResourceId(resource.id)
+    setResourceForm({
+      role_title: resource.role_title,
+      internal_cost_per_hour: String(resource.internal_cost_per_hour),
+      billing_rate_per_hour: String(resource.billing_rate_per_hour),
+      daily_capacity_hours: String(resource.daily_capacity_hours),
+      calendar_id: resource.calendar_id || '',
+    })
+    setResourceFormError('')
+  }
+
+  async function handleSaveResource(event) {
     event.preventDefault()
     setResourceFormError('')
     setSavingResource(true)
     try {
       const payload = {
-        user_id: resourceTarget.id,
         role_title: resourceForm.role_title,
         internal_cost_per_hour: resourceForm.internal_cost_per_hour,
         billing_rate_per_hour: resourceForm.billing_rate_per_hour,
         daily_capacity_hours: resourceForm.daily_capacity_hours || '8',
+        calendar_id: resourceForm.calendar_id || null,
       }
-      if (resourceForm.calendar_id) payload.calendar_id = resourceForm.calendar_id
-      await resourcesApi.createResource(payload)
+      if (editingResourceId) {
+        await resourcesApi.updateResource(editingResourceId, payload)
+      } else {
+        await resourcesApi.createResource({ ...payload, user_id: resourceTarget.id })
+      }
       setResourceTarget(null)
+      setEditingResourceId(null)
       setResourceForm(EMPTY_RESOURCE_FORM)
       loadAll()
     } catch (err) {
@@ -214,8 +244,12 @@ export default function UsersPage() {
                     >
                       Redefinir senha
                     </button>
-                    {!resourceByUserId[row.id] && (
-                      <button type="button" onClick={() => setResourceTarget(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
+                    {resourceByUserId[row.id] ? (
+                      <button type="button" onClick={() => openEditResourceModal(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
+                        Editar recurso
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => openLinkResourceModal(row)} className="text-xs font-medium text-[var(--series-1)] hover:underline">
                         Vincular como recurso
                       </button>
                     )}
@@ -279,8 +313,14 @@ export default function UsersPage() {
       )}
 
       {resourceTarget && (
-        <Modal title={`Vincular recurso — ${resourceTarget.name}`} onClose={() => setResourceTarget(null)}>
-          <form onSubmit={handleCreateResource} className="space-y-4">
+        <Modal
+          title={`${editingResourceId ? 'Editar recurso' : 'Vincular recurso'} — ${resourceTarget.name}`}
+          onClose={() => {
+            setResourceTarget(null)
+            setEditingResourceId(null)
+          }}
+        >
+          <form onSubmit={handleSaveResource} className="space-y-4">
             <FormField label="Função" required hint='Ex.: "Consultor sênior", "Gerente de projetos".'>
               <TextInput required value={resourceForm.role_title} onChange={updateResourceField('role_title')} />
             </FormField>
@@ -311,7 +351,14 @@ export default function UsersPage() {
             <ErrorBanner message={resourceFormError} />
 
             <div className="flex justify-end gap-2 pt-1">
-              <Button type="button" variant="secondary" onClick={() => setResourceTarget(null)}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setResourceTarget(null)
+                  setEditingResourceId(null)
+                }}
+              >
                 Cancelar
               </Button>
               <Button type="submit" disabled={savingResource}>

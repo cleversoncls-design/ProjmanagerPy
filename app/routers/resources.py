@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import require_roles
 from ..models import Calendar, Resource, User, UserRole
-from ..schemas import ResourceCreate, ResourceRead, ResourceUtilizationRow
+from ..schemas import ResourceCreate, ResourceRead, ResourceUpdate, ResourceUtilizationRow
 from ..services import resource_utilization
 
 router = APIRouter(prefix="/resources", tags=["resources"])
@@ -92,4 +92,28 @@ def read_resource(
     resource = db.get(Resource, resource_id)
     if not resource:
         raise HTTPException(status_code=404, detail="Recurso não encontrado")
+    return resource
+
+
+@router.patch("/{resource_id}", response_model=ResourceRead)
+def update_resource(
+    resource_id: str,
+    data: ResourceUpdate,
+    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    db: Session = Depends(get_db),
+) -> Resource:
+    """Corrige o cadastro de um recurso já vinculado (função/custo interno/
+    valor de faturamento/capacidade diária/calendário pessoal) — antes só
+    dava pra definir esses campos na hora de vincular (POST /resources);
+    não havia como ajustar depois sem apagar e recriar o vínculo."""
+    resource = db.get(Resource, resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Recurso não encontrado")
+    changes = data.model_dump(exclude_unset=True)
+    if "calendar_id" in changes and changes["calendar_id"] and not db.get(Calendar, changes["calendar_id"]):
+        raise HTTPException(status_code=404, detail="Calendário não encontrado")
+    for field, value in changes.items():
+        setattr(resource, field, value)
+    db.commit()
+    db.refresh(resource)
     return resource

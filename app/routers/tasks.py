@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..audit import record_audit
 from ..database import get_db
 from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access
-from ..models import AuditAction, Project, Resource, Task, TaskApprovalStatus, TaskAssignment, TaskDependency, User
+from ..models import AuditAction, Project, Resource, Task, TaskApprovalStatus, TaskAssignment, TaskDependency, Timesheet, User
 from ..schemas import (
     RescheduleRequest,
     TaskAssignmentCreate,
@@ -149,6 +149,40 @@ def update_task(
     db.commit()
     db.refresh(task)
     return task
+
+
+@router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_task(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Apaga uma tarefa — recusa (409) se ela tiver tarefas-filhas na EAP
+    (apagar destruiria uma parte inteira da estrutura sem aviso; mova ou
+    apague as filhas primeiro) ou se já tiver algum apontamento de horas
+    (Timesheet) registrado contra ela (apagar destruiria histórico real de
+    trabalho lançado — o pedido explícito do usuário foi permitir apagar
+    "desde que não tenha tido nenhum apontamento"). Dependências e
+    alocações de recurso da própria tarefa são removidas junto (cascade no
+    banco — TaskDependency/TaskAssignment não são histórico de trabalho
+    feito, só vínculos estruturais)."""
+    task = _get_task_or_404(db, task_id)
+    require_project_access(task.project, user, write=True)
+    if db.scalar(select(Task.id).where(Task.parent_task_id == task_id)):
+        raise HTTPException(status_code=409, detail="Não é possível apagar uma tarefa que tem tarefas-filhas. Mova ou apague as filhas primeiro.")
+    if db.scalar(select(Timesheet.id).where(Timesheet.task_id == task_id)):
+        raise HTTPException(status_code=409, detail="Não é possível apagar uma tarefa que já tem apontamento de horas registrado.")
+    record_audit(
+        db,
+        entity_type="task",
+        entity_id=task.id,
+        action=AuditAction.UPDATE,
+        user_id=user.id,
+        details={"action": "task_deleted", "wbs_code": task.wbs_code, "name": task.name},
+    )
+    db.delete(task)
+    db.commit()
+    return None
 
 
 @router.post("/tasks/{task_id}/submit-for-approval", response_model=TaskRead)
