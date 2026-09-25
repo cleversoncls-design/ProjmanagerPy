@@ -249,12 +249,19 @@ export default function UsersPage() {
                     {resourceByUserId[row.id] ? (
                       <>
                         <IconButton icon={BriefcaseIcon} label={t('Editar recurso')} onClick={() => openEditResourceModal(row)} />
-                        <IconButton
-                          icon={TrashIcon}
-                          label={t('Excluir recurso')}
-                          variant="danger"
-                          onClick={() => setDeletingResourceTarget({ row, resource: resourceByUserId[row.id] })}
-                        />
+                        {/* Recurso do Administrador nunca é excluível por aqui — o resto
+                            (inclusive perfis de cliente) segue liberado, e a checagem de
+                            alocação/apontamento de horas no backend (DELETE /resources/{id})
+                            continua sendo a proteção de verdade contra apagar um recurso
+                            em uso. */}
+                        {row.role !== 'ADMIN' && (
+                          <IconButton
+                            icon={TrashIcon}
+                            label={t('Excluir recurso')}
+                            variant="danger"
+                            onClick={() => setDeletingResourceTarget({ row, resource: resourceByUserId[row.id] })}
+                          />
+                        )}
                       </>
                     ) : (
                       <IconButton icon={BriefcaseIcon} label={t('Vincular como recurso')} onClick={() => openLinkResourceModal(row)} />
