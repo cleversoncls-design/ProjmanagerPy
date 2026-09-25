@@ -15,3 +15,7 @@ export function createProject(payload) {
 export function updateProject(projectId, payload) {
   return api.patch(`/projects/${projectId}`, payload)
 }
+
+export function deleteProject(projectId) {
+  return api.del(`/projects/${projectId}`)
+}

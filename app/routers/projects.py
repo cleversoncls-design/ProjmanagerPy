@@ -8,7 +8,7 @@ from ..audit import record_audit
 from ..database import get_db
 from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access, require_roles
 from ..i18n import t as translate
-from ..models import AuditAction, Calendar, Client, Project, User, UserRole
+from ..models import AuditAction, Baseline, Calendar, ChangeRequest, Client, Project, ProjectExpense, Risk, Task, Timesheet, User, UserRole
 from ..schemas import ProjectCreate, ProjectDetail, ProjectSummary, ProjectUpdate
 from ..services import project_financials
 
@@ -113,3 +113,62 @@ def update_project(
     db.commit()
     db.refresh(project)
     return project
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project(
+    project_id: str,
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    db: Session = Depends(get_db),
+) -> None:
+    """Cobre o caso de um projeto cadastrado por engano: só permite apagar
+    enquanto ele ainda não tem nenhuma tarefa (a regra que foi pedida — o
+    projeto "recém-criado" típico não tem mais nada além disso). Mas
+    Task.project_id não é a única FK que aponta pra cá (todas
+    ondelete="CASCADE" — ver app/models.py): Baseline, ProjectExpense,
+    Risk, ChangeRequest e Timesheet avulso (sem task_id, só project_id)
+    também apontam direto pro projeto e podiam existir mesmo sem nenhuma
+    tarefa ainda (ex.: uma despesa ou um risco lançado antes de montar o
+    cronograma, ou uma linha de base tirada de um cronograma ainda vazio).
+    Sem checar esses também, o DELETE apagaria esse dado em cascata
+    silenciosamente — então cada um vira uma mensagem 409 específica em
+    vez de só travar em "tem tarefa"."""
+    # Sem require_project_access aqui: já é restrito a ADMIN/INTERNAL_PM
+    # (require_roles acima), que sempre têm acesso de escrita a qualquer
+    # projeto — perfil externo nunca chega neste endpoint.
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
+    if db.scalar(select(Task).where(Task.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem tarefas cadastradas — não pode ser excluído", user.language),
+        )
+    if db.scalar(select(Baseline).where(Baseline.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem linha(s) de base salva(s) — não pode ser excluído", user.language),
+        )
+    if db.scalar(select(ProjectExpense).where(ProjectExpense.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem despesas lançadas — não pode ser excluído", user.language),
+        )
+    if db.scalar(select(Risk).where(Risk.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem riscos cadastrados — não pode ser excluído", user.language),
+        )
+    if db.scalar(select(ChangeRequest).where(ChangeRequest.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem solicitações de mudança — não pode ser excluído", user.language),
+        )
+    if db.scalar(select(Timesheet).where(Timesheet.project_id == project_id)):
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Projeto já tem apontamento de horas avulso — não pode ser excluído", user.language),
+        )
+    record_audit(db, entity_type="project", entity_id=project.id, action=AuditAction.DELETE, user_id=user.id, details={"code": project.code})
+    db.delete(project)  # passou por todas as checagens acima — não sobra filho nenhum pra cascata apagar
+    db.commit()

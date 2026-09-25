@@ -11,7 +11,3 @@ export function createResource(payload) {
 export function updateResource(resourceId, payload) {
   return api.patch(`/resources/${resourceId}`, payload)
 }
-
-export function deleteResource(resourceId) {
-  return api.del(`/resources/${resourceId}`)
-}

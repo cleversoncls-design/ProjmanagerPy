@@ -51,12 +51,15 @@ _ES: dict[str, str] = {
     "Predecessora e sucessora precisam pertencer ao mesmo projeto": "La predecesora y la sucesora deben pertenecer al mismo proyecto",
     "Projeto fora do escopo do cliente": "Proyecto fuera del alcance del cliente",
     "Projeto não encontrado": "Proyecto no encontrado",
+    "Projeto já tem tarefas cadastradas — não pode ser excluído": "El proyecto ya tiene tareas registradas — no se puede eliminar",
+    "Projeto já tem linha(s) de base salva(s) — não pode ser excluído": "El proyecto ya tiene línea(s) de base guardada(s) — no se puede eliminar",
+    "Projeto já tem despesas lançadas — não pode ser excluído": "El proyecto ya tiene gastos registrados — no se puede eliminar",
+    "Projeto já tem riscos cadastrados — não pode ser excluído": "El proyecto ya tiene riesgos registrados — no se puede eliminar",
+    "Projeto já tem solicitações de mudança — não pode ser excluído": "El proyecto ya tiene solicitudes de cambio — no se puede eliminar",
+    "Projeto já tem apontamento de horas avulso — não pode ser excluído": "El proyecto ya tiene horas sueltas registradas — no se puede eliminar",
     "Recurso já alocado nesta tarefa": "Recurso ya asignado a esta tarea",
     "Recurso não encontrado": "Recurso no encontrado",
     "Recurso não está alocado nesta tarefa": "El recurso no está asignado a esta tarea",
-    "Recurso está alocado em uma ou mais tarefas — remova as alocações antes de excluir": "El recurso está asignado a una o más tareas — quite las asignaciones antes de eliminarlo",
-    "Recurso tem apontamento de horas em projetos/tarefas — não pode ser excluído": "El recurso tiene horas registradas en proyectos/tareas — no se puede eliminar",
-    "O recurso do Administrador não pode ser excluído": "El recurso del Administrador no se puede eliminar",
     "O recurso deste usuário está alocado em uma ou mais tarefas — remova as alocações antes de excluir": (
         "El recurso de este usuario está asignado a una o más tareas — quite las asignaciones antes de eliminarlo"
     ),

@@ -9,10 +9,12 @@ import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Table from '../components/Table'
 import Button from '../components/Button'
+import IconButton from '../components/IconButton'
 import Modal from '../components/Modal'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
 import StatusPill from '../components/StatusPill'
+import { TrashIcon } from '../components/icons'
 import { FormField, TextInput, Select } from '../components/FormField'
 import { formatCurrency, formatPercent } from '../utils/format'
 import { MANAGEMENT_ROLES, PROJECT_STATUS_TONE } from '../utils/labels'
@@ -46,6 +48,8 @@ export default function ProjectsPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  const [deletingProject, setDeletingProject] = useState(null)
 
   function loadRows() {
     setLoading(true)
@@ -135,6 +139,27 @@ export default function ProjectsPage() {
                 align: 'right',
                 render: (row) => (row.margin === null || row.margin === undefined ? '—' : formatCurrency(row.margin)),
               },
+              // Excluir projeto — cobre o caso de um cadastro por engano.
+              // Só aparece pra quem também pode criar projeto (ADMIN/
+              // INTERNAL_PM), mesmo perfil exigido pelo backend (DELETE
+              // /projects/{id}). "tasks_remaining" desta linha não serve pra
+              // decidir se mostra o botão (é só tarefa NÃO concluída — um
+              // projeto todo concluído tem tasks_remaining=0 mas ainda tem
+              // tarefas, e por isso não pode ser excluído); então o botão
+              // fica sempre visível e é o backend quem trava de verdade,
+              // explicando o motivo na mensagem de erro do modal.
+              ...(canCreate
+                ? [
+                    {
+                      key: 'actions',
+                      header: '',
+                      align: 'right',
+                      render: (row) => (
+                        <IconButton icon={TrashIcon} label={t('Excluir projeto')} variant="danger" onClick={() => setDeletingProject(row)} />
+                      ),
+                    },
+                  ]
+                : []),
             ]}
             rows={rows}
             getRowKey={(row) => row.id}
@@ -220,6 +245,65 @@ export default function ProjectsPage() {
           </form>
         </Modal>
       )}
+
+      {deletingProject && (
+        <ProjectDeleteModal
+          project={deletingProject}
+          onClose={() => setDeletingProject(null)}
+          onDeleted={() => {
+            setDeletingProject(null)
+            loadRows()
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/** Modal de confirmação pra excluir um projeto cadastrado por engano — a
+ * API (DELETE /projects/{id}) recusa (409) se o projeto já tiver qualquer
+ * tarefa, linha de base, despesa, risco, solicitação de mudança ou
+ * apontamento de horas avulso, já que todas essas FKs são
+ * ondelete="CASCADE" e apagar sem checar destruiria esse dado junto. A
+ * mensagem de erro do backend já diz qual desses é o caso, então basta
+ * repassá-la. */
+function ProjectDeleteModal({ project, onClose, onDeleted }) {
+  const { t } = useLanguage()
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleDelete() {
+    setDeleting(true)
+    setError('')
+    try {
+      await projectsApi.deleteProject(project.id)
+      onDeleted()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Modal title={t('Excluir projeto')} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--text-secondary)]">
+          {t('Tem certeza que quer excluir o projeto')} <span className="font-medium text-[var(--text-primary)]">
+            {project.code} — {project.name}
+          </span>
+          ? {t('Só é possível excluir um projeto que ainda não tenha nenhuma tarefa cadastrada.')}
+        </p>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
+            {deleting ? t('Excluindo…') : t('Excluir')}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   )
 }
