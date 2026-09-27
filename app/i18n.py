@@ -20,6 +20,9 @@ from .models import Language
 _ES: dict[str, str] = {
     "Agendamento não encontrado": "Agenda no encontrada",
     "Alocação não encontrada": "Asignación no encontrada",
+    "Apontamento fora da agenda — só o Administrador pode aprová-lo": (
+        "Registro de horas fuera de la agenda — solo el Administrador puede aprobarlo"
+    ),
     "Apontamento não encontrado": "Registro de horas no encontrado",
     "Calendário não encontrado": "Calendario no encontrado",
     "Cliente não encontrado": "Cliente no encontrado",
@@ -35,7 +38,13 @@ _ES: dict[str, str] = {
     "Feriado não encontrado": "Feriado no encontrado",
     "Fora do escopo do cliente": "Fuera del alcance del cliente",
     "Hora final precisa ser depois da hora inicial": "La hora final debe ser posterior a la hora inicial",
+    "Informe ao menos um filtro (project_id, task_id, resource_id ou status_filter)": (
+        "Informe al menos un filtro (project_id, task_id, resource_id o status_filter)"
+    ),
     "Informe project_id ou task_id": "Informe project_id o task_id",
+    "Intervalo não pode ser maior ou igual ao tempo entre a hora inicial e a final": (
+        "El intervalo no puede ser mayor o igual al tiempo entre la hora inicial y la final"
+    ),
     "Já existe um apontamento deste recurso nesta tarefa para esta data": "Ya existe un registro de horas de este recurso en esta tarea para esta fecha",
     "Já existe um cliente com este código": "Ya existe un cliente con este código",
     "Já existe um feriado cadastrado nesta data para este calendário": "Ya existe un feriado registrado en esta fecha para este calendario",
@@ -70,6 +79,9 @@ _ES: dict[str, str] = {
     "O recurso deste usuário tem apontamento de horas em projetos/tarefas — não pode ser excluído": (
         "El recurso de este usuario tiene horas registradas en proyectos/tareas — no se puede eliminar"
     ),
+    "O agendamento informado não corresponde a este recurso/projeto/data": (
+        "La agenda informada no corresponde a este recurso/proyecto/fecha"
+    ),
     "O usuário Administrador não pode ser excluído": "El usuario Administrador no se puede eliminar",
     "Risco não encontrado": "Riesgo no encontrado",
     "Solicitação de mudança não encontrada": "Solicitud de cambio no encontrada",
@@ -82,6 +94,7 @@ _ES: dict[str, str] = {
     "Tarefa não está aguardando validação do cliente": "La tarea no está esperando la validación del cliente",
     "Token de acesso ausente": "Token de acceso ausente",
     "Token inválido ou expirado": "Token inválido o expirado",
+    "Um apontamento não pode passar de 24 horas": "Un registro de horas no puede superar las 24 horas",
     "Uma tarefa não pode depender de si mesma": "Una tarea no puede depender de sí misma",
     "Usuário é gerente de um ou mais projetos — troque o gerente antes de excluir": (
         "El usuario es gerente de uno o más proyectos — cambie el gerente antes de eliminar"
@@ -95,6 +108,7 @@ _ES: dict[str, str] = {
     "Usuário não possui recurso habilitado": "El usuario no tiene un recurso habilitado",
     "manager_id precisa ser um usuário interno (ADMIN ou INTERNAL_PM)": "manager_id debe ser un usuario interno (ADMIN o INTERNAL_PM)",
     "parent_task_id precisa ser uma tarefa do mesmo projeto": "parent_task_id debe ser una tarea del mismo proyecto",
+    "schedule_id exige project_id ou task_id": "schedule_id requiere project_id o task_id",
     "start precisa ser anterior ou igual a end": "start debe ser anterior o igual a end",
     "status precisa ser APPROVED ou REJECTED": "status debe ser APPROVED o REJECTED",
 }

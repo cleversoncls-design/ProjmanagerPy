@@ -448,8 +448,19 @@ class TimesheetCreate(BaseModel):
     # projeto sem exigir WBS; os dois nulos = hora administrativa interna.
     task_id: str | None = None
     project_id: str | None = None
+    # Bloco da Agenda que este apontamento cumpre — opcional; informar
+    # ajuda a auditoria mas não é o que decide `unscheduled` (isso é sempre
+    # recalculado no backend a partir de resource+projeto+data, ver
+    # create_timesheet em routers/timesheets.py — nunca confiar no cliente
+    # pra essa checagem, que é justamente a regra de aprovação extra).
+    schedule_id: str | None = None
     date: date
-    hours_spent: Decimal = Field(gt=0, le=24)
+    # Hora início/fim + intervalo — `hours_spent` não é mais informado
+    # aqui: é sempre calculado no backend (Hora Final − Hora Inicial −
+    # Intervalo), igual ao `sold_value` do projeto.
+    start_time: time
+    end_time: time
+    break_minutes: int = Field(default=0, ge=0)
     description: str | None = None
 
 
@@ -462,8 +473,13 @@ class TimesheetRead(ORMModel):
     task_id: str | None
     project_id: str | None
     resource_id: str
+    schedule_id: str | None
     date: date
+    start_time: time | None
+    end_time: time | None
+    break_minutes: int
     hours_spent: Decimal
+    unscheduled: bool
     description: str | None
     status: TimesheetStatus
 

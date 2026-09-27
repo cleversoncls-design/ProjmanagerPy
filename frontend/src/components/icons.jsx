@@ -77,6 +77,28 @@ export const ClockIcon = (props) => (
   </Icon>
 )
 
+// Aprovar/rejeitar apontamento (TimesheetsPage).
+export const CheckIcon = (props) => (
+  <Icon {...props}>
+    <path d="M4.5 12.5 9.5 17.5 19.5 6.5" />
+  </Icon>
+)
+
+export const XIcon = (props) => (
+  <Icon {...props}>
+    <path d="M6 6l12 12M18 6 6 18" />
+  </Icon>
+)
+
+// Apontamento de horas (TimesheetsPage) — prancheta com check.
+export const ClipboardCheckIcon = (props) => (
+  <Icon {...props}>
+    <rect x="5" y="4.5" width="14" height="17" rx="1.8" />
+    <path d="M9 4.5V3.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1" />
+    <path d="M8.5 13l2.2 2.2L15.5 10.5" />
+  </Icon>
+)
+
 export const PanelLeftIcon = (props) => (
   <Icon {...props}>
     <rect x="3.5" y="4.5" width="17" height="15" rx="2" />

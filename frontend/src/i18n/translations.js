@@ -371,6 +371,32 @@ export const es = {
   'Confirmar exclusão?': '¿Confirmar eliminación?',
   'Não é possível trocar o consultor de um agendamento já criado — exclua e crie um novo.':
     'No es posible cambiar el consultor de una agenda ya creada — elimínela y cree una nueva.',
+
+  // --- Apontamento de horas (Fase 2 do agendamento) ---
+  'Apontamento de horas': 'Registro de horas',
+  'Registre e aprove horas trabalhadas nos projetos.': 'Registre y apruebe horas trabajadas en los proyectos.',
+  'Seu usuário não tem um recurso vinculado — peça a um Administrador para vincular um recurso para poder apontar horas.':
+    'Su usuario no tiene un recurso vinculado — pida a un Administrador que vincule un recurso para poder registrar horas.',
+  'Novo apontamento': 'Nuevo registro',
+  'Deixe em branco para hora administrativa interna.': 'Déjelo en blanco para hora administrativa interna.',
+  'Interno': 'Interno',
+  'Tarefa': 'Tarea',
+  'Selecione um projeto para escolher a tarefa.': 'Seleccione un proyecto para elegir la tarea.',
+  'Sem tarefa (apontamento no projeto)': 'Sin tarea (registro en el proyecto)',
+  'Tipo de apontamento': 'Tipo de registro',
+  'Segue automaticamente o tipo da tarefa (Gestão/Consultoria).': 'Sigue automáticamente el tipo de la tarea (Gestión/Consultoría).',
+  'Intervalo (min)': 'Intervalo (min)',
+  'Total calculado': 'Total calculado',
+  'Meus apontamentos': 'Mis registros',
+  'Horário': 'Horario',
+  'Total': 'Total',
+  'Fora da agenda': 'Fuera de la agenda',
+  'Nenhum apontamento registrado ainda.': 'Ningún registro todavía.',
+  'Aprovações pendentes': 'Aprobaciones pendientes',
+  'Nenhum apontamento pendente.': 'Ningún registro pendiente.',
+  'Aprovar': 'Aprobar',
+  'Rejeitar': 'Rechazar',
+  'Só o Administrador pode aprovar apontamentos fora da agenda.': 'Solo el Administrador puede aprobar registros fuera de la agenda.',
 }
 
 export function translate(lang, text, vars) {

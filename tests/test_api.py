@@ -207,7 +207,7 @@ def test_timesheet_requires_assignment_active_project_and_rejects_duplicates(cli
     ).json()
 
     consultant_headers = auth_headers(client, setup["consultant"].email)
-    timesheet_payload = {"task_id": task["id"], "date": "2026-08-24", "hours_spent": "4"}
+    timesheet_payload = {"task_id": task["id"], "date": "2026-08-24", "start_time": "09:00", "end_time": "13:00"}
 
     # Ainda sem alocação (TaskAssignment) -> bloqueado.
     not_assigned = client.post("/timesheets", json=timesheet_payload, headers=consultant_headers)
@@ -255,7 +255,7 @@ def test_approving_timesheet_updates_task_actual_hours(client, setup):
     consultant_headers = auth_headers(client, setup["consultant"].email)
     timesheet = client.post(
         "/timesheets",
-        json={"task_id": task["id"], "date": "2026-08-24", "hours_spent": "6"},
+        json={"task_id": task["id"], "date": "2026-08-24", "start_time": "09:00", "end_time": "15:00"},
         headers=consultant_headers,
     ).json()
 
@@ -302,7 +302,7 @@ def test_timesheet_blocked_when_project_not_active(client, setup):
     consultant_headers = auth_headers(client, setup["consultant"].email)
     response = client.post(
         "/timesheets",
-        json={"task_id": task["id"], "date": "2026-08-24", "hours_spent": "4"},
+        json={"task_id": task["id"], "date": "2026-08-24", "start_time": "09:00", "end_time": "13:00"},
         headers=consultant_headers,
     )
     assert response.status_code == 422
@@ -456,7 +456,7 @@ def test_user_can_change_own_language_without_admin_role(client, setup):
     # Mensagens de erro passam a vir em espanhol para este usuário.
     bad_project = client.post(
         "/timesheets",
-        json={"task_id": "id-inexistente", "date": "2026-01-01", "hours_spent": "1"},
+        json={"task_id": "id-inexistente", "date": "2026-01-01", "start_time": "09:00", "end_time": "10:00"},
         headers=consultant_headers,
     )
     assert bad_project.status_code == 422
@@ -483,7 +483,7 @@ def test_adhoc_timesheet_without_task_or_project(client, setup):
     consultant_headers = auth_headers(client, setup["consultant"].email)
 
     admin_hours = client.post(
-        "/timesheets", json={"date": "2026-08-24", "hours_spent": "1"}, headers=consultant_headers
+        "/timesheets", json={"date": "2026-08-24", "start_time": "09:00", "end_time": "10:00"}, headers=consultant_headers
     )
     assert admin_hours.status_code == 201
     assert admin_hours.json()["task_id"] is None
@@ -491,7 +491,7 @@ def test_adhoc_timesheet_without_task_or_project(client, setup):
 
     project_hours = client.post(
         "/timesheets",
-        json={"project_id": project_id, "date": "2026-08-24", "hours_spent": "2"},
+        json={"project_id": project_id, "date": "2026-08-24", "start_time": "09:00", "end_time": "11:00"},
         headers=consultant_headers,
     )
     assert project_hours.status_code == 201
@@ -1139,7 +1139,7 @@ def test_delete_task_blocked_when_it_has_timesheet_entries(client, setup):
     consultant_headers = auth_headers(client, setup["consultant"].email)
     logged = client.post(
         "/timesheets",
-        json={"task_id": task["id"], "date": "2026-08-24", "hours_spent": "4"},
+        json={"task_id": task["id"], "date": "2026-08-24", "start_time": "09:00", "end_time": "13:00"},
         headers=consultant_headers,
     )
     assert logged.status_code == 201

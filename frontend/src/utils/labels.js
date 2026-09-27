@@ -135,6 +135,21 @@ export const USER_STATUS_TONE = {
   BLOCKED: 'critical',
 }
 
+// Status do apontamento de horas (Timesheet) — vocabulário próprio (mais
+// direto que APPROVAL_STATUS_LABELS, que é sobre a validação da TAREFA
+// pelo cliente, um fluxo diferente e sem relação com este).
+export const TIMESHEET_STATUS_LABELS = {
+  PENDING: 'Pendente',
+  APPROVED: 'Aprovado',
+  REJECTED: 'Rejeitado',
+}
+
+export const TIMESHEET_STATUS_TONE = {
+  PENDING: 'warning',
+  APPROVED: 'good',
+  REJECTED: 'critical',
+}
+
 export const DEPENDENCY_TYPE_LABELS = {
   FS: 'Término → Início',
   SS: 'Início → Início',
@@ -197,5 +212,6 @@ export function getLabels(lang) {
     STATUS_DOT_LABELS: translateMap(STATUS_DOT_LABELS, lang),
     WEEKDAY_LABELS: WEEKDAY_LABELS.map((day) => translate(lang, day)),
     PROJECT_COLOR_LABELS: translateMap(PROJECT_COLOR_LABELS, lang),
+    TIMESHEET_STATUS_LABELS: translateMap(TIMESHEET_STATUS_LABELS, lang),
   }
 }
