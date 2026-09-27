@@ -99,6 +99,15 @@ export const ClipboardCheckIcon = (props) => (
   </Icon>
 )
 
+// Ordens de Serviço (ServiceOrdersPage) — documento com linhas.
+export const FileTextIcon = (props) => (
+  <Icon {...props}>
+    <path d="M7 3.5h7l3.5 3.5V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" />
+    <path d="M14 3.5V7h3.5" />
+    <path d="M8.5 12h7M8.5 15.5h7M8.5 8.5h3" />
+  </Icon>
+)
+
 export const PanelLeftIcon = (props) => (
   <Icon {...props}>
     <rect x="3.5" y="4.5" width="17" height="15" rx="2" />

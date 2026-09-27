@@ -707,6 +707,38 @@ class RoiRow(BaseModel):
     roi_percentage: Decimal | None
 
 
+class ServiceOrderActivity(BaseModel):
+    """Uma linha da Ordem de Serviço — um apontamento (Timesheet). Sem
+    `task_id` (apontamento avulso no projeto), `wbs_code`/`task_name`
+    ficam nulos e o frontend mostra "Avulso" no lugar."""
+
+    task_id: str | None
+    wbs_code: str | None
+    task_name: str | None
+    start_time: time
+    end_time: time
+    break_minutes: int
+    hours: Decimal
+    description: str | None
+
+
+class ServiceOrderRow(BaseModel):
+    """Uma Ordem de Serviço: 1 por dia + projeto + consultor (ver
+    `service_orders` em services.py)."""
+
+    date: date
+    client_id: str | None
+    client_code: str
+    client_name: str
+    project_id: str
+    project_code: str
+    project_name: str
+    resource_id: str
+    resource_name: str
+    total_hours: Decimal
+    activities: list[ServiceOrderActivity]
+
+
 class GanttResponse(BaseModel):
     tasks: list[TaskRead]
     dependencies: list[TaskDependencyRead]

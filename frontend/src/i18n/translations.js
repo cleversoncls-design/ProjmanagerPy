@@ -397,6 +397,18 @@ export const es = {
   'Aprovar': 'Aprobar',
   'Rejeitar': 'Rechazar',
   'Só o Administrador pode aprovar apontamentos fora da agenda.': 'Solo el Administrador puede aprobar registros fuera de la agenda.',
+
+  // --- Ordens de Serviço (Fase 3 do apontamento) ---
+  'Ordens de Serviço': 'Órdenes de Servicio',
+  'Prévia da OS a partir dos apontamentos — o modelo final de impressão ainda será definido.':
+    'Vista previa de la OS a partir de los registros — el modelo final de impresión aún se definirá.',
+  'Imprimir': 'Imprimir',
+  'Nenhuma Ordem de Serviço no período filtrado.': 'Ninguna Orden de Servicio en el período filtrado.',
+  'Ordem de Serviço': 'Orden de Servicio',
+  'Código do cliente': 'Código del cliente',
+  'Código do projeto': 'Código del proyecto',
+  'Total de horas': 'Total de horas',
+  'Atividade': 'Actividad',
 }
 
 export function translate(lang, text, vars) {

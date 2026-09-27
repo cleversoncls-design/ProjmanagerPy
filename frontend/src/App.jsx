@@ -13,6 +13,7 @@ import UsersPage from './pages/UsersPage'
 import CalendarsPage from './pages/CalendarsPage'
 import SchedulesPage from './pages/SchedulesPage'
 import TimesheetsPage from './pages/TimesheetsPage'
+import ServiceOrdersPage from './pages/ServiceOrdersPage'
 import { INTERNAL_ROLES, MANAGEMENT_ROLES } from './utils/labels'
 
 export default function App() {
@@ -33,6 +34,7 @@ export default function App() {
                   <Route element={<ProtectedRoute roles={INTERNAL_ROLES} />}>
                     <Route path="/schedules" element={<SchedulesPage />} />
                     <Route path="/timesheets" element={<TimesheetsPage />} />
+                    <Route path="/service-orders" element={<ServiceOrdersPage />} />
                   </Route>
 
                   <Route element={<ProtectedRoute roles={MANAGEMENT_ROLES} />}>

@@ -28,6 +28,12 @@ export function getStatistics(projectId) {
   return api.get(`/projects/${projectId}/statistics`)
 }
 
+// Prévia da Ordem de Serviço (Fase 3 do apontamento) — ver
+// app/routers/reports.py (GET /reports/service-orders).
+export function getServiceOrders(params) {
+  return api.get('/reports/service-orders', params)
+}
+
 /** Baixa a planilha de tarefas (.xlsx) direto do navegador — não passa
  * pelo `api.get` normal porque a resposta é binária, não JSON, e precisa
  * virar um download (link temporário) em vez de ser parseada. */
