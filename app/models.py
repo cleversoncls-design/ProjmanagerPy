@@ -334,12 +334,35 @@ class Timesheet(Base):
     task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"))
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     resource_id: Mapped[str] = mapped_column(ForeignKey("resources.id", ondelete="CASCADE"), nullable=False)
+    # Bloco da Agenda (ResourceSchedule) que este apontamento cumpre —
+    # opcional, só informativo/de referência (ver `unscheduled` abaixo, que é
+    # quem de fato decide a regra de aprovação extra). SET NULL: apagar o
+    # agendamento não pode arrastar um apontamento (dado financeiro) junto.
+    schedule_id: Mapped[str | None] = mapped_column(ForeignKey("resource_schedules.id", ondelete="SET NULL"))
     date: Mapped[date] = mapped_column(Date, nullable=False)
+    # Hora início/fim + intervalo (Fase 2 do apontamento) — `hours_spent`
+    # nunca é digitado diretamente: é sempre calculado a partir destes três
+    # (mesmo padrão de `Project.sold_value`, ver _recompute_hours_spent no
+    # router). Nulos em registros antigos (criados antes desta fase, quando
+    # só existia `hours_spent` solto) — nunca em um apontamento novo.
+    start_time: Mapped[time | None] = mapped_column(Time)
+    end_time: Mapped[time | None] = mapped_column(Time)
+    break_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     hours_spent: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)
+    # "Avulso" no sentido novo (Fase 2): apontamento num projeto/data em que
+    # o recurso NÃO tinha nenhum ResourceSchedule — pede aprovação extra
+    # (só ADMIN aprova, ver update_timesheet_status). Independente do
+    # "avulso" antigo (task_id nulo, comentário acima) — os dois conceitos
+    # coexistem: dá pra ter uma tarefa da EAP apontada fora da agenda, ou um
+    # apontamento sem tarefa mas dentro de um horário agendado no projeto.
+    # Sempre False para hora administrativa interna (sem task_id nem
+    # project_id) — não há agenda de projeto pra checar nesse caso.
+    unscheduled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[TimesheetStatus] = mapped_column(nullable=False, default=TimesheetStatus.PENDING)
     task: Mapped[Task | None] = relationship(back_populates="timesheets")
     project: Mapped[Project | None] = relationship()
+    schedule: Mapped[ResourceSchedule | None] = relationship()
 
 
 class ProjectExpense(Base):

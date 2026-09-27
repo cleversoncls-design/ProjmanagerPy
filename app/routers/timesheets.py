@@ -15,6 +15,7 @@ from ..models import (
     Project,
     ProjectStatus,
     Resource,
+    ResourceSchedule,
     Task,
     TaskAssignment,
     Timesheet,
@@ -25,6 +26,31 @@ from ..models import (
 from ..schemas import TimesheetCreate, TimesheetRead, TimesheetStatusUpdate
 
 router = APIRouter(tags=["timesheets"])
+
+_MANAGEMENT_ROLES = (UserRole.ADMIN, UserRole.INTERNAL_PM)
+
+
+def _compute_hours(data: TimesheetCreate, lang) -> Decimal:
+    """`hours_spent` nunca é digitado — é sempre Hora Final − Hora Inicial −
+    Intervalo, igual ao `sold_value` do projeto (ver create_project).
+    Trabalha em minutos inteiros (nunca `float`/`datetime`) — `time` não tem
+    fuso nem data, então a diferença em minutos é só aritmética simples;
+    nenhum apontamento atravessa a meia-noite (isso seriam dois
+    lançamentos)."""
+    start_minutes = data.start_time.hour * 60 + data.start_time.minute
+    end_minutes = data.end_time.hour * 60 + data.end_time.minute
+    if end_minutes <= start_minutes:
+        raise HTTPException(status_code=422, detail=translate("Hora final precisa ser depois da hora inicial", lang))
+    span_minutes = end_minutes - start_minutes
+    if data.break_minutes >= span_minutes:
+        raise HTTPException(
+            status_code=422,
+            detail=translate("Intervalo não pode ser maior ou igual ao tempo entre a hora inicial e a final", lang),
+        )
+    hours = Decimal(span_minutes - data.break_minutes) / Decimal(60)
+    if hours > 24:
+        raise HTTPException(status_code=422, detail=translate("Um apontamento não pode passar de 24 horas", lang))
+    return hours.quantize(Decimal("0.01"))
 
 
 def _recalculate_actual_hours(db: Session, task_id: str | None) -> None:
@@ -106,12 +132,51 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
     # else: hora administrativa interna (sem task nem projeto) — qualquer
     # recurso autenticado pode lançar, sem checagem de escopo de cliente.
 
+    hours_spent = _compute_hours(data, user.language)
+
+    # Regra da Agenda (Fase 2 do apontamento): só é "avulso" (exige
+    # aprovação extra do Administrador, ver update_timesheet_status) um
+    # apontamento ligado a um projeto em que o recurso NÃO tinha nenhum
+    # agendamento (ResourceSchedule) naquele dia. Hora administrativa
+    # interna (sem projeto) nunca entra nessa regra — não existe agenda de
+    # projeto pra checar. `schedule_id` explícito é só referência para
+    # auditoria; a checagem real é sempre refeita aqui, nunca confiando no
+    # que o cliente informou.
+    schedule: ResourceSchedule | None = None
+    project_id_for_schedule = project.id if project else None
+    unscheduled = False
+    if project_id_for_schedule:
+        has_schedule = db.scalar(
+            select(ResourceSchedule).where(
+                ResourceSchedule.resource_id == resource.id,
+                ResourceSchedule.project_id == project_id_for_schedule,
+                ResourceSchedule.date == data.date,
+            )
+        )
+        unscheduled = has_schedule is None
+        if data.schedule_id:
+            schedule = db.get(ResourceSchedule, data.schedule_id)
+            if not schedule:
+                raise HTTPException(status_code=404, detail=translate("Agendamento não encontrado", user.language))
+            if schedule.resource_id != resource.id or schedule.project_id != project_id_for_schedule or schedule.date != data.date:
+                raise HTTPException(
+                    status_code=422,
+                    detail=translate("O agendamento informado não corresponde a este recurso/projeto/data", user.language),
+                )
+    elif data.schedule_id:
+        raise HTTPException(status_code=422, detail=translate("schedule_id exige project_id ou task_id", user.language))
+
     entry = Timesheet(
         task_id=task.id if task else None,
         project_id=project.id if project else None,
         resource_id=resource.id,
+        schedule_id=schedule.id if schedule else None,
         date=data.date,
-        hours_spent=data.hours_spent,
+        start_time=data.start_time,
+        end_time=data.end_time,
+        break_minutes=data.break_minutes,
+        hours_spent=hours_spent,
+        unscheduled=unscheduled,
         description=data.description,
     )
     db.add(entry)
@@ -126,9 +191,24 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
 def list_timesheets(
     project_id: str | None = None,
     task_id: str | None = None,
+    resource_id: str | None = None,
+    status_filter: TimesheetStatus | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Timesheet]:
+    """`resource_id`/`status_filter` (query `?status_filter=`) são novos —
+    permitem "meus apontamentos" (resource_id) e a fila de aprovação
+    (status_filter=PENDING), sem precisar de project_id/task_id. Perfil não
+    gerencial (fora de ADMIN/INTERNAL_PM) nunca enxerga apontamento de
+    outro recurso: `resource_id` é sempre forçado pro recurso do próprio
+    usuário, ignorando qualquer valor de terceiro que venha na query."""
+    is_manager = user.role in _MANAGEMENT_ROLES
+    if not is_manager:
+        own_resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
+        if not own_resource:
+            raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
+        resource_id = own_resource.id
+
     # outerjoin (não join) porque apontamentos avulsos têm task_id nulo —
     # um INNER JOIN os excluiria até de listagens por project_id, já que
     # esses registros também carregam o project_id diretamente em Timesheet.
@@ -141,9 +221,16 @@ def list_timesheets(
             raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
         require_project_access(project, user)
         stmt = stmt.where(or_(Task.project_id == project_id, Timesheet.project_id == project_id))
-    else:
-        raise HTTPException(status_code=422, detail=translate("Informe project_id ou task_id", user.language))
-    return list(db.scalars(stmt).all())
+    elif not (resource_id or status_filter):
+        raise HTTPException(
+            status_code=422,
+            detail=translate("Informe ao menos um filtro (project_id, task_id, resource_id ou status_filter)", user.language),
+        )
+    if resource_id:
+        stmt = stmt.where(Timesheet.resource_id == resource_id)
+    if status_filter:
+        stmt = stmt.where(Timesheet.status == status_filter)
+    return list(db.scalars(stmt.order_by(Timesheet.date.desc())).all())
 
 
 @router.patch("/timesheets/{timesheet_id}/status", response_model=TimesheetRead)
@@ -156,6 +243,15 @@ def update_timesheet_status(
     entry = db.get(Timesheet, timesheet_id)
     if not entry:
         raise HTTPException(status_code=404, detail=translate("Apontamento não encontrado", user.language))
+    # "Aprovação extra" (Fase 2): um apontamento avulso — sem agendamento
+    # correspondente na Agenda — só pode ser APROVADO pelo Administrador;
+    # INTERNAL_PM continua podendo rejeitar normalmente (rejeitar nunca
+    # precisou de aprovação extra nenhuma).
+    if entry.unscheduled and data.status == TimesheetStatus.APPROVED and user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail=translate("Apontamento fora da agenda — só o Administrador pode aprová-lo", user.language),
+        )
     entry.status = data.status
     _recalculate_actual_hours(db, entry.task_id)
     record_audit(
