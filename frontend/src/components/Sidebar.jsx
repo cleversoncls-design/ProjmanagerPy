@@ -4,13 +4,14 @@ import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import { INTERNAL_ROLES, MANAGEMENT_ROLES } from '../utils/labels'
 import logo from '../assets/resultar-logo.png'
-import { BriefcaseIcon, BuildingIcon, CalendarIcon, ClipboardCheckIcon, ClockIcon, HomeIcon, UsersIcon } from './icons'
+import { BriefcaseIcon, BuildingIcon, CalendarIcon, ClipboardCheckIcon, ClockIcon, FileTextIcon, HomeIcon, UsersIcon } from './icons'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', end: true, icon: HomeIcon },
   { to: '/projects', label: 'Projetos', icon: BriefcaseIcon },
   { to: '/schedules', label: 'Agenda de consultores', roles: INTERNAL_ROLES, icon: ClockIcon },
   { to: '/timesheets', label: 'Apontamento de horas', roles: INTERNAL_ROLES, icon: ClipboardCheckIcon },
+  { to: '/service-orders', label: 'Ordens de Serviço', roles: INTERNAL_ROLES, icon: FileTextIcon },
   { to: '/clients', label: 'Clientes', roles: MANAGEMENT_ROLES, icon: BuildingIcon },
   { to: '/users', label: 'Usuários e recursos', roles: MANAGEMENT_ROLES, icon: UsersIcon },
   { to: '/calendars', label: 'Calendários', roles: MANAGEMENT_ROLES, icon: CalendarIcon },

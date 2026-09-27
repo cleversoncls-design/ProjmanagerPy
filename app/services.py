@@ -6,12 +6,13 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from .models import (
     Baseline,
     Calendar,
+    Client,
     DependencyType,
     Holiday,
     Project,
@@ -27,6 +28,7 @@ from .models import (
     TaskType,
     Timesheet,
     TimesheetStatus,
+    User,
 )
 
 # "Trabalho" (estimated_hours) sem nenhum recurso alocado ainda assume uma
@@ -1101,6 +1103,114 @@ def velocity_series(
         buckets[period_start] += Decimal(hours)
 
     return [{"period_start": period_start, "hours_delivered": _q(hours)} for period_start, hours in sorted(buckets.items())]
+
+
+def service_orders(
+    session: Session,
+    *,
+    start: date,
+    end: date,
+    project_id: str | None = None,
+    resource_id: str | None = None,
+    client_id: str | None = None,
+) -> list[dict]:
+    """Ordem de Serviço (Fase 3 do apontamento): agrupa os apontamentos
+    (Timesheet) em uma OS por dia + projeto + consultor — regra confirmada
+    pelo usuário ("1 OS por dia + projeto + consultor") — com uma
+    atividade por apontamento dentro do grupo. Exclui:
+    - REJECTED (mesmo critério de project_financials/velocity_series);
+    - hora administrativa interna (sem task_id nem project_id) — não tem
+      projeto/cliente pra compor o cabeçalho da OS;
+    - apontamentos antigos sem `start_time` (criados antes da Fase 2 do
+      apontamento) — a OS é sempre Hora Inicial/Final, não dá pra montar
+      essa linha sem elas.
+    """
+    project_col = func.coalesce(Task.project_id, Timesheet.project_id)
+    stmt = (
+        select(
+            Timesheet.date,
+            Timesheet.resource_id,
+            project_col.label("project_id"),
+            Timesheet.task_id,
+            Task.wbs_code,
+            Task.name.label("task_name"),
+            Timesheet.start_time,
+            Timesheet.end_time,
+            Timesheet.break_minutes,
+            Timesheet.hours_spent,
+            Timesheet.description,
+        )
+        .outerjoin(Task, Task.id == Timesheet.task_id)
+        .where(
+            Timesheet.date >= start,
+            Timesheet.date <= end,
+            Timesheet.status != TimesheetStatus.REJECTED,
+            Timesheet.start_time.isnot(None),
+            project_col.isnot(None),
+        )
+    )
+    if project_id:
+        stmt = stmt.where(project_col == project_id)
+    if resource_id:
+        stmt = stmt.where(Timesheet.resource_id == resource_id)
+    rows = session.execute(stmt).all()
+
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    for row in rows:
+        key = (row.date, row.project_id, row.resource_id)
+        groups[key].append(
+            {
+                "task_id": row.task_id,
+                "wbs_code": row.wbs_code,
+                "task_name": row.task_name,
+                "start_time": row.start_time,
+                "end_time": row.end_time,
+                "break_minutes": row.break_minutes,
+                "hours": Decimal(row.hours_spent),
+                "description": row.description,
+            }
+        )
+    if not groups:
+        return []
+
+    project_ids = {key[1] for key in groups}
+    resource_ids = {key[2] for key in groups}
+    projects = {p.id: p for p in session.scalars(select(Project).where(Project.id.in_(project_ids))).all()}
+    client_ids = {p.client_id for p in projects.values()}
+    clients = {c.id: c for c in session.scalars(select(Client).where(Client.id.in_(client_ids))).all()} if client_ids else {}
+    resources = {r.id: r for r in session.scalars(select(Resource).where(Resource.id.in_(resource_ids))).all()}
+    user_ids = {r.user_id for r in resources.values()}
+    users = {u.id: u for u in session.scalars(select(User).where(User.id.in_(user_ids))).all()} if user_ids else {}
+
+    result = []
+    for (day, proj_id, res_id), activities in groups.items():
+        project = projects.get(proj_id)
+        if not project:
+            continue
+        client = clients.get(project.client_id)
+        if client_id and (not client or client.id != client_id):
+            continue
+        resource = resources.get(res_id)
+        user = users.get(resource.user_id) if resource else None
+        activities.sort(key=lambda a: a["start_time"])
+        total_hours = _q(sum((a["hours"] for a in activities), Decimal("0")))
+        result.append(
+            {
+                "date": day,
+                "client_id": client.id if client else None,
+                "client_code": client.code if client else "—",
+                "client_name": client.legal_name if client else "—",
+                "project_id": project.id,
+                "project_code": project.code,
+                "project_name": project.name,
+                "resource_id": res_id,
+                "resource_name": user.name if user else "—",
+                "total_hours": total_hours,
+                "activities": [{**activity, "hours": _q(activity["hours"])} for activity in activities],
+            }
+        )
+    result.sort(key=lambda r: (r["date"], r["client_code"], r["project_code"], r["resource_name"]))
+    return result
 
 
 def project_roi(session: Session, project_id: str) -> dict:

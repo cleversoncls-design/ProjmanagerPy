@@ -8,10 +8,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access, require_roles
+from ..deps import EXTERNAL_ROLES, INTERNAL_ROLES, get_current_user, require_project_access, require_roles
 from ..exports import build_tasks_workbook
 from ..i18n import t as translate
-from ..models import Project, Task, TaskDependency, TaskStatus, User, UserRole
+from ..models import Project, Resource, Task, TaskDependency, TaskStatus, User, UserRole
 from ..schemas import (
     DashboardResponse,
     EvmMetrics,
@@ -22,6 +22,7 @@ from ..schemas import (
     ProjectStatisticsResponse,
     RiskMatrixResponse,
     RoiRow,
+    ServiceOrderRow,
     VelocityPoint,
 )
 from ..services import (
@@ -34,6 +35,7 @@ from ..services import (
     project_statistics,
     project_roi,
     risk_matrix,
+    service_orders,
     task_schedule_rows,
     velocity_series,
 )
@@ -179,6 +181,40 @@ def roi(
         return [project_roi(db, project_id)]
     projects = list(db.scalars(select(Project)).all())
     return [project_roi(db, project.id) for project in projects]
+
+
+@router.get("/reports/service-orders", response_model=list[ServiceOrderRow])
+def service_orders_report(
+    project_id: str | None = None,
+    resource_id: str | None = None,
+    client_id: str | None = None,
+    start: date | None = None,
+    end: date | None = None,
+    user: User = Depends(require_roles(*INTERNAL_ROLES)),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Prévia da Ordem de Serviço (Fase 3 do apontamento) — 1 OS por dia +
+    projeto + consultor, a partir dos apontamentos já lançados (ver
+    `service_orders` em services.py). Documento interno (dados de horas e
+    consultor por trás do serviço prestado) — restrito aos perfis internos,
+    igual à Agenda de consultores; o modelo de impressão final ainda será
+    definido pelo usuário, então por ora só devolve os dados agrupados para
+    o frontend renderizar como prévia. CONSULTANT só enxerga a própria OS
+    (mesma regra de escopo de GET /timesheets) — resource_id de terceiro é
+    sempre substituído pelo recurso do próprio usuário."""
+    if user.role == UserRole.CONSULTANT:
+        own_resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
+        if not own_resource:
+            return []
+        resource_id = own_resource.id
+    period_end = end or date.today()
+    period_start = start or (period_end - timedelta(days=30))
+    if period_start > period_end:
+        raise HTTPException(status_code=422, detail=translate("start precisa ser anterior ou igual a end", user.language))
+    if project_id:
+        project = _get_project_or_404(db, project_id, user.language)
+        require_project_access(project, user)
+    return service_orders(db, start=period_start, end=period_end, project_id=project_id, resource_id=resource_id, client_id=client_id)
 
 
 @router.get("/projects/{project_id}/schedule", response_model=ProjectScheduleResponse)

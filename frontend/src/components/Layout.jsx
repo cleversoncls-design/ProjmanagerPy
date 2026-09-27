@@ -8,11 +8,15 @@ import Header from './Header'
 export default function Layout() {
   return (
     <div className="flex min-h-screen flex-col">
-      <div className="h-1 shrink-0" style={{ backgroundColor: 'var(--nav-top-accent)' }} />
+      <div className="h-1 shrink-0 print:hidden" style={{ backgroundColor: 'var(--nav-top-accent)' }} />
       <div className="flex min-h-0 flex-1 bg-[var(--page)]">
-        <Sidebar />
+        <div className="contents print:hidden">
+          <Sidebar />
+        </div>
         <div className="flex min-w-0 flex-1 flex-col">
-          <Header />
+          <div className="contents print:hidden">
+            <Header />
+          </div>
           <main className="min-w-0 flex-1 overflow-y-auto px-8 py-8">
             <Outlet />
           </main>
