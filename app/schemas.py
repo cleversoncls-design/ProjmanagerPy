@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as _dt
 from datetime import date, datetime, time
 from decimal import Decimal
 
@@ -419,7 +420,17 @@ class ResourceScheduleUpdate(BaseModel):
     existente pra outra pessoa."""
 
     project_id: str | None = None
-    date: date | None = None
+    # Anotado via `_dt.date` (não `date` puro) de propósito: o campo se
+    # chama `date` e tem valor padrão, então a classe ganha um atributo
+    # `date = None` — com `from __future__ import annotations` (anotações
+    # avaliadas como string, sob demanda), o Pydantic resolve o forward ref
+    # 'date | None' usando um namespace que inclui os próprios atributos da
+    # classe, e o atributo `date = None` da classe esconde o tipo `date`
+    # importado do módulo `datetime`, virando `None | None` e quebrando com
+    # TypeError na definição da classe (import time). Referenciar via
+    # `_dt.date` evita a colisão de nome sem mudar o nome do campo (contrato
+    # da API) nem o desta docstring de ResourceScheduleUpdate.
+    date: _dt.date | None = None
     start_time: time | None = None
     end_time: time | None = None
     description: str | None = None
