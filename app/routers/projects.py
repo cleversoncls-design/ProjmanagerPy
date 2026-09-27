@@ -8,7 +8,21 @@ from ..audit import record_audit
 from ..database import get_db
 from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access, require_roles
 from ..i18n import t as translate
-from ..models import AuditAction, Baseline, Calendar, ChangeRequest, Client, Project, ProjectExpense, Risk, Task, Timesheet, User, UserRole
+from ..models import (
+    AuditAction,
+    Baseline,
+    Calendar,
+    ChangeRequest,
+    Client,
+    PROJECT_COLOR_KEYS,
+    Project,
+    ProjectExpense,
+    Risk,
+    Task,
+    Timesheet,
+    User,
+    UserRole,
+)
 from ..schemas import ProjectCreate, ProjectDetail, ProjectSummary, ProjectUpdate
 from ..services import project_financials
 
@@ -42,6 +56,8 @@ def create_project(
         raise HTTPException(status_code=409, detail=translate("Já existe um projeto com este código", user.language))
     if data.calendar_id and not db.get(Calendar, data.calendar_id):
         raise HTTPException(status_code=404, detail=translate("Calendário não encontrado", user.language))
+    if data.color not in PROJECT_COLOR_KEYS:
+        raise HTTPException(status_code=422, detail=translate("Cor do projeto inválida", user.language))
     project = Project(**data.model_dump())
     _recompute_sold_value(project)
     db.add(project)
@@ -101,6 +117,8 @@ def update_project(
             raise HTTPException(status_code=422, detail=translate("manager_id precisa ser um usuário interno (ADMIN ou INTERNAL_PM)", user.language))
     if changes.get("calendar_id") and not db.get(Calendar, changes["calendar_id"]):
         raise HTTPException(status_code=404, detail=translate("Calendário não encontrado", user.language))
+    if "color" in changes and changes["color"] not in PROJECT_COLOR_KEYS:
+        raise HTTPException(status_code=422, detail=translate("Cor do projeto inválida", user.language))
     if user.role in EXTERNAL_ROLES:
         for field in _FINANCIAL_FIELDS:
             changes.pop(field, None)

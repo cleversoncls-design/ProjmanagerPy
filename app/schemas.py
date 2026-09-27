@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -166,6 +166,11 @@ class ProjectCreate(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     calendar_id: str | None = None
+    # Uma das 8 chaves da paleta categórica do app ("series-1".."series-8") —
+    # aplicada automaticamente em toda agenda (ResourceSchedule) deste
+    # projeto. Validada no router (não aqui) contra a lista de chaves
+    # válidas, no mesmo padrão de manager_id/calendar_id.
+    color: str = "series-1"
 
 
 class ProjectUpdate(BaseModel):
@@ -183,6 +188,7 @@ class ProjectUpdate(BaseModel):
     # e services.project_evm/task_dot_color. Enviar null explicitamente
     # volta a usar a data de hoje como data-base.
     status_date: date | None = None
+    color: str | None = None
 
 
 class ProjectSummary(ORMModel):
@@ -196,6 +202,7 @@ class ProjectSummary(ORMModel):
     end_date: date | None
     calendar_id: str | None
     status_date: date | None
+    color: str
 
 
 class ProjectDetail(ProjectSummary):
@@ -389,6 +396,44 @@ class ResourceRead(ORMModel):
     billing_rate_per_hour: Decimal
     daily_capacity_hours: Decimal
     calendar_id: str | None
+
+
+# ---------------------------------------------------------------------------
+# Agenda de consultores (ResourceSchedule)
+# ---------------------------------------------------------------------------
+
+
+class ResourceScheduleCreate(BaseModel):
+    resource_id: str
+    project_id: str
+    date: date
+    start_time: time
+    end_time: time
+    description: str | None = None
+
+
+class ResourceScheduleUpdate(BaseModel):
+    """Todos os campos opcionais (PATCH parcial) — mesmo padrão de
+    ResourceUpdate/ProjectUpdate. resource_id não é editável de propósito:
+    trocar de recurso é apagar e recriar o agendamento, não "mover" um
+    existente pra outra pessoa."""
+
+    project_id: str | None = None
+    date: date | None = None
+    start_time: time | None = None
+    end_time: time | None = None
+    description: str | None = None
+
+
+class ResourceScheduleRead(ORMModel):
+    id: str
+    resource_id: str
+    project_id: str
+    date: date
+    start_time: time
+    end_time: time
+    description: str | None
+    created_at: datetime
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,8 @@ import ProjectDetailPage from './pages/ProjectDetailPage'
 import ClientsPage from './pages/ClientsPage'
 import UsersPage from './pages/UsersPage'
 import CalendarsPage from './pages/CalendarsPage'
-import { MANAGEMENT_ROLES } from './utils/labels'
+import SchedulesPage from './pages/SchedulesPage'
+import { INTERNAL_ROLES, MANAGEMENT_ROLES } from './utils/labels'
 
 export default function App() {
   return (
@@ -27,6 +28,10 @@ export default function App() {
                   <Route path="/" element={<DashboardPage />} />
                   <Route path="/projects" element={<ProjectsPage />} />
                   <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+
+                  <Route element={<ProtectedRoute roles={INTERNAL_ROLES} />}>
+                    <Route path="/schedules" element={<SchedulesPage />} />
+                  </Route>
 
                   <Route element={<ProtectedRoute roles={MANAGEMENT_ROLES} />}>
                     <Route path="/clients" element={<ClientsPage />} />

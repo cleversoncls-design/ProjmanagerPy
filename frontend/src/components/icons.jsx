@@ -63,6 +63,20 @@ export const ChevronRightIcon = (props) => (
   </Icon>
 )
 
+export const ChevronLeftIcon = (props) => (
+  <Icon {...props}>
+    <path d="M15 5.5 8.5 12l6.5 6.5" />
+  </Icon>
+)
+
+// Agenda de consultores (SchedulesPage) — bloco de horário agendado.
+export const ClockIcon = (props) => (
+  <Icon {...props}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 7.5V12l3 2" />
+  </Icon>
+)
+
 export const PanelLeftIcon = (props) => (
   <Icon {...props}>
     <rect x="3.5" y="4.5" width="17" height="15" rx="2" />

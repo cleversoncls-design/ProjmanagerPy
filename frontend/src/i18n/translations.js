@@ -340,6 +340,37 @@ export const es = {
   'A redefinição de senha deve ser solicitada ao Administrador.': 'El restablecimiento de contraseña debe solicitarse al Administrador.',
   'Acesso privado da organização': 'Acceso privado de la organización',
   'Os usuários e permissões são administrados pelo Administrador.': 'Los usuarios y permisos son administrados por el Administrador.',
+
+  // --- Agenda de consultores / cor do projeto (Fase 1 do agendamento) ---
+  'Cor do projeto': 'Color del proyecto',
+  'Usada na Agenda de consultores para identificar este projeto.': 'Usada en la Agenda de consultores para identificar este proyecto.',
+  Azul: 'Azul',
+  Laranja: 'Naranja',
+  Água: 'Agua',
+  Amarelo: 'Amarillo',
+  Magenta: 'Magenta',
+  Verde: 'Verde',
+  Violeta: 'Violeta',
+  Vermelho: 'Rojo',
+  'Agenda de consultores': 'Agenda de consultores',
+  'Agendamento de recursos por projeto, dia e horário.': 'Programación de recursos por proyecto, día y horario.',
+  'Todos': 'Todos',
+  'Data inicial': 'Fecha inicial',
+  'Data final': 'Fecha final',
+  'Mostrando o período filtrado (Data inicial/final) em vez do calendário mensal. Limpe as datas para voltar ao mês.':
+    'Mostrando el período filtrado (Fecha inicial/final) en lugar del calendario mensual. Borre las fechas para volver al mes.',
+  'Mês anterior': 'Mes anterior',
+  'Próximo mês': 'Mes siguiente',
+  'Hoje': 'Hoy',
+  'Novo agendamento': 'Nueva agenda',
+  'Editar agendamento': 'Editar agenda',
+  '+{n} mais': '+{n} más',
+  'Nenhum agendamento no período filtrado.': 'Ninguna agenda en el período filtrado.',
+  'Hora início': 'Hora de inicio',
+  'Hora fim': 'Hora de fin',
+  'Confirmar exclusão?': '¿Confirmar eliminación?',
+  'Não é possível trocar o consultor de um agendamento já criado — exclua e crie um novo.':
+    'No es posible cambiar el consultor de una agenda ya creada — elimínela y cree una nueva.',
 }
 
 export function translate(lang, text, vars) {

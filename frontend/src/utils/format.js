@@ -52,6 +52,14 @@ export function formatIndex(value) {
   return Number(value).toFixed(2)
 }
 
+/** Hora da API vem como "HH:MM:SS" (serialização padrão de `datetime.time`
+ * do Pydantic) — só interessa mostrar "HH:MM" (ver ResourceSchedule na
+ * Agenda de consultores). */
+export function formatTime(value) {
+  if (!value) return '—'
+  return value.slice(0, 5)
+}
+
 export function daysBetween(startValue, endValue) {
   const start = parseApiDate(startValue)
   const end = parseApiDate(endValue)
