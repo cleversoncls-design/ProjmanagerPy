@@ -4,17 +4,19 @@
 import { getStoredLanguage, translate } from '../i18n/translations'
 
 // VITE_API_BASE_URL (se definida no build) manda sempre — útil quando a API
-// mora num host diferente do frontend. Sem ela, descobrimos o endereço da
-// API a partir de onde o navegador abriu a página (mesmo host, porta
-// VITE_API_PORT — padrão 3035, a mesma do docker-compose): assim o mesmo
-// build funciona acessando por localhost, IP da rede local ou IP público,
-// sem precisar escolher um endereço fixo em tempo de build.
+// mora num host diferente do frontend. Sem ela (padrão), as chamadas vão
+// para "/api" no MESMO endereço/porta que o navegador usou pra abrir a
+// página — o nginx do frontend (ver nginx.conf) repassa internamente esse
+// caminho pro container da API. Assim só uma porta (a do frontend, ex.:
+// 3036) precisa ficar acessível de fora — nada de abrir/expor uma segunda
+// porta pra API nem de configurar CORS pra acesso via navegador — e o
+// mesmo build funciona por localhost, IP da rede local ou IP público sem
+// escolher um endereço fixo em tempo de build.
 function resolveApiBaseUrl() {
   const configured = import.meta.env.VITE_API_BASE_URL
   if (configured) return configured.replace(/\/$/, '')
-  if (typeof window === 'undefined') return 'http://localhost:8000'
-  const apiPort = import.meta.env.VITE_API_PORT || '3035'
-  return `${window.location.protocol}//${window.location.hostname}:${apiPort}`
+  if (typeof window === 'undefined') return 'http://localhost:8000/api'
+  return `${window.location.origin}/api`
 }
 
 export const API_BASE_URL = resolveApiBaseUrl()

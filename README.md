@@ -41,11 +41,11 @@ docker compose ps
 
 A API ficará disponível em `http://localhost:3035` e a documentação interativa em `http://localhost:3035/docs`. A aplicação espera o PostgreSQL passar no healthcheck antes de iniciar. Os dados são persistidos no volume Docker `postgres_data`, portanto a remoção dos containers não remove o banco. O padrão configurado para acesso externo é a porta **3035**; a porta interna do container continua sendo `8000`. A aplicação recebe as credenciais do PostgreSQL em variáveis separadas e monta a URL com SQLAlchemy, permitindo senhas com caracteres como `@`, `:`, `/` e `#`.
 
-O mesmo `docker compose up -d --build` já sobe o frontend junto (serviço `web`), disponível por padrão em `http://localhost:3036` (ou `http://<ip-do-servidor>:3036` quando acessado de outra máquina na rede — local ou pela internet, se a porta estiver liberada). Um ponto importante antes do primeiro build:
+O mesmo `docker compose up -d --build` já sobe o frontend junto (serviço `web`), disponível por padrão em `http://localhost:3036` (ou `http://<ip-do-servidor>:3036` quando acessado de outra máquina na rede — local ou pela internet, se a porta estiver liberada). O nginx do frontend repassa internamente as chamadas de `/api/*` para o serviço `api` (ver `frontend/nginx.conf`), então **só a porta do frontend (`WEB_PORT`, padrão 3036) precisa estar liberada no firewall/roteador para acesso externo** — não é preciso abrir a porta da API (`API_PORT`) separadamente; ela continua mapeada só para uso direto (curl, Swagger, servidor-a-servidor) na própria máquina ou rede confiável.
 
-- **`CORS_ORIGINS`** precisa incluir **todas** as origens pelas quais alguém vai acessar o frontend — ex.: `http://192.168.22.20:3036,http://localhost:3036,http://<ip-publico>:3036` — senão a API rejeita por CORS as chamadas vindas dessas origens, mesmo com tudo no ar.
+Como o navegador passa a chamar a API pela mesma origem do frontend, isso também dispensa configurar `CORS_ORIGINS` para o uso normal pelo navegador — só é necessário preenchê-lo se algo fora do navegador (outro frontend, script, integração) for chamar a API diretamente, num domínio diferente (ver seção [CORS](#cors) abaixo).
 
-`VITE_API_BASE_URL` (no `.env`) normalmente fica **vazia** — o frontend descobre sozinho o endereço da API a partir do host que o navegador usou pra abrir a página, então o mesmo build funciona acessando por rede local, `localhost` ou IP público, sem precisar escolher um fixo. Só preencha essa variável se a API morar num host diferente do frontend; nesse caso o valor fica gravado dentro do JavaScript estático no momento do build, e mudar depois exige `docker compose build web && docker compose up -d web` — reiniciar o container sozinho não é suficiente.
+`VITE_API_BASE_URL` (no `.env`) normalmente fica **vazia** — o frontend chama `/api` no mesmo host:porta que o navegador usou pra abrir a página, então o mesmo build funciona acessando por rede local, `localhost` ou IP público, sem precisar escolher um fixo nem expor uma segunda porta. Só preencha essa variável se a API morar num host diferente do frontend (fora deste `docker-compose.yml`); nesse caso o valor fica gravado dentro do JavaScript estático no momento do build, e mudar depois exige `docker compose build web && docker compose up -d web` — reiniciar o container sozinho não é suficiente.
 
 Para aplicar a configuração automaticamente, tornar o processo repetível e recriar os serviços, execute:
 
@@ -89,7 +89,7 @@ O token expira em `JWT_EXPIRE_MINUTES` (padrão 480 minutos) e é assinado com `
 
 ### CORS
 
-Por padrão, nenhuma origem de navegador é liberada (chamadas via curl, Swagger ou servidor-a-servidor continuam funcionando normalmente, pois CORS é uma restrição aplicada pelo navegador, não pela API). Para permitir que um front-end em outro domínio consuma a API diretamente do navegador, defina `CORS_ORIGINS` no `.env` com as origens autorizadas, separadas por vírgula:
+O frontend (serviço `web`) chama a API pelo caminho `/api` na mesma origem — o nginx repassa internamente para o serviço `api` — então, para o uso normal pelo navegador, CORS nem entra em jogo (não é uma chamada cross-origin). `CORS_ORIGINS` só importa quando algo **fora** desse fluxo chama a API diretamente do navegador, num domínio diferente (ex.: um outro frontend, uma integração separada). Por padrão, nenhuma origem extra é liberada (chamadas via curl, Swagger ou servidor-a-servidor continuam funcionando normalmente, pois CORS é uma restrição aplicada pelo navegador, não pela API). Para liberar esse caso, defina `CORS_ORIGINS` no `.env` com as origens autorizadas, separadas por vírgula:
 
 ```bash
 CORS_ORIGINS=https://app.exemplo.com,https://admin.exemplo.com

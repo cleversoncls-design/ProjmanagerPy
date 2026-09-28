@@ -46,15 +46,17 @@ services:
     build:
       context: ./frontend
       args:
-        # Deixe VITE_API_BASE_URL vazia (padrão) — o frontend descobre
-        # sozinho o endereço da API a partir do host que o navegador usou
-        # pra abrir a página (funciona por localhost, IP da rede local ou
-        # IP público ao mesmo tempo, sem escolher um fixo). Só preencha se
-        # a API morar num host diferente do frontend. Qualquer mudança
-        # aqui é gravada dentro do JS estático no build, então exige
-        # reconstruir a imagem: docker compose build web && docker compose up -d web
+        # Deixe VITE_API_BASE_URL vazia (padrão) — o frontend chama "/api"
+        # no mesmo host:porta usado pra abrir a página, e o nginx deste
+        # serviço repassa internamente pro serviço "api" (ver
+        # frontend/nginx.conf). Só uma porta (WEB_PORT) precisa ficar
+        # acessível de fora; API_PORT continua existindo só pra acesso
+        # direto à API (curl, Swagger) sem passar pelo frontend. Preencha
+        # VITE_API_BASE_URL apenas se a API morar num host diferente deste
+        # docker-compose. Qualquer mudança aqui é gravada dentro do JS
+        # estático no build, então exige reconstruir a imagem:
+        # docker compose build web && docker compose up -d web
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
-        VITE_API_PORT: ${API_PORT:-3035}
     container_name: projmanager-web
     restart: unless-stopped
     ports:
