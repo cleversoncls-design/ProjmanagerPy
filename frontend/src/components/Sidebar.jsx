@@ -36,7 +36,7 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="flex shrink-0 flex-col overflow-hidden border-r transition-[width] duration-150 ease-out"
+      className="flex shrink-0 flex-col overflow-hidden border-r transition-[width] duration-150 ease-out print:hidden"
       style={{
         width: expanded ? WIDTH_EXPANDED : WIDTH_COLLAPSED,
         backgroundColor: 'var(--nav-bg)',
