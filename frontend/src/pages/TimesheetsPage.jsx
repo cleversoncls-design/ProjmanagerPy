@@ -15,7 +15,7 @@ import ErrorBanner from '../components/ErrorBanner'
 import StatusPill from '../components/StatusPill'
 import { FormField, TextInput, Select, TextArea } from '../components/FormField'
 import { CheckIcon, XIcon } from '../components/icons'
-import { formatDate, formatTime } from '../utils/format'
+import { formatDate, formatTime, formatHoursDuration, minutesToHM, hmToMinutes } from '../utils/format'
 import { MANAGEMENT_ROLES, TIMESHEET_STATUS_TONE } from '../utils/labels'
 
 function todayIso() {
@@ -23,20 +23,23 @@ function todayIso() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
-const EMPTY_FORM = { date: todayIso(), project_id: '', task_id: '', start_time: '', end_time: '', break_minutes: '0', description: '' }
+const EMPTY_FORM = { date: todayIso(), project_id: '', task_id: '', start_time: '', end_time: '', break_minutes: '00:00', description: '' }
 
-/** Prévia do total calculado (Hora Fim − Hora Início − Intervalo) — só
- * pra mostrar ao consultor antes de salvar; o valor que vale de verdade é
- * sempre recalculado no backend (nunca digitado, nem confiado do cliente,
- * mesmo padrão de `Project.sold_value`). */
+/** Prévia do total calculado (Hora Fim − Hora Início − Intervalo), já em
+ * formato de horas "HH:MM" — só pra mostrar ao consultor antes de salvar; o
+ * valor que vale de verdade é sempre recalculado no backend (nunca
+ * digitado, nem confiado do cliente, mesmo padrão de `Project.sold_value`).
+ * `form.break_minutes` é um "HH:MM" (o <input type="time"> do campo
+ * Intervalo, usado como seletor de duração) — convertido pra minutos aqui
+ * antes da conta. */
 function previewHours(form) {
   if (!form.start_time || !form.end_time) return null
   const [sh, sm] = form.start_time.split(':').map(Number)
   const [eh, em] = form.end_time.split(':').map(Number)
   const span = eh * 60 + em - (sh * 60 + sm)
-  const brk = Number(form.break_minutes) || 0
+  const brk = hmToMinutes(form.break_minutes)
   if (!(span > 0) || brk >= span) return null
-  return ((span - brk) / 60).toFixed(2)
+  return formatHoursDuration((span - brk) / 60)
 }
 
 export default function TimesheetsPage() {
@@ -153,7 +156,7 @@ export default function TimesheetsPage() {
         date: form.date,
         start_time: form.start_time,
         end_time: form.end_time,
-        break_minutes: Number(form.break_minutes) || 0,
+        break_minutes: hmToMinutes(form.break_minutes),
         description: form.description || null,
       }
       if (form.task_id) payload.task_id = form.task_id
@@ -236,8 +239,8 @@ export default function TimesheetsPage() {
               <FormField label={t('Hora fim')} required>
                 <TextInput type="time" required value={form.end_time} onChange={updateField('end_time')} />
               </FormField>
-              <FormField label={t('Intervalo (min)')}>
-                <TextInput type="number" min="0" step="5" value={form.break_minutes} onChange={updateField('break_minutes')} />
+              <FormField label={t('Intervalo')}>
+                <TextInput type="time" step="300" value={form.break_minutes} onChange={updateField('break_minutes')} />
               </FormField>
               <FormField label={t('Total calculado')}>
                 <div className="flex h-[38px] items-center rounded-lg border border-[var(--border)] bg-[var(--page)] px-3 text-sm font-medium text-[var(--text-primary)]">
@@ -273,7 +276,7 @@ export default function TimesheetsPage() {
               { key: 'task', header: t('Tarefa'), render: (row) => entryDescription(row).taskLabel },
               { key: 'type', header: t('Tipo'), render: (row) => entryDescription(row).typeLabel },
               { key: 'time', header: t('Horário'), render: (row) => (row.start_time ? `${formatTime(row.start_time)}–${formatTime(row.end_time)}` : '—') },
-              { key: 'hours', header: t('Total'), align: 'right', render: (row) => Number(row.hours_spent).toFixed(2) },
+              { key: 'hours', header: t('Total'), align: 'right', render: (row) => formatHoursDuration(row.hours_spent) },
               {
                 key: 'status',
                 header: t('Status'),
@@ -313,7 +316,7 @@ export default function TimesheetsPage() {
                         </span>
                         {entry.start_time && (
                           <span className="text-[var(--text-muted)]">
-                            {formatTime(entry.start_time)}–{formatTime(entry.end_time)} ({Number(entry.hours_spent).toFixed(2)}h)
+                            {formatTime(entry.start_time)}–{formatTime(entry.end_time)} ({formatHoursDuration(entry.hours_spent)})
                           </span>
                         )}
                         {entry.unscheduled && <StatusPill label={t('Fora da agenda')} tone="serious" />}

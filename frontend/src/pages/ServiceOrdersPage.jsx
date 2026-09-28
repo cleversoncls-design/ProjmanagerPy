@@ -11,7 +11,7 @@ import Button from '../components/Button'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
 import { FormField, TextInput, Select } from '../components/FormField'
-import { formatDate, formatTime } from '../utils/format'
+import { formatDate, formatTime, formatHoursDuration, minutesToHM } from '../utils/format'
 
 function todayIso() {
   const now = new Date()
@@ -170,7 +170,7 @@ export default function ServiceOrdersPage() {
                   </div>
                   <div>
                     <p className="text-xs text-[var(--text-muted)]">{t('Total de horas')}</p>
-                    <p className="font-medium text-[var(--text-primary)]">{Number(order.total_hours).toFixed(2)}</p>
+                    <p className="font-medium text-[var(--text-primary)]">{formatHoursDuration(order.total_hours)}</p>
                   </div>
                 </div>
               </div>
@@ -180,7 +180,7 @@ export default function ServiceOrdersPage() {
                   <tr className="border-b border-[var(--border)] text-left text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">
                     <th className="px-2 py-1.5">{t('Atividade')}</th>
                     <th className="px-2 py-1.5">{t('Horário')}</th>
-                    <th className="px-2 py-1.5 text-right">{t('Intervalo (min)')}</th>
+                    <th className="px-2 py-1.5 text-right">{t('Intervalo')}</th>
                     <th className="px-2 py-1.5 text-right">{t('Total')}</th>
                     <th className="px-2 py-1.5">{t('Descrição')}</th>
                   </tr>
@@ -194,8 +194,8 @@ export default function ServiceOrdersPage() {
                       <td className="px-2 py-1.5 whitespace-nowrap text-[var(--text-secondary)]">
                         {formatTime(activity.start_time)}–{formatTime(activity.end_time)}
                       </td>
-                      <td className="px-2 py-1.5 text-right text-[var(--text-secondary)]">{activity.break_minutes}</td>
-                      <td className="px-2 py-1.5 text-right font-medium text-[var(--text-primary)]">{Number(activity.hours).toFixed(2)}</td>
+                      <td className="px-2 py-1.5 text-right text-[var(--text-secondary)]">{minutesToHM(activity.break_minutes)}</td>
+                      <td className="px-2 py-1.5 text-right font-medium text-[var(--text-primary)]">{formatHoursDuration(activity.hours)}</td>
                       <td className="px-2 py-1.5 text-[var(--text-secondary)]">{activity.description || '—'}</td>
                     </tr>
                   ))}

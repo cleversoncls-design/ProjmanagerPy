@@ -60,6 +60,41 @@ export function formatTime(value) {
   return value.slice(0, 5)
 }
 
+/** Horas decimais (ex.: 4.33, como vem de `Timesheet.hours_spent` ou
+ * `ServiceOrder.total_hours`) → "HH:MM" (ex.: "04:20") — "formato de horas"
+ * de verdade, usado no Apontamento de horas e na Ordem de Serviço; o
+ * decimal cru confundia quem lia (4.33 parece "4h33", mas são 4h20). */
+export function formatHoursDuration(value) {
+  if (value === null || value === undefined || value === '') return '—'
+  const totalMinutes = Math.round(Number(value) * 60)
+  if (Number.isNaN(totalMinutes)) return '—'
+  const sign = totalMinutes < 0 ? '-' : ''
+  const abs = Math.abs(totalMinutes)
+  const hours = Math.floor(abs / 60)
+  const minutes = abs % 60
+  return `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+/** Minutos inteiros (ex.: `Timesheet.break_minutes`) → "HH:MM", pro campo
+ * Intervalo, que usa um <input type="time"> como seletor de DURAÇÃO (não de
+ * horário do dia) — mesmo widget de Hora início/Hora fim. */
+export function minutesToHM(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0))
+  const hours = Math.floor(total / 60)
+  const mins = total % 60
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`
+}
+
+/** "HH:MM" → minutos inteiros — inverso de `minutesToHM`, pra mandar
+ * `break_minutes` pro backend (que continua em minutos, sem mudança de
+ * schema/API — só o formato de entrada/exibição no frontend mudou). */
+export function hmToMinutes(value) {
+  if (!value) return 0
+  const [h, m] = value.split(':').map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return 0
+  return h * 60 + m
+}
+
 export function daysBetween(startValue, endValue) {
   const start = parseApiDate(startValue)
   const end = parseApiDate(endValue)
