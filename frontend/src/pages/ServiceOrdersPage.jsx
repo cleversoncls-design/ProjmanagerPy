@@ -4,14 +4,24 @@ import * as resourcesApi from '../api/resources'
 import * as usersApi from '../api/users'
 import * as clientsApi from '../api/clients'
 import * as projectsApi from '../api/projects'
+import * as tasksApi from '../api/tasks'
+import * as timesheetsApi from '../api/timesheets'
+import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Button from '../components/Button'
+import IconButton from '../components/IconButton'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
+import StatusPill from '../components/StatusPill'
+import TimesheetEditModal from '../components/TimesheetEditModal'
+import TimesheetDeleteModal from '../components/TimesheetDeleteModal'
 import { FormField, TextInput, Select } from '../components/FormField'
+import { CheckIcon, XIcon, PencilIcon, TrashIcon } from '../components/icons'
 import { formatDate, formatTime, formatHoursDuration, minutesToHM } from '../utils/format'
+import { MANAGEMENT_ROLES, TIMESHEET_STATUS_TONE } from '../utils/labels'
+import { isTimesheetEditable } from '../utils/timesheetForm'
 
 function todayIso() {
   const now = new Date()
@@ -27,22 +37,34 @@ function daysAgoIso(days) {
 const EMPTY_FILTERS = { resource_id: '', client_id: '', project_id: '', start: daysAgoIso(30), end: todayIso() }
 
 export default function ServiceOrdersPage() {
-  const { t } = useLanguage()
+  const { user } = useAuth()
+  const { labels, t } = useLanguage()
+  const canManage = MANAGEMENT_ROLES.includes(user.role)
 
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [resources, setResources] = useState([])
   const [users, setUsers] = useState([])
   const [clients, setClients] = useState([])
   const [projects, setProjects] = useState([])
+  const [allTasks, setAllTasks] = useState([])
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [actingId, setActingId] = useState(null)
+  const [editingEntry, setEditingEntry] = useState(null)
+  const [deletingEntry, setDeletingEntry] = useState(null)
 
   useEffect(() => {
     resourcesApi.listResources().then(setResources).catch(() => {})
     usersApi.listUsers().then(setUsers).catch(() => {})
     clientsApi.listClients().then(setClients).catch(() => {})
-    projectsApi.listProjects().then(setProjects).catch(() => {})
+    // Tarefas de todos os projetos — só usadas pra popular o combo Tarefa
+    // do modal de Editar (TimesheetEditModal), mesmo padrão de
+    // TimesheetsPage.jsx (ver allTasks lá).
+    projectsApi.listProjects().then((rows) => {
+      setProjects(rows)
+      Promise.all(rows.map((p) => tasksApi.listTasks(p.id).catch(() => []))).then((lists) => setAllTasks(lists.flat()))
+    })
   }, [])
 
   const usersById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
@@ -54,6 +76,11 @@ export default function ServiceOrdersPage() {
     () => (filters.client_id ? projects.filter((p) => p.client_id === filters.client_id) : projects),
     [projects, filters.client_id],
   )
+  const tasksById = useMemo(() => Object.fromEntries(allTasks.map((task) => [task.id, task])), [allTasks])
+  // Recurso do usuário logado — só ele (nunca outro consultor, mesmo pra
+  // quem gerencia) enxerga Editar/Excluir numa linha da OS; ver mesma regra
+  // em TimesheetsPage "Meus apontamentos".
+  const ownResource = useMemo(() => resources.find((r) => r.user_id === user.id) || null, [resources, user.id])
 
   function loadOrders() {
     setLoading(true)
@@ -75,6 +102,43 @@ export default function ServiceOrdersPage() {
 
   function updateFilter(field) {
     return (event) => setFilters((prev) => ({ ...prev, [field]: event.target.value }))
+  }
+
+  async function handleStatus(activity, newStatus) {
+    setActingId(activity.id)
+    setError('')
+    try {
+      await timesheetsApi.updateTimesheetStatus(activity.id, newStatus)
+      loadOrders()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setActingId(null)
+    }
+  }
+
+  /** Rótulo pro modal de Editar/o modal de Excluir — a atividade da OS já
+   * traz wbs_code/task_name resolvidos (sem precisar de tasksById/
+   * projectsById como em TimesheetsPage), então monta direto a partir da
+   * própria linha + do cabeçalho da Ordem de Serviço (`order`). */
+  function activityLabel(order, activity) {
+    return {
+      projectLabel: `${order.project_code} — ${order.project_name}`,
+      taskLabel: activity.wbs_code ? `${activity.wbs_code} ${activity.task_name}` : t('Avulso'),
+    }
+  }
+
+  /** `ServiceOrderActivity` não repete `date`/`project_id` (vêm do
+   * `ServiceOrderRow` que a contém) — completa os dois antes de passar pro
+   * TimesheetEditModal, que espera o mesmo formato de TimesheetRead (ver
+   * entryToTimesheetForm em utils/timesheetForm.js). `project_id` do
+   * pedido é sempre o projeto efetivo da atividade (Task.project_id ou
+   * Timesheet.project_id — o mesmo `project_col` usado em
+   * services.py::service_orders), então serve tanto pro caso avulso
+   * quanto o com tarefa (nesse último, entryToTimesheetForm nem usa este
+   * campo — pega o projeto da própria tarefa). */
+  function openEdit(order, activity) {
+    setEditingEntry({ ...activity, date: order.date, project_id: order.project_id })
   }
 
   return (
@@ -183,27 +247,108 @@ export default function ServiceOrdersPage() {
                     <th className="px-2 py-1.5 text-right">{t('Intervalo')}</th>
                     <th className="px-2 py-1.5 text-right">{t('Total')}</th>
                     <th className="px-2 py-1.5">{t('Descrição')}</th>
+                    <th className="px-2 py-1.5">{t('Status')}</th>
+                    <th className="px-2 py-1.5 text-right print:hidden">{''}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {order.activities.map((activity, index) => (
-                    <tr key={index} className="border-b border-[var(--border)] last:border-0">
-                      <td className="px-2 py-1.5 text-[var(--text-primary)]">
-                        {activity.wbs_code ? `${activity.wbs_code} — ${activity.task_name}` : t('Avulso')}
-                      </td>
-                      <td className="px-2 py-1.5 whitespace-nowrap text-[var(--text-secondary)]">
-                        {formatTime(activity.start_time)}–{formatTime(activity.end_time)}
-                      </td>
-                      <td className="px-2 py-1.5 text-right text-[var(--text-secondary)]">{minutesToHM(activity.break_minutes)}</td>
-                      <td className="px-2 py-1.5 text-right font-medium text-[var(--text-primary)]">{formatHoursDuration(activity.hours)}</td>
-                      <td className="px-2 py-1.5 text-[var(--text-secondary)]">{activity.description || '—'}</td>
-                    </tr>
-                  ))}
+                  {order.activities.map((activity) => {
+                    const own = ownResource && order.resource_id === ownResource.id
+                    const canApprove = canManage && activity.status === 'PENDING'
+                    const canEdit = own && isTimesheetEditable(activity)
+                    const blockedForMe = activity.unscheduled && user.role !== 'ADMIN'
+                    return (
+                      <tr key={activity.id} className="border-b border-[var(--border)] last:border-0">
+                        <td className="px-2 py-1.5 text-[var(--text-primary)]">
+                          {activity.wbs_code ? `${activity.wbs_code} — ${activity.task_name}` : t('Avulso')}
+                        </td>
+                        <td className="px-2 py-1.5 whitespace-nowrap text-[var(--text-secondary)]">
+                          {formatTime(activity.start_time)}–{formatTime(activity.end_time)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right text-[var(--text-secondary)]">{minutesToHM(activity.break_minutes)}</td>
+                        <td className="px-2 py-1.5 text-right font-medium text-[var(--text-primary)]">{formatHoursDuration(activity.hours)}</td>
+                        <td className="px-2 py-1.5 text-[var(--text-secondary)]">{activity.description || '—'}</td>
+                        <td className="px-2 py-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <StatusPill
+                              label={labels.TIMESHEET_STATUS_LABELS[activity.status] || activity.status}
+                              tone={TIMESHEET_STATUS_TONE[activity.status]}
+                            />
+                            {activity.unscheduled && <StatusPill label={t('Fora da agenda')} tone="serious" />}
+                          </div>
+                        </td>
+                        <td className="px-2 py-1.5 text-right print:hidden">
+                          {canApprove || canEdit ? (
+                            <div className="flex justify-end gap-1.5">
+                              {canApprove && (
+                                <>
+                                  <IconButton
+                                    icon={CheckIcon}
+                                    label={t('Aprovar')}
+                                    disabled={actingId === activity.id || blockedForMe}
+                                    title={blockedForMe ? t('Só o Administrador pode aprovar apontamentos fora da agenda.') : t('Aprovar')}
+                                    onClick={() => handleStatus(activity, 'APPROVED')}
+                                  />
+                                  <IconButton
+                                    icon={XIcon}
+                                    label={t('Rejeitar')}
+                                    variant="danger"
+                                    disabled={actingId === activity.id}
+                                    onClick={() => handleStatus(activity, 'REJECTED')}
+                                  />
+                                </>
+                              )}
+                              {canEdit && (
+                                <>
+                                  <IconButton icon={PencilIcon} label={t('Editar')} onClick={() => openEdit(order, activity)} />
+                                  <IconButton
+                                    icon={TrashIcon}
+                                    label={t('Excluir')}
+                                    variant="danger"
+                                    onClick={() => setDeletingEntry({ activity: { ...activity, date: order.date }, label: activityLabel(order, activity) })}
+                                  />
+                                </>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-[var(--text-muted)]">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </Card>
           ))}
         </div>
+      )}
+
+      {editingEntry && (
+        <TimesheetEditModal
+          entry={editingEntry}
+          projects={projects}
+          allTasks={allTasks}
+          tasksById={tasksById}
+          labels={labels}
+          onClose={() => setEditingEntry(null)}
+          onSaved={() => {
+            setEditingEntry(null)
+            loadOrders()
+          }}
+        />
+      )}
+
+      {deletingEntry && (
+        <TimesheetDeleteModal
+          entry={deletingEntry.activity}
+          entryLabel={deletingEntry.label}
+          onClose={() => setDeletingEntry(null)}
+          onDeleted={() => {
+            setDeletingEntry(null)
+            loadOrders()
+          }}
+        />
       )}
     </div>
   )

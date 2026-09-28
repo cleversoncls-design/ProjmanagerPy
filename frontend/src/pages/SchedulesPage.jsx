@@ -25,20 +25,22 @@ function toIsoDate(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-/** Início da semana (segunda) que contém `date` — usado só pra montar a
- * grade do mês (WEEKDAY_LABELS já começa em "Seg"), nunca pra cálculo de
- * negócio (dias úteis/feriados são responsabilidade do backend). */
+/** Início da semana (domingo) que contém `date` — usado só pra montar a
+ * grade visual do mês (domingo a sábado, mais fácil de visualizar — pedido
+ * do usuário), nunca pra cálculo de negócio: dias úteis/feriados continuam
+ * em `WEEKDAY_LABELS`/`working_days` com a convenção ISO do backend
+ * (segunda=0..domingo=6, ver services.py e CalendarsPage.jsx), que não
+ * muda por causa disso. */
 function startOfWeek(date) {
   const day = date.getDay() // 0=Dom..6=Sáb
-  const diff = day === 0 ? -6 : 1 - day
   const result = new Date(date)
-  result.setDate(result.getDate() + diff)
+  result.setDate(result.getDate() - day)
   return result
 }
 
 /** Monta as células da grade do mês: sempre semanas completas (múltiplo de
- * 7), começando na segunda-feira da semana que contém o dia 1 e terminando
- * na semana que contém o último dia do mês — inclui alguns dias do mês
+ * 7), começando no domingo da semana que contém o dia 1 e terminando na
+ * semana que contém o último dia do mês — inclui alguns dias do mês
  * anterior/seguinte pra não deixar semana incompleta na grade. */
 function buildMonthCells(viewDate) {
   const firstOfMonth = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1)
@@ -46,7 +48,7 @@ function buildMonthCells(viewDate) {
   const gridStart = startOfWeek(firstOfMonth)
   const cells = []
   const cursor = new Date(gridStart)
-  while (cursor <= lastOfMonth || cursor.getDay() !== 1) {
+  while (cursor <= lastOfMonth || cursor.getDay() !== 0) {
     cells.push(new Date(cursor))
     cursor.setDate(cursor.getDate() + 1)
     if (cells.length > 42) break
@@ -112,6 +114,14 @@ export default function SchedulesPage() {
     [projects, filters.client_id],
   )
   const monthCells = useMemo(() => buildMonthCells(viewDate), [viewDate])
+  // Cabeçalho da grade do mês, domingo a sábado — reordena só a exibição
+  // (WEEKDAY_LABELS em si continua segunda=0..domingo=6, convenção do
+  // backend usada em CalendarsPage/working_days; ver comentário em
+  // startOfWeek acima).
+  const weekdayLabelsSundayFirst = useMemo(
+    () => [labels.WEEKDAY_LABELS[6], ...labels.WEEKDAY_LABELS.slice(0, 6)],
+    [labels.WEEKDAY_LABELS],
+  )
 
   function loadSchedules() {
     setLoading(true)
@@ -244,8 +254,8 @@ export default function SchedulesPage() {
       {!loading && !listMode && (
         <Card dense>
           <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold text-[var(--text-secondary)]">
-            {labels.WEEKDAY_LABELS.map((day) => (
-              <div key={day} className="py-1">
+            {weekdayLabelsSundayFirst.map((day, index) => (
+              <div key={`${day}-${index}`} className="py-1">
                 {day}
               </div>
             ))}
