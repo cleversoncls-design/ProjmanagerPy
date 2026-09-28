@@ -722,8 +722,14 @@ class RoiRow(BaseModel):
 class ServiceOrderActivity(BaseModel):
     """Uma linha da Ordem de Serviço — um apontamento (Timesheet). Sem
     `task_id` (apontamento avulso no projeto), `wbs_code`/`task_name`
-    ficam nulos e o frontend mostra "Avulso" no lugar."""
+    ficam nulos e o frontend mostra "Avulso" no lugar. `id`/`status`/
+    `unscheduled` existem pra a tela oferecer Editar/Excluir/Aprovar/
+    Rejeitar direto na Ordem de Serviço (ver ServiceOrdersPage.jsx) — as
+    mesmas rotas/regras de app/routers/timesheets.py, nunca duplicadas
+    aqui; REJECTED nunca aparece (excluído por `service_orders` em
+    services.py), então só PENDING/APPROVED chegam no frontend."""
 
+    id: str
     task_id: str | None
     wbs_code: str | None
     task_name: str | None
@@ -732,6 +738,8 @@ class ServiceOrderActivity(BaseModel):
     break_minutes: int
     hours: Decimal
     description: str | None
+    status: TimesheetStatus
+    unscheduled: bool
 
 
 class ServiceOrderRow(BaseModel):

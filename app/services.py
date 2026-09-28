@@ -1128,6 +1128,7 @@ def service_orders(
     project_col = func.coalesce(Task.project_id, Timesheet.project_id)
     stmt = (
         select(
+            Timesheet.id,
             Timesheet.date,
             Timesheet.resource_id,
             project_col.label("project_id"),
@@ -1139,6 +1140,8 @@ def service_orders(
             Timesheet.break_minutes,
             Timesheet.hours_spent,
             Timesheet.description,
+            Timesheet.status,
+            Timesheet.unscheduled,
         )
         .outerjoin(Task, Task.id == Timesheet.task_id)
         .where(
@@ -1160,6 +1163,7 @@ def service_orders(
         key = (row.date, row.project_id, row.resource_id)
         groups[key].append(
             {
+                "id": row.id,
                 "task_id": row.task_id,
                 "wbs_code": row.wbs_code,
                 "task_name": row.task_name,
@@ -1168,6 +1172,8 @@ def service_orders(
                 "break_minutes": row.break_minutes,
                 "hours": Decimal(row.hours_spent),
                 "description": row.description,
+                "status": row.status,
+                "unscheduled": row.unscheduled,
             }
         )
     if not groups:
