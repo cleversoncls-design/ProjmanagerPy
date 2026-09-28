@@ -118,8 +118,14 @@ body {
 
 /* Destaque amarelo dos campos variáveis da OS impressa — reproduz o
  * mesmo destaque já presente no modelo oficial TOTVS anexado pelo
- * usuário (só o VALOR de cada campo, nunca o rótulo). */
+ * usuário (só o VALOR de cada campo, nunca o rótulo). print-color-adjust
+ * força o navegador a imprimir esse fundo mesmo com a opção "Gráficos de
+ * segundo plano"/"Background graphics" desmarcada na caixa de diálogo de
+ * impressão (desmarcada é o padrão do Chrome) — sem isso, o destaque some
+ * do PDF/impresso mesmo aparecendo certo na tela. */
 .os-field {
   background-color: #fff6a3;
   padding: 0 3px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
