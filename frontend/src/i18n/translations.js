@@ -648,7 +648,7 @@ export const es = {
   'Sem tarefa (apontamento no projeto)': 'Sin tarea (registro en el proyecto)',
   'Tipo de apontamento': 'Tipo de registro',
   'Segue automaticamente o tipo da tarefa (Gestão/Consultoria).': 'Sigue automáticamente el tipo de la tarea (Gestión/Consultoría).',
-  'Intervalo (min)': 'Intervalo (min)',
+  'Intervalo': 'Intervalo',
   'Total calculado': 'Total calculado',
   'Meus apontamentos': 'Mis registros',
   'Horário': 'Horario',
