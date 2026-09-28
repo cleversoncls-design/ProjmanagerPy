@@ -7,7 +7,15 @@ import Header from './Header'
  * referência Resultar Servicios (components/desktop-route-shell.tsx). */
 export default function Layout() {
   return (
-    <div className="flex min-h-screen flex-col">
+    // print:hidden aqui (não só nos filhos) — sem isso, o `min-h-screen`
+    // deste div força pelo menos uma página inteira de espaço em branco
+    // na impressão mesmo com todo o conteúdo visível já escondido (cada
+    // filho já tem seu próprio print:hidden), porque min-height:100vh
+    // continua valendo no cálculo de paginação da impressão. Foi essa
+    // página 1 em branco antes da OS impressa (ver ServiceOrdersPage →
+    // ServiceOrderPrintSheet, que imprime via portal direto em
+    // document.body, fora desta árvore).
+    <div className="flex min-h-screen flex-col print:hidden">
       <div className="h-1 shrink-0 print:hidden" style={{ backgroundColor: 'var(--nav-top-accent)' }} />
       <div className="flex min-h-0 flex-1 bg-[var(--page)]">
         <Sidebar />
