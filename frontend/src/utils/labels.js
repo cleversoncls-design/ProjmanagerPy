@@ -104,24 +104,9 @@ export const APPROVAL_STATUS_LABELS_SHORT = {
 
 export const WEEKDAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 
-// As mesmas 8 chaves em app/models.py (PROJECT_COLOR_KEYS) — a cor do
-// projeto é sempre uma destas 8 (nunca um hex livre), reaproveitando a
-// paleta categórica já validada (--series-1..8, ver index.css) em vez de
-// inventar uma paleta nova só pra isso. Usada no seletor de cor do projeto
-// (ColorSwatchPicker) e para colorir os blocos da Agenda de consultores —
-// a cor "segue" o projeto automaticamente, sem escolha por agendamento.
-export const PROJECT_COLOR_KEYS = ['series-1', 'series-2', 'series-3', 'series-4', 'series-5', 'series-6', 'series-7', 'series-8']
-
-export const PROJECT_COLOR_LABELS = {
-  'series-1': 'Azul',
-  'series-2': 'Laranja',
-  'series-3': 'Água',
-  'series-4': 'Amarelo',
-  'series-5': 'Magenta',
-  'series-6': 'Verde',
-  'series-7': 'Violeta',
-  'series-8': 'Vermelho',
-}
+// A cor do projeto deixou de ser uma das 8 chaves categóricas fixas — ver
+// utils/colorPalette.js (PROJECT_COLOR_PALETTE, 256 cores nomeadas) e
+// components/ColorListPicker.jsx.
 
 export const USER_STATUS_LABELS = {
   ACTIVE: 'Ativo',
@@ -211,7 +196,6 @@ export function getLabels(lang) {
     DEPENDENCY_TYPE_SHORT: translateMap(DEPENDENCY_TYPE_SHORT, lang),
     STATUS_DOT_LABELS: translateMap(STATUS_DOT_LABELS, lang),
     WEEKDAY_LABELS: WEEKDAY_LABELS.map((day) => translate(lang, day)),
-    PROJECT_COLOR_LABELS: translateMap(PROJECT_COLOR_LABELS, lang),
     TIMESHEET_STATUS_LABELS: translateMap(TIMESHEET_STATUS_LABELS, lang),
   }
 }

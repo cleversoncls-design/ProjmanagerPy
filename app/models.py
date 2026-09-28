@@ -8,6 +8,8 @@ from decimal import Decimal
 from sqlalchemy import Boolean, Date, DateTime, Enum as SqlEnum, ForeignKey, Integer, JSON, Numeric, String, Text, Time, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from .color_palette import DEFAULT_PROJECT_COLOR
+
 
 class Base(DeclarativeBase):
     pass
@@ -171,12 +173,6 @@ class ProjectIntake(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
-# As 8 chaves da paleta categórica já validada do app (ver --series-1..8
-# em frontend/src/index.css) — Project.color só aceita uma destas (checado
-# no router, não aqui: nível de validação de request, não de coluna).
-PROJECT_COLOR_KEYS = ("series-1", "series-2", "series-3", "series-4", "series-5", "series-6", "series-7", "series-8")
-
-
 class Project(Base):
     __tablename__ = "projects"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -210,11 +206,12 @@ class Project(Base):
     # `services.project_evm` e `services.task_dot_color`. None = usa a data
     # de hoje como data-base (comportamento antes de existir este campo).
     status_date: Mapped[date | None] = mapped_column(Date)
-    # Cor do projeto (uma das 8 chaves da paleta categórica já validada do
-    # app — "series-1".."series-8", ver --series-* em index.css) — aplicada
-    # automaticamente em toda agenda (ResourceSchedule) deste projeto na
-    # tela "Agenda de consultores", sem escolha manual por agendamento.
-    color: Mapped[str] = mapped_column(String(20), nullable=False, default="series-1")
+    # Cor do projeto — um hex (ex.: "#2A78D6") da paleta de 256 cores
+    # nomeadas em app/color_palette.py (PROJECT_COLOR_PALETTE; validação de
+    # membership fica no router, não aqui). Aplicada automaticamente em toda
+    # agenda (ResourceSchedule) deste projeto na tela "Agenda de
+    # consultores", sem escolha manual por agendamento.
+    color: Mapped[str] = mapped_column(String(20), nullable=False, default=DEFAULT_PROJECT_COLOR)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     client: Mapped[Client] = relationship(back_populates="projects")

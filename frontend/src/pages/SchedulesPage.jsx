@@ -17,6 +17,7 @@ import { FormField, TextInput, Select, TextArea } from '../components/FormField'
 import { ChevronLeftIcon, ChevronRightIcon, PencilIcon, PlusIcon } from '../components/icons'
 import { formatTime } from '../utils/format'
 import { MANAGEMENT_ROLES } from '../utils/labels'
+import { DEFAULT_PROJECT_COLOR, contrastTextColor } from '../utils/colorPalette'
 
 const EMPTY_FILTERS = { resource_id: '', client_id: '', project_id: '', start: '', end: '' }
 
@@ -279,15 +280,15 @@ export default function SchedulesPage() {
                   </div>
                   <div className="space-y-0.5">
                     {daySchedules.slice(0, 3).map((schedule) => {
-                      const color = projectsById[schedule.project_id]?.color || 'series-1'
+                      const color = projectsById[schedule.project_id]?.color || DEFAULT_PROJECT_COLOR
                       return (
                         <button
                           key={schedule.id}
                           type="button"
                           title={scheduleLabel(schedule)}
                           onClick={() => setFormTarget({ schedule })}
-                          className="block w-full truncate rounded px-1 py-0.5 text-left text-[10.5px] font-medium text-white"
-                          style={{ backgroundColor: `var(--${color})` }}
+                          className="block w-full truncate rounded px-1 py-0.5 text-left text-[10.5px] font-medium"
+                          style={{ backgroundColor: color, color: contrastTextColor(color) }}
                         >
                           {formatTime(schedule.start_time)} {resourcesById[schedule.resource_id]?.userName || '—'}
                         </button>
@@ -311,14 +312,14 @@ export default function SchedulesPage() {
           ) : (
             <div className="space-y-1.5">
               {schedules.map((schedule) => {
-                const color = projectsById[schedule.project_id]?.color || 'series-1'
+                const color = projectsById[schedule.project_id]?.color || DEFAULT_PROJECT_COLOR
                 return (
                   <div
                     key={schedule.id}
                     className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
                   >
                     <div className="flex items-center gap-2.5">
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: `var(--${color})` }} />
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
                       <span className="font-medium text-[var(--text-primary)]">{schedule.date}</span>
                       <span className="text-[var(--text-secondary)]">{scheduleLabel(schedule)}</span>
                     </div>

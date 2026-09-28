@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from .color_palette import DEFAULT_PROJECT_COLOR
 from .models import (
     AuditAction,
     ChangeStatus,
@@ -167,11 +168,11 @@ class ProjectCreate(BaseModel):
     start_date: date | None = None
     end_date: date | None = None
     calendar_id: str | None = None
-    # Uma das 8 chaves da paleta categórica do app ("series-1".."series-8") —
-    # aplicada automaticamente em toda agenda (ResourceSchedule) deste
-    # projeto. Validada no router (não aqui) contra a lista de chaves
-    # válidas, no mesmo padrão de manager_id/calendar_id.
-    color: str = "series-1"
+    # Um hex da paleta de 256 cores em app/color_palette.py — aplicada
+    # automaticamente em toda agenda (ResourceSchedule) deste projeto.
+    # Validada no router (não aqui) contra a lista de hexes válidos, no
+    # mesmo padrão de manager_id/calendar_id.
+    color: str = DEFAULT_PROJECT_COLOR
 
 
 class ProjectUpdate(BaseModel):
