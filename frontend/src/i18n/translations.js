@@ -682,6 +682,9 @@ export const es = {
   'Itens': 'Ítems',
   'Detalhes': 'Detalles',
   'Emitida em {date}': 'Emitida el {date}',
+  'Subtotal': 'Subtotal',
+  'Total geral': 'Total general',
+  'Período': 'Período',
 }
 
 export function translate(lang, text, vars) {

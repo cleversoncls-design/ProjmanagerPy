@@ -1,4 +1,4 @@
-import { api, API_BASE_URL, ApiError, getToken } from './client'
+import { api, API_BASE_URL, ApiError, getToken, withQuery } from './client'
 
 export function getDashboard() {
   return api.get('/dashboard')
@@ -44,6 +44,31 @@ export async function downloadTasksXlsx(projectId, filenameFallback) {
   })
   if (!response.ok) {
     throw new ApiError(`Erro ${response.status} ao exportar as tarefas.`, response.status)
+  }
+  const blob = await response.blob()
+  const disposition = response.headers.get('Content-Disposition') || ''
+  const match = disposition.match(/filename="?([^"]+)"?/)
+  const filename = match ? match[1] : filenameFallback
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+/** Baixa a planilha de Ordens de Serviço (.xlsx) — mesmos filtros de
+ * getServiceOrders (params), mas via download binário direto (mesmo
+ * padrão de downloadTasksXlsx acima, não passa por api.get). */
+export async function downloadServiceOrdersXlsx(params, filenameFallback) {
+  const token = getToken()
+  const response = await fetch(`${API_BASE_URL}${withQuery('/reports/service-orders/export.xlsx', params)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!response.ok) {
+    throw new ApiError(`Erro ${response.status} ao exportar as Ordens de Serviço.`, response.status)
   }
   const blob = await response.blob()
   const disposition = response.headers.get('Content-Disposition') || ''
