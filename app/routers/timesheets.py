@@ -86,12 +86,14 @@ def _recalculate_actual_hours(db: Session, task_id: str | None) -> None:
     task.actual_hours = sum((Decimal(h) for h in hours), Decimal("0"))
 
 
-@router.post("/timesheets", response_model=TimesheetRead, status_code=status.HTTP_201_CREATED)
-def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Timesheet:
-    resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
-    if not resource:
-        raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
-
+def _resolve_task_and_project(
+    data: TimesheetCreate, resource: Resource, user: User, db: Session, *, exclude_timesheet_id: str | None = None
+) -> tuple[Task | None, Project | None]:
+    """Validações de escopo/projeto ativo/alocação e a checagem de
+    apontamento duplicado (mesmo recurso+tarefa+data) — compartilhadas por
+    create_timesheet e update_timesheet. `exclude_timesheet_id` tira o
+    próprio registro da checagem de duplicado ao editar (senão ele sempre
+    "colidiria" consigo mesmo)."""
     task: Task | None = None
     project: Project | None = None
 
@@ -110,13 +112,14 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
         if not assignment:
             raise HTTPException(status_code=403, detail=translate("Recurso não está alocado nesta tarefa", user.language))
 
-        duplicate = db.scalar(
-            select(Timesheet).where(
-                Timesheet.task_id == task.id,
-                Timesheet.resource_id == resource.id,
-                Timesheet.date == data.date,
-            )
+        duplicate_stmt = select(Timesheet).where(
+            Timesheet.task_id == task.id,
+            Timesheet.resource_id == resource.id,
+            Timesheet.date == data.date,
         )
+        if exclude_timesheet_id:
+            duplicate_stmt = duplicate_stmt.where(Timesheet.id != exclude_timesheet_id)
+        duplicate = db.scalar(duplicate_stmt)
         if duplicate:
             raise HTTPException(status_code=409, detail=translate("Já existe um apontamento deste recurso nesta tarefa para esta data", user.language))
     elif data.project_id:
@@ -131,17 +134,20 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
             raise HTTPException(status_code=422, detail=translate("Só é possível apontar horas em projetos ativos", user.language))
     # else: hora administrativa interna (sem task nem projeto) — qualquer
     # recurso autenticado pode lançar, sem checagem de escopo de cliente.
+    return task, project
 
-    hours_spent = _compute_hours(data, user.language)
 
-    # Regra da Agenda (Fase 2 do apontamento): só é "avulso" (exige
-    # aprovação extra do Administrador, ver update_timesheet_status) um
-    # apontamento ligado a um projeto em que o recurso NÃO tinha nenhum
-    # agendamento (ResourceSchedule) naquele dia. Hora administrativa
-    # interna (sem projeto) nunca entra nessa regra — não existe agenda de
-    # projeto pra checar. `schedule_id` explícito é só referência para
-    # auditoria; a checagem real é sempre refeita aqui, nunca confiando no
-    # que o cliente informou.
+def _resolve_schedule(
+    data: TimesheetCreate, resource: Resource, project: Project | None, user: User, db: Session
+) -> tuple[ResourceSchedule | None, bool]:
+    """Regra da Agenda (Fase 2 do apontamento): só é "avulso" (exige
+    aprovação extra do Administrador, ver update_timesheet_status) um
+    apontamento ligado a um projeto em que o recurso NÃO tinha nenhum
+    agendamento (ResourceSchedule) naquele dia. Hora administrativa interna
+    (sem projeto) nunca entra nessa regra — não existe agenda de projeto pra
+    checar. `schedule_id` explícito é só referência para auditoria; a
+    checagem real é sempre refeita aqui, nunca confiando no que o cliente
+    informou. Compartilhada por create_timesheet e update_timesheet."""
     schedule: ResourceSchedule | None = None
     project_id_for_schedule = project.id if project else None
     unscheduled = False
@@ -165,6 +171,37 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
                 )
     elif data.schedule_id:
         raise HTTPException(status_code=422, detail=translate("schedule_id exige project_id ou task_id", user.language))
+    return schedule, unscheduled
+
+
+def _require_own_editable_entry(timesheet_id: str, resource: Resource, user: User, db: Session) -> Timesheet:
+    """Checagens comuns a editar/excluir um apontamento: precisa existir, ser
+    do próprio recurso (nunca de outro consultor — isso é para gestor via
+    Aprovações pendentes, não aqui) e ainda não ter sido aprovado. Depois de
+    aprovado, o apontamento já afeta `Task.actual_hours` e possivelmente
+    faturamento — mudar ou apagar silenciosamente quebraria esse número; se
+    precisar corrigir um já aprovado, é rejeitar antes (fluxo do gestor).
+    Bloqueio mensal (mês fechado) é uma trava futura, ainda não implementada
+    — ver pedido do usuário."""
+    entry = db.get(Timesheet, timesheet_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=translate("Apontamento não encontrado", user.language))
+    if entry.resource_id != resource.id:
+        raise HTTPException(status_code=403, detail=translate("Você só pode alterar seus próprios apontamentos", user.language))
+    if entry.status == TimesheetStatus.APPROVED:
+        raise HTTPException(status_code=422, detail=translate("Um apontamento já aprovado não pode ser alterado ou excluído", user.language))
+    return entry
+
+
+@router.post("/timesheets", response_model=TimesheetRead, status_code=status.HTTP_201_CREATED)
+def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Timesheet:
+    resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
+    if not resource:
+        raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
+
+    task, project = _resolve_task_and_project(data, resource, user, db)
+    hours_spent = _compute_hours(data, user.language)
+    schedule, unscheduled = _resolve_schedule(data, resource, project, user, db)
 
     entry = Timesheet(
         task_id=task.id if task else None,
@@ -185,6 +222,51 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
     db.commit()
     db.refresh(entry)
     return entry
+
+
+@router.put("/timesheets/{timesheet_id}", response_model=TimesheetRead)
+def update_timesheet(
+    timesheet_id: str, data: TimesheetCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> Timesheet:
+    resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
+    if not resource:
+        raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
+    entry = _require_own_editable_entry(timesheet_id, resource, user, db)
+
+    task, project = _resolve_task_and_project(data, resource, user, db, exclude_timesheet_id=entry.id)
+    hours_spent = _compute_hours(data, user.language)
+    schedule, unscheduled = _resolve_schedule(data, resource, project, user, db)
+
+    entry.task_id = task.id if task else None
+    entry.project_id = project.id if project else None
+    entry.schedule_id = schedule.id if schedule else None
+    entry.date = data.date
+    entry.start_time = data.start_time
+    entry.end_time = data.end_time
+    entry.break_minutes = data.break_minutes
+    entry.hours_spent = hours_spent
+    entry.unscheduled = unscheduled
+    entry.description = data.description
+    # Editar (inclusive um apontamento Rejeitado, pra corrigir e reenviar)
+    # sempre volta pro estado Pendente — precisa passar pela aprovação de
+    # novo, nunca herda um status antigo que não reflete mais o conteúdo.
+    entry.status = TimesheetStatus.PENDING
+
+    record_audit(db, entity_type="timesheet", entity_id=entry.id, action=AuditAction.UPDATE, user_id=user.id)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
+@router.delete("/timesheets/{timesheet_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_timesheet(timesheet_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> None:
+    resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
+    if not resource:
+        raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
+    entry = _require_own_editable_entry(timesheet_id, resource, user, db)
+    record_audit(db, entity_type="timesheet", entity_id=entry.id, action=AuditAction.DELETE, user_id=user.id)
+    db.delete(entry)
+    db.commit()
 
 
 @router.get("/timesheets", response_model=list[TimesheetRead])
