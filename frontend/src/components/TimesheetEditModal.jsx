@@ -11,10 +11,9 @@ import { entryToTimesheetForm, previewTimesheetHours, timesheetFormToPayload } f
  * de Serviço (ServiceOrdersPage), onde não existe (e não faria sentido
  * ter) o card "Novo apontamento" que TimesheetsPage usa pra editar inline.
  * Mesmos campos (TimesheetFieldsForm) e mesma regra de negócio de
- * TimesheetsPage: editar sempre volta o apontamento pro status Pendente
- * (ver PUT /timesheets/{id}), e só é oferecido enquanto ele não estiver
- * Aprovado (`isTimesheetEditable`, ver utils/timesheetForm.js) — a API
- * também recusa fora disso, isto aqui só evita oferecer o botão.
+ * TimesheetsPage: disponível em qualquer status — inclusive Aprovado ou
+ * Rejeitado (`isTimesheetEditable`, ver utils/timesheetForm.js) — e editar
+ * sempre volta o apontamento pro status Pendente (ver PUT /timesheets/{id}).
  *
  * `projects`/`allTasks`/`tasksById`/`labels` vêm de quem chama (mesmas
  * listas já carregadas pra tela toda, sem duplicar as chamadas de API). */
