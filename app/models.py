@@ -362,6 +362,31 @@ class Timesheet(Base):
     schedule: Mapped[ResourceSchedule | None] = relationship()
 
 
+class ServiceOrderNumber(Base):
+    """Número sequencial oficial (Nro. O.S.) e data de Emissão de uma
+    Ordem de Serviço impressa (ver `service_orders` em services.py).
+
+    A Ordem de Serviço em si não é uma entidade gravada (é montada na hora
+    agrupando Timesheet por dia+projeto+consultor) — só o NÚMERO e a data
+    de emissão precisam ser fixos pra sempre depois de emitidos (documento
+    com linha de assinatura do cliente). Por isso esta tabela guarda só
+    isso, uma linha por grupo (dia, projeto, consultor), atribuída na
+    primeira vez que o grupo aparece na tela/relatório de Ordens de
+    Serviço — nunca muda depois disso, mesmo que os apontamentos daquele
+    dia sejam editados depois (só o CONTEÚDO da OS impressa muda).
+
+    `number` é o próprio id autoincrement — evita uma corrida de
+    "MAX()+1" calculada na mão entre requisições concorrentes."""
+
+    __tablename__ = "service_order_numbers"
+    number: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    resource_id: Mapped[str] = mapped_column(ForeignKey("resources.id", ondelete="CASCADE"), nullable=False)
+    emitted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.utcnow())
+    __table_args__ = (UniqueConstraint("date", "project_id", "resource_id", name="uq_service_order_number_group"),)
+
+
 class ProjectExpense(Base):
     __tablename__ = "project_expenses"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))

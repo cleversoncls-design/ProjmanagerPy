@@ -744,7 +744,10 @@ class ServiceOrderActivity(BaseModel):
 
 class ServiceOrderRow(BaseModel):
     """Uma Ordem de Serviço: 1 por dia + projeto + consultor (ver
-    `service_orders` em services.py)."""
+    `service_orders` em services.py). `order_number`/`emitted_at` são o
+    Nro. O.S./Emissão oficiais do documento impresso — atribuídos e
+    gravados na primeira vez que o grupo aparece aqui (ServiceOrderNumber
+    em models.py), nunca recalculados depois."""
 
     date: date
     client_id: str | None
@@ -756,6 +759,8 @@ class ServiceOrderRow(BaseModel):
     resource_id: str
     resource_name: str
     total_hours: Decimal
+    order_number: str
+    emitted_at: datetime
     activities: list[ServiceOrderActivity]
 
 
