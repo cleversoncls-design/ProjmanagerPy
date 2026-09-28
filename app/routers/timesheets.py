@@ -175,21 +175,21 @@ def _resolve_schedule(
 
 
 def _require_own_editable_entry(timesheet_id: str, resource: Resource, user: User, db: Session) -> Timesheet:
-    """Checagens comuns a editar/excluir um apontamento: precisa existir, ser
+    """Checagem comum a editar/excluir um apontamento: precisa existir e ser
     do próprio recurso (nunca de outro consultor — isso é para gestor via
-    Aprovações pendentes, não aqui) e ainda não ter sido aprovado. Depois de
-    aprovado, o apontamento já afeta `Task.actual_hours` e possivelmente
-    faturamento — mudar ou apagar silenciosamente quebraria esse número; se
-    precisar corrigir um já aprovado, é rejeitar antes (fluxo do gestor).
-    Bloqueio mensal (mês fechado) é uma trava futura, ainda não implementada
-    — ver pedido do usuário."""
+    Aprovações pendentes, não aqui). Decisão confirmada com o usuário:
+    Aprovado/Rejeitado também podem ser alterados/excluídos (editar sempre
+    volta pra Pendente, ver update_timesheet) — antes disso um Aprovado
+    ficava travado aqui, porque já tinha afetado `Task.actual_hours`; agora
+    quem chama depois de editar/excluir recalcula esse campo (ver
+    `_recalculate_actual_hours` em update_timesheet/delete_timesheet) em vez
+    de proibir a ação. O bloqueio real (mês fechado) é uma trava futura,
+    ainda não implementada — é aqui que ela vai entrar."""
     entry = db.get(Timesheet, timesheet_id)
     if not entry:
         raise HTTPException(status_code=404, detail=translate("Apontamento não encontrado", user.language))
     if entry.resource_id != resource.id:
         raise HTTPException(status_code=403, detail=translate("Você só pode alterar seus próprios apontamentos", user.language))
-    if entry.status == TimesheetStatus.APPROVED:
-        raise HTTPException(status_code=422, detail=translate("Um apontamento já aprovado não pode ser alterado ou excluído", user.language))
     return entry
 
 
@@ -232,6 +232,12 @@ def update_timesheet(
     if not resource:
         raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
     entry = _require_own_editable_entry(timesheet_id, resource, user, db)
+    # Guarda a tarefa ANTES de sobrescrever entry.task_id abaixo — se o
+    # apontamento editado estava Aprovado numa tarefa e o usuário troca de
+    # tarefa (ou tira a tarefa), é essa tarefa antiga que precisa recalcular
+    # Task.actual_hours pra não ficar com um total inflado (ver
+    # _recalculate_actual_hours no final).
+    old_task_id = entry.task_id
 
     task, project = _resolve_task_and_project(data, resource, user, db, exclude_timesheet_id=entry.id)
     hours_spent = _compute_hours(data, user.language)
@@ -247,10 +253,18 @@ def update_timesheet(
     entry.hours_spent = hours_spent
     entry.unscheduled = unscheduled
     entry.description = data.description
-    # Editar (inclusive um apontamento Rejeitado, pra corrigir e reenviar)
-    # sempre volta pro estado Pendente — precisa passar pela aprovação de
-    # novo, nunca herda um status antigo que não reflete mais o conteúdo.
+    # Editar (inclusive um apontamento Aprovado ou Rejeitado, pra corrigir e
+    # reenviar) sempre volta pro estado Pendente — precisa passar pela
+    # aprovação de novo, nunca herda um status antigo que não reflete mais o
+    # conteúdo.
     entry.status = TimesheetStatus.PENDING
+
+    # Como o status vira Pendente (nunca Aprovado), esta chamada nunca soma
+    # o próprio `entry` de volta — só existe pra TIRAR a hora antiga da
+    # tarefa antiga quando o apontamento editado estava Aprovado antes.
+    _recalculate_actual_hours(db, old_task_id)
+    if entry.task_id != old_task_id:
+        _recalculate_actual_hours(db, entry.task_id)
 
     record_audit(db, entity_type="timesheet", entity_id=entry.id, action=AuditAction.UPDATE, user_id=user.id)
     db.commit()
@@ -264,8 +278,14 @@ def delete_timesheet(timesheet_id: str, user: User = Depends(get_current_user), 
     if not resource:
         raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
     entry = _require_own_editable_entry(timesheet_id, resource, user, db)
+    task_id = entry.task_id
     record_audit(db, entity_type="timesheet", entity_id=entry.id, action=AuditAction.DELETE, user_id=user.id)
     db.delete(entry)
+    # Se o apontamento excluído estava Aprovado, Task.actual_hours ficaria
+    # inflado (contando uma linha que não existe mais) sem este recálculo —
+    # antes disso era impossível excluir um Aprovado, então isto nunca foi
+    # necessário aqui.
+    _recalculate_actual_hours(db, task_id)
     db.commit()
 
 

@@ -1,15 +1,16 @@
 import { formatHoursDuration, hmToMinutes, minutesToHM } from './format'
 
 // Editar/excluir um apontamento (TimesheetsPage "Meus apontamentos" e a
-// coluna de ações da Ordem de Serviço) só ficam disponíveis enquanto ele
-// não tiver sido Aprovado — depois de aprovado ele já entrou em
-// `Task.actual_hours` (e possivelmente faturamento), então mudar/apagar
-// sem controle quebraria esse número (ver _require_own_editable_entry no
-// backend, que também recusa nesse caso — isto aqui só evita oferecer o
-// botão, nunca é a única trava). Mais pra frente isso ganha uma segunda
-// trava: bloqueio mensal (mês fechado), ainda não implementado.
-export function isTimesheetEditable(entry) {
-  return entry.status !== 'APPROVED'
+// coluna de ações da Ordem de Serviço) ficam disponíveis independente do
+// status — inclusive Aprovado ou Rejeitado (decisão confirmada com o
+// usuário: editar sempre volta o apontamento pra Pendente e exige nova
+// aprovação, ver PUT /timesheets/{id}). Antes disso um apontamento
+// Aprovado ficava travado (já tinha entrado em Task.actual_hours); agora
+// quem trava isso é só a trava mensal que ainda vai existir (mês fechado
+// — ainda não implementada, ver `_require_own_editable_entry` no backend,
+// que hoje só checa dono; é ali que a trava mensal vai entrar).
+export function isTimesheetEditable() {
+  return true
 }
 
 /** Formulário vazio pro card "Novo apontamento" (TimesheetsPage) — `date`

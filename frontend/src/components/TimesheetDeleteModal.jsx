@@ -9,11 +9,11 @@ import { formatDate } from '../utils/format'
 /** Modal de confirmação pra excluir um apontamento — mesmo padrão de
  * ProjectDeleteModal/UserDeleteModal (Projects/UsersPage). Usado tanto em
  * "Meus apontamentos" (TimesheetsPage) quanto na coluna de ações da Ordem
- * de Serviço (ServiceOrdersPage). A API (DELETE /timesheets/{id}) já
- * recusa (403/422) fora do dono/fora de Pendente-Rejeitado, mas quem chama
- * este componente só deve oferecer o botão quando `isTimesheetEditable`
- * (ver utils/timesheetForm.js) já é true — este modal existe só pra evitar
- * um clique acidental apagar um apontamento válido. */
+ * de Serviço (ServiceOrdersPage). A API (DELETE /timesheets/{id}) recusa
+ * fora do dono (403) em qualquer status — Aprovado/Rejeitado também podem
+ * ser excluídos (recalcula Task.actual_hours quando o excluído estava
+ * Aprovado, ver delete_timesheet no backend) — este modal existe só pra
+ * evitar um clique acidental apagar um apontamento válido. */
 export default function TimesheetDeleteModal({ entry, entryLabel, onClose, onDeleted }) {
   const { t } = useLanguage()
   const [deleting, setDeleting] = useState(false)
