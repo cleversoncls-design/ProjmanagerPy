@@ -655,6 +655,12 @@ export const es = {
   'Total': 'Total',
   'Fora da agenda': 'Fuera de la agenda',
   'Nenhum apontamento registrado ainda.': 'Ningún registro todavía.',
+  'Editar apontamento': 'Editar registro',
+  'A alteração volta o status para Pendente e exige nova aprovação.':
+    'El cambio vuelve el estado a Pendiente y exige nueva aprobación.',
+  'Excluir apontamento': 'Eliminar registro',
+  'Tem certeza que quer excluir este apontamento?': '¿Está seguro de que quiere eliminar este registro?',
+  'Apontamento aprovado — não pode mais ser alterado ou excluído.': 'Registro aprobado — ya no puede modificarse ni eliminarse.',
   'Aprovações pendentes': 'Aprobaciones pendientes',
   'Nenhum apontamento pendente.': 'Ningún registro pendiente.',
   'Aprovar': 'Aprobar',
