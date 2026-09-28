@@ -60,7 +60,7 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
       {/* Empresa + numeração oficial */}
       <div className="mt-3 grid grid-cols-2 gap-4 border-b border-black pb-2 text-[11px]">
         <div>
-          <p className="font-bold">RESULTAR SERVICIOS Y SOLUCIONES S.R.L.</p>
+          <p className="text-[10.25pt] font-bold">RESULTAR SERVICIOS Y SOLUCIONES E.A.S.</p>
           <p>Patricio Colman, Edificio Centenario - Piso 2 - Sala B</p>
           <p>CIUDAD DEL ESTE - ALTO PARANÁ</p>
           <p>PARAGUAI</p>
@@ -91,35 +91,29 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
       {/* Um bloco por apontamento */}
       {order.activities.map((activity, index) => (
         <div key={activity.id} className={`text-[11px] ${index === order.activities.length - 1 ? '' : 'border-b border-black'} py-2`}>
-          <div className="grid grid-cols-2">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
             <p>
               Fecha: <span className="os-field font-bold">{formatDate(order.date)}</span>
             </p>
             <p>
               Tipo Apunte: <span className="os-field font-bold">{tipoApunte(activity)}</span>
             </p>
+            <p>
+              Entrada: <span className="os-field font-bold">{formatTime(activity.start_time)}</span>
+              {'  '}Salida: <span className="os-field font-bold">{formatTime(activity.end_time)}</span>
+              {'  '}Intervalo: <span className="os-field font-bold">{minutesToHM(activity.break_minutes)}</span>
+              {'  '}Total: <span className="os-field font-bold">{formatHoursDuration(activity.hours)}</span>
+            </p>
+            <p>
+              Tarea(s): <span className="os-field font-bold">{tareaLabel(activity)}</span>
+            </p>
           </div>
-          <p>
-            Entrada: <span className="os-field font-bold">{formatTime(activity.start_time)}</span>
-            {'  '}Salida: <span className="os-field font-bold">{formatTime(activity.end_time)}</span>
-            {'  '}Intervalo: <span className="os-field font-bold">{minutesToHM(activity.break_minutes)}</span>
-          </p>
-          <p>
+          <p className="mt-0.5">
             Proyecto: <span className="os-field font-bold">{order.project_code} - {order.project_name}</span>
-          </p>
-          <p>
-            Horas / Tarea(s):{' '}
-            <span className="os-field font-bold">
-              {formatHoursDuration(activity.hours)} / {tareaLabel(activity)}
-            </span>
-          </p>
-          <p>
-            Total: <span className="os-field font-bold">{formatHoursDuration(activity.hours)}</span>
           </p>
 
           <p className="mt-2">Tareas ejecutadas según planificación:</p>
-          <p className="os-field mt-1 inline-block font-bold">{tareaLabel(activity)}</p>
-          {activity.description && <p className="os-field mt-1 inline-block">{activity.description}</p>}
+          <p className="os-field mt-1 inline-block">{activity.description || '—'}</p>
         </div>
       ))}
 
@@ -139,7 +133,7 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
       <div className="mt-16 grid grid-cols-2 gap-8 text-[10px]">
         <div>
           <p className="border-t border-black pt-1 font-bold">{order.resource_name}</p>
-          <p>Responsable RESULTAR SERVICIOS Y SOLUCIONES S.R.L.</p>
+          <p>Responsable RESULTAR SERVICIOS Y SOLUCIONES E.A.S.</p>
         </div>
         <div>
           <p className="border-t border-black pt-1 font-bold">
