@@ -1,13 +1,16 @@
 import { useLanguage } from '../context/LanguageContext'
 import { formatDate, formatTime, formatHoursDuration, minutesToHM } from '../utils/format'
 
-/** Uma folha impressa da Ordem de Serviço, reproduzindo o modelo oficial
- * TOTVS que o usuário anexou (OS-000164169.pdf) — texto de documento
- * (cabeçalho da empresa, rótulos "Fecha/Entrada/Salida/Proyecto/Tareas
- * ejecutadas...", aviso legal) é sempre em espanhol, IGUAL ao modelo, e
- * nunca passa por t()/idioma da interface: é o texto fixo do documento
- * oficial da Resultar Servicios pro cliente assinar, não texto da UI do
- * app. Só rótulos que não vêm do modelo (nenhum aqui) usariam i18n.
+/** Uma folha impressa da Ordem de Serviço — modelo baseado no oficial TOTVS
+ * que o usuário anexou (OS-000164169.pdf), depois ajustado por pedido dele
+ * (endereço/razão social da empresa, campo "Tarea(s)" autônomo, rótulo
+ * "Detalles" no lugar de "Tareas ejecutadas según planificación", Proyecto/
+ * Total general promovidos pro cabeçalho da OS — ver histórico do arquivo).
+ * Texto de documento (cabeçalho da empresa, rótulos "Fecha/Entrada/Salida/
+ * Proyecto/Detalles...", aviso legal) é sempre em espanhol, e nunca passa
+ * por t()/idioma da interface: é o texto fixo do documento oficial da
+ * Resultar Servicios pro cliente assinar, não texto da UI do app. Só
+ * rótulos que não vêm do modelo (nenhum aqui) usariam i18n.
  *
  * O destaque amarelo (.os-field, ver index.css) reproduz o mesmo destaque
  * que já existe no PDF original nos campos variáveis — não é anotação
@@ -15,11 +18,12 @@ import { formatDate, formatTime, formatHoursDuration, minutesToHM } from '../uti
  *
  * Uma OS pode ter mais de um apontamento (mesmo dia+projeto+consultor,
  * horários diferentes — "1 OS por dia + projeto + consultor", ver
- * `service_orders` em services.py) — o modelo original só mostra um
- * apontamento como exemplo; aqui o bloco Fecha/Entrada/Salida/Proyecto/
- * Horas-Tarefa/Tareas ejecutadas se repete uma vez por apontamento, na
- * mesma folha (Hoja continua "1 / 1" — nunca quebramos em mais de uma
- * página por OS), com um "Total general" ao final quando há mais de um. */
+ * `service_orders` em services.py). Proyecto é o mesmo pra todos os
+ * apontamentos da OS (por definição do agrupamento), então aparece uma
+ * única vez no cabeçalho, ao lado de Cliente — junto com "Total general"
+ * quando há mais de um apontamento. Só o bloco Fecha/Entrada/Salida/Tarea/
+ * Detalles se repete, uma vez por apontamento, na mesma folha (Hoja
+ * continua "1 / 1" — nunca quebramos em mais de uma página por OS). */
 export default function ServiceOrderPrintSheet({ order, tasksById }) {
   const { labels } = useLanguage()
 
@@ -78,14 +82,28 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
         </div>
       </div>
 
-      {/* Consultor / Cliente */}
+      {/* Consultor / Cliente / Proyecto — a OS inteira é sempre do mesmo
+          projeto ("1 OS por dia + projeto + consultor", ver service_orders
+          em services.py), então Proyecto aparece uma vez aqui, não repetido
+          em cada bloco de apontamento; Total general acompanha junto,
+          quando há mais de um apontamento na OS. */}
       <div className="mt-2 border-b border-black pb-2 text-[11px]">
         <p>
           Consultor: <span className="os-field font-bold">{order.resource_name}</span>
         </p>
-        <p>
-          Cliente: <span className="os-field font-bold">{order.client_code} - {order.client_name}</span>
-        </p>
+        <div className="grid grid-cols-2 gap-x-4">
+          <p>
+            Cliente: <span className="os-field font-bold">{order.client_code} - {order.client_name}</span>
+          </p>
+          <p>
+            Proyecto: <span className="os-field font-bold">{order.project_code} - {order.project_name}</span>
+          </p>
+        </div>
+        {order.activities.length > 1 && (
+          <p className="mt-1 font-bold">
+            Total general: <span className="os-field">{formatHoursDuration(order.total_hours)}</span>
+          </p>
+        )}
       </div>
 
       {/* Um bloco por apontamento */}
@@ -108,20 +126,11 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
               Tarea(s): <span className="os-field font-bold">{tareaLabel(activity)}</span>
             </p>
           </div>
-          <p className="mt-0.5">
-            Proyecto: <span className="os-field font-bold">{order.project_code} - {order.project_name}</span>
-          </p>
 
-          <p className="mt-2">Tareas ejecutadas según planificación:</p>
+          <p className="mt-2">Detalles</p>
           <p className="os-field mt-1 inline-block">{activity.description || '—'}</p>
         </div>
       ))}
-
-      {order.activities.length > 1 && (
-        <p className="border-b border-black pb-2 text-[11px] font-bold">
-          Total general: <span className="os-field">{formatHoursDuration(order.total_hours)}</span>
-        </p>
-      )}
 
       <p className="mt-2 text-[9px] leading-snug text-black">
         Posibles restricciones acerca del contenido, apuntes u otros datos contenidos en la Orden de Servicio aqui
