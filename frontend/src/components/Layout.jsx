@@ -10,14 +10,10 @@ export default function Layout() {
     <div className="flex min-h-screen flex-col">
       <div className="h-1 shrink-0 print:hidden" style={{ backgroundColor: 'var(--nav-top-accent)' }} />
       <div className="flex min-h-0 flex-1 bg-[var(--page)]">
-        <div className="contents print:hidden">
-          <Sidebar />
-        </div>
+        <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="contents print:hidden">
-            <Header />
-          </div>
-          <main className="min-w-0 flex-1 overflow-y-auto px-8 py-8">
+          <Header />
+          <main className="min-w-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8 sm:py-8">
             <Outlet />
           </main>
         </div>
