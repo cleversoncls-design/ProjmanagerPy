@@ -3,10 +3,11 @@ from __future__ import annotations
 import math
 import re
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -21,6 +22,7 @@ from .models import (
     Risk,
     RiskLevel,
     RiskStatus,
+    ServiceOrderNumber,
     Task,
     TaskAssignment,
     TaskDependency,
@@ -1105,6 +1107,49 @@ def velocity_series(
     return [{"period_start": period_start, "hours_delivered": _q(hours)} for period_start, hours in sorted(buckets.items())]
 
 
+def _get_or_create_order_number(session: Session, day: date, project_id: str, resource_id: str) -> ServiceOrderNumber:
+    """Busca ou atribui o Nro. O.S./Emissão do grupo (dia, projeto,
+    consultor) — decisão confirmada com o usuário: um número sequencial
+    real, gravado na primeira vez que a OS aparece (ver ServiceOrderNumber
+    em models.py), nunca recalculado depois. `session.flush()` (não
+    `commit()`) só pra popular `number` (autoincrement) antes de devolver;
+    quem chama (`service_orders`) faz um único commit no final pro grupo
+    inteiro.
+
+    Duas requisições concorrentes vendo o mesmo grupo pela primeira vez ao
+    mesmo tempo poderiam colidir na constraint única — o retry aqui cobre
+    esse caso raro sem propagar um 500 pro usuário. Usa um SAVEPOINT
+    (`begin_nested`) em vez de um rollback da sessão inteira: só desfaz o
+    INSERT que colidiu, sem expirar os outros objetos já carregados nesta
+    mesma chamada de `service_orders` (Project/Client/Resource/User)."""
+    existing = session.scalar(
+        select(ServiceOrderNumber).where(
+            ServiceOrderNumber.date == day,
+            ServiceOrderNumber.project_id == project_id,
+            ServiceOrderNumber.resource_id == resource_id,
+        )
+    )
+    if existing:
+        return existing
+    try:
+        with session.begin_nested():
+            row = ServiceOrderNumber(date=day, project_id=project_id, resource_id=resource_id)
+            session.add(row)
+            session.flush()
+        return row
+    except IntegrityError:
+        existing = session.scalar(
+            select(ServiceOrderNumber).where(
+                ServiceOrderNumber.date == day,
+                ServiceOrderNumber.project_id == project_id,
+                ServiceOrderNumber.resource_id == resource_id,
+            )
+        )
+        if not existing:
+            raise
+        return existing
+
+
 def service_orders(
     session: Session,
     *,
@@ -1200,6 +1245,9 @@ def service_orders(
         user = users.get(resource.user_id) if resource else None
         activities.sort(key=lambda a: a["start_time"])
         total_hours = _q(sum((a["hours"] for a in activities), Decimal("0")))
+        # Nro. O.S./Emissão: atribuído (e gravado) na primeira vez que este
+        # grupo aparece aqui — ver _get_or_create_order_number.
+        order_number = _get_or_create_order_number(session, day, proj_id, res_id)
         result.append(
             {
                 "date": day,
@@ -1212,9 +1260,12 @@ def service_orders(
                 "resource_id": res_id,
                 "resource_name": user.name if user else "—",
                 "total_hours": total_hours,
+                "order_number": f"{order_number.number:06d}",
+                "emitted_at": order_number.emitted_at,
                 "activities": [{**activity, "hours": _q(activity["hours"])} for activity in activities],
             }
         )
+    session.commit()
     result.sort(key=lambda r: (r["date"], r["client_code"], r["project_code"], r["resource_name"]))
     return result
 

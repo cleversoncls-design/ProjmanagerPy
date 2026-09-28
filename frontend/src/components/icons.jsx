@@ -234,6 +234,24 @@ export const KeyIcon = (props) => (
 
 // Seletor de idioma da tela de Login (splash sempre escuro, fora do tema
 // claro/escuro do conteúdo — ver LoginPage.jsx).
+// "Detalhes" (expandir/ver itens de uma linha-resumo) — ServiceOrdersPage.
+export const EyeIcon = (props) => (
+  <Icon {...props}>
+    <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+    <circle cx="12" cy="12" r="2.6" />
+  </Icon>
+)
+
+// "Imprimir" por linha (ServiceOrdersPage) — mesmo estilo de traço único
+// dos outros ícones de ação.
+export const PrinterIcon = (props) => (
+  <Icon {...props}>
+    <path d="M7 8.5V4h10v4.5" />
+    <rect x="4" y="8.5" width="16" height="8" rx="1.5" />
+    <path d="M7 14.5h10V20H7v-5.5Z" />
+  </Icon>
+)
+
 export const GlobeIcon = (props) => (
   <Icon {...props}>
     <circle cx="12" cy="12" r="9" />

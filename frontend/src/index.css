@@ -96,3 +96,30 @@ body {
 .nav-link--active:hover {
   background-color: var(--nav-active-bg);
 }
+
+/* Impressão da Ordem de Serviço (ServiceOrdersPage → ServiceOrderPrintSheet).
+ * O documento é renderizado via portal direto em document.body (fora do
+ * <main> com scroll do Layout), então esta folha existe só pra impressão —
+ * .hidden/.print:block do Tailwind já cuida de escondê-la na tela; aqui só
+ * o tamanho de página e a quebra entre folhas quando mais de uma OS é
+ * impressa de uma vez (botão "Imprimir" do topo, todas as OS filtradas). */
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm 12mm;
+  }
+  .os-print-page {
+    break-after: page;
+  }
+  .os-print-page:last-child {
+    break-after: auto;
+  }
+}
+
+/* Destaque amarelo dos campos variáveis da OS impressa — reproduz o
+ * mesmo destaque já presente no modelo oficial TOTVS anexado pelo
+ * usuário (só o VALOR de cada campo, nunca o rótulo). */
+.os-field {
+  background-color: #fff6a3;
+  padding: 0 3px;
+}

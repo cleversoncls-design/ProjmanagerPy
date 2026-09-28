@@ -669,8 +669,8 @@ export const es = {
 
   // --- Ordens de Serviço (Fase 3 do apontamento) ---
   'Ordens de Serviço': 'Órdenes de Servicio',
-  'Prévia da OS a partir dos apontamentos — o modelo final de impressão ainda será definido.':
-    'Vista previa de la OS a partir de los registros — el modelo final de impresión aún se definirá.',
+  'Cada Ordem de Serviço agrupa os apontamentos de um consultor, projeto e dia — clique em Detalhes para ver os itens.':
+    'Cada Orden de Servicio agrupa los registros de un consultor, proyecto y día — haga clic en Detalles para ver los ítems.',
   'Imprimir': 'Imprimir',
   'Nenhuma Ordem de Serviço no período filtrado.': 'Ninguna Orden de Servicio en el período filtrado.',
   'Ordem de Serviço': 'Orden de Servicio',
@@ -678,6 +678,10 @@ export const es = {
   'Código do projeto': 'Código del proyecto',
   'Total de horas': 'Total de horas',
   'Atividade': 'Actividad',
+  'Nº OS': 'N.º OS',
+  'Itens': 'Ítems',
+  'Detalhes': 'Detalles',
+  'Emitida em {date}': 'Emitida el {date}',
 }
 
 export function translate(lang, text, vars) {
