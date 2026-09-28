@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..audit import record_audit
+from ..color_palette import PROJECT_COLOR_HEXES
 from ..database import get_db
 from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access, require_roles
 from ..i18n import t as translate
@@ -14,7 +15,6 @@ from ..models import (
     Calendar,
     ChangeRequest,
     Client,
-    PROJECT_COLOR_KEYS,
     Project,
     ProjectExpense,
     Risk,
@@ -56,9 +56,11 @@ def create_project(
         raise HTTPException(status_code=409, detail=translate("Já existe um projeto com este código", user.language))
     if data.calendar_id and not db.get(Calendar, data.calendar_id):
         raise HTTPException(status_code=404, detail=translate("Calendário não encontrado", user.language))
-    if data.color not in PROJECT_COLOR_KEYS:
+    if data.color.upper() not in PROJECT_COLOR_HEXES:
         raise HTTPException(status_code=422, detail=translate("Cor do projeto inválida", user.language))
-    project = Project(**data.model_dump())
+    project_data = data.model_dump()
+    project_data["color"] = data.color.upper()
+    project = Project(**project_data)
     _recompute_sold_value(project)
     db.add(project)
     db.flush()
@@ -117,8 +119,10 @@ def update_project(
             raise HTTPException(status_code=422, detail=translate("manager_id precisa ser um usuário interno (ADMIN ou INTERNAL_PM)", user.language))
     if changes.get("calendar_id") and not db.get(Calendar, changes["calendar_id"]):
         raise HTTPException(status_code=404, detail=translate("Calendário não encontrado", user.language))
-    if "color" in changes and changes["color"] not in PROJECT_COLOR_KEYS:
-        raise HTTPException(status_code=422, detail=translate("Cor do projeto inválida", user.language))
+    if "color" in changes:
+        if changes["color"].upper() not in PROJECT_COLOR_HEXES:
+            raise HTTPException(status_code=422, detail=translate("Cor do projeto inválida", user.language))
+        changes["color"] = changes["color"].upper()
     if user.role in EXTERNAL_ROLES:
         for field in _FINANCIAL_FIELDS:
             changes.pop(field, None)

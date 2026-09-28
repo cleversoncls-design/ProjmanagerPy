@@ -16,9 +16,10 @@ import ErrorBanner from '../components/ErrorBanner'
 import StatusPill from '../components/StatusPill'
 import { TrashIcon } from '../components/icons'
 import { FormField, TextInput, Select } from '../components/FormField'
-import ColorSwatchPicker from '../components/ColorSwatchPicker'
+import ColorListPicker from '../components/ColorListPicker'
 import { formatCurrency, formatPercent } from '../utils/format'
 import { MANAGEMENT_ROLES, PROJECT_STATUS_TONE } from '../utils/labels'
+import { DEFAULT_PROJECT_COLOR } from '../utils/colorPalette'
 import { useLanguage } from '../context/LanguageContext'
 
 const EMPTY_FORM = {
@@ -26,7 +27,7 @@ const EMPTY_FORM = {
   manager_id: '',
   code: '',
   name: '',
-  color: 'series-1',
+  color: DEFAULT_PROJECT_COLOR,
   management_hours: '0',
   management_rate: '0',
   consulting_hours: '0',
@@ -124,7 +125,7 @@ export default function ProjectsPage() {
                 header: t('Projeto'),
                 render: (row) => (
                   <Link to={`/projects/${row.id}`} className="inline-flex items-center gap-2 font-medium text-[var(--series-1)] hover:underline">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: `var(--${row.color || 'series-1'})` }} />
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: row.color || DEFAULT_PROJECT_COLOR }} />
                     {row.code} — {row.name}
                   </Link>
                 ),
@@ -206,7 +207,7 @@ export default function ProjectsPage() {
             </div>
 
             <FormField label={t('Cor do projeto')} hint={t('Usada na Agenda de consultores para identificar este projeto.')}>
-              <ColorSwatchPicker value={form.color} onChange={(color) => setForm((prev) => ({ ...prev, color }))} colorLabels={labels.PROJECT_COLOR_LABELS} />
+              <ColorListPicker value={form.color} onChange={(color) => setForm((prev) => ({ ...prev, color }))} />
             </FormField>
 
             <div className="rounded-lg border border-[var(--border)] p-4">

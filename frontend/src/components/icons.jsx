@@ -69,6 +69,14 @@ export const ChevronLeftIcon = (props) => (
   </Icon>
 )
 
+// Seta do seletor de cor do projeto (ColorListPicker) — mesmo estilo dos
+// outros chevrons acima.
+export const ChevronDownIcon = (props) => (
+  <Icon {...props}>
+    <path d="M5.5 9 12 15.5 18.5 9" />
+  </Icon>
+)
+
 // Agenda de consultores (SchedulesPage) — bloco de horário agendado.
 export const ClockIcon = (props) => (
   <Icon {...props}>

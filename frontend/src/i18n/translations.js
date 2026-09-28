@@ -344,6 +344,13 @@ export const es = {
   // --- Agenda de consultores / cor do projeto (Fase 1 do agendamento) ---
   'Cor do projeto': 'Color del proyecto',
   'Usada na Agenda de consultores para identificar este projeto.': 'Usada en la Agenda de consultores para identificar este proyecto.',
+  // Seletor de cor com lista de 256 cores (ColorListPicker) — os 256 nomes
+  // de cor em si (utils/colorPalette.js) ainda não têm tradução em
+  // espanhol; aparecem em Português até alguém preencher (mesmo padrão
+  // "gettext" do resto deste dicionário).
+  'Selecione uma cor': 'Seleccione un color',
+  'Buscar cor por nome...': 'Buscar color por nombre...',
+  'Nenhuma cor encontrada.': 'Ningún color encontrado.',
   Azul: 'Azul',
   Laranja: 'Naranja',
   Água: 'Agua',
