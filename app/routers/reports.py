@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import EXTERNAL_ROLES, INTERNAL_ROLES, get_current_user, require_project_access, require_roles
-from ..exports import build_tasks_workbook
+from ..exports import build_service_orders_workbook, build_tasks_workbook
 from ..i18n import t as translate
 from ..models import Project, Resource, Task, TaskDependency, TaskStatus, User, UserRole
 from ..schemas import (
@@ -183,6 +183,36 @@ def roi(
     return [project_roi(db, project.id) for project in projects]
 
 
+def _resolve_service_orders_scope(
+    db: Session,
+    user: User,
+    *,
+    project_id: str | None,
+    resource_id: str | None,
+    start: date | None,
+    end: date | None,
+) -> tuple[date, date, str | None]:
+    """Escopo/validação compartilhados por GET /reports/service-orders e
+    GET /reports/service-orders/export.xlsx: CONSULTANT só enxerga a
+    própria OS (resource_id de terceiro é sempre substituído — mesma regra
+    de escopo de GET /timesheets; sem recurso vinculado, um resource_id que
+    não bate com nenhum registro real faz `service_orders` devolver lista
+    vazia, sem precisar de um retorno antecipado aqui), período default de
+    30 dias terminando hoje, start<=end, e acesso ao projeto quando
+    informado."""
+    if user.role == UserRole.CONSULTANT:
+        own_resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
+        resource_id = own_resource.id if own_resource else "__sem_recurso__"
+    period_end = end or date.today()
+    period_start = start or (period_end - timedelta(days=30))
+    if period_start > period_end:
+        raise HTTPException(status_code=422, detail=translate("start precisa ser anterior ou igual a end", user.language))
+    if project_id:
+        project = _get_project_or_404(db, project_id, user.language)
+        require_project_access(project, user)
+    return period_start, period_end, resource_id
+
+
 @router.get("/reports/service-orders", response_model=list[ServiceOrderRow])
 def service_orders_report(
     project_id: str | None = None,
@@ -197,24 +227,42 @@ def service_orders_report(
     projeto + consultor, a partir dos apontamentos já lançados (ver
     `service_orders` em services.py). Documento interno (dados de horas e
     consultor por trás do serviço prestado) — restrito aos perfis internos,
-    igual à Agenda de consultores; o modelo de impressão final ainda será
-    definido pelo usuário, então por ora só devolve os dados agrupados para
-    o frontend renderizar como prévia. CONSULTANT só enxerga a própria OS
-    (mesma regra de escopo de GET /timesheets) — resource_id de terceiro é
-    sempre substituído pelo recurso do próprio usuário."""
-    if user.role == UserRole.CONSULTANT:
-        own_resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
-        if not own_resource:
-            return []
-        resource_id = own_resource.id
-    period_end = end or date.today()
-    period_start = start or (period_end - timedelta(days=30))
-    if period_start > period_end:
-        raise HTTPException(status_code=422, detail=translate("start precisa ser anterior ou igual a end", user.language))
-    if project_id:
-        project = _get_project_or_404(db, project_id, user.language)
-        require_project_access(project, user)
+    igual à Agenda de consultores; o frontend renderiza tanto a tabela
+    quanto a impressão (individual e a lista agrupada por consultor, ver
+    ServiceOrderPrintSheet.jsx/ServiceOrderListPrintSheet.jsx) a partir
+    destes mesmos dados."""
+    period_start, period_end, resource_id = _resolve_service_orders_scope(
+        db, user, project_id=project_id, resource_id=resource_id, start=start, end=end
+    )
     return service_orders(db, start=period_start, end=period_end, project_id=project_id, resource_id=resource_id, client_id=client_id)
+
+
+@router.get("/reports/service-orders/export.xlsx")
+def service_orders_export_xlsx(
+    project_id: str | None = None,
+    resource_id: str | None = None,
+    client_id: str | None = None,
+    start: date | None = None,
+    end: date | None = None,
+    user: User = Depends(require_roles(*INTERNAL_ROLES)),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Exporta as Ordens de Serviço do período filtrado pra .xlsx, agrupadas
+    por consultor com subtotal por consultor e total geral — mesmo escopo/
+    filtros de GET /reports/service-orders (ver `_resolve_service_orders_scope`
+    acima), ver app/exports.build_service_orders_workbook."""
+    period_start, period_end, resource_id = _resolve_service_orders_scope(
+        db, user, project_id=project_id, resource_id=resource_id, start=start, end=end
+    )
+    content = build_service_orders_workbook(
+        db, start=period_start, end=period_end, project_id=project_id, resource_id=resource_id, client_id=client_id
+    )
+    filename = f"ordens_de_servico_{period_start.isoformat()}_{period_end.isoformat()}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/projects/{project_id}/schedule", response_model=ProjectScheduleResponse)

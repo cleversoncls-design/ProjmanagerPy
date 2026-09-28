@@ -107,7 +107,10 @@ async function request(path, { method = 'GET', json, form, signal } = {}) {
   return data
 }
 
-function withQuery(path, params) {
+// Exportada pra ser reaproveitada por downloads binários (ex.:
+// downloadServiceOrdersXlsx em api/reports.js), que não passam por
+// `request()`/`api.get` porque a resposta é um arquivo, não JSON.
+export function withQuery(path, params) {
   if (!params) return path
   const entries = Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
   if (entries.length === 0) return path

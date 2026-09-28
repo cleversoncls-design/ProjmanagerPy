@@ -19,8 +19,9 @@ import StatusPill from '../components/StatusPill'
 import TimesheetEditModal from '../components/TimesheetEditModal'
 import TimesheetDeleteModal from '../components/TimesheetDeleteModal'
 import ServiceOrderPrintSheet from '../components/ServiceOrderPrintSheet'
+import ServiceOrderListPrintSheet from '../components/ServiceOrderListPrintSheet'
 import { FormField, TextInput, Select } from '../components/FormField'
-import { CheckIcon, XIcon, PencilIcon, TrashIcon, EyeIcon, PrinterIcon } from '../components/icons'
+import { CheckIcon, XIcon, PencilIcon, TrashIcon, EyeIcon, PrinterIcon, DownloadIcon } from '../components/icons'
 import { formatDate, formatTime, formatHoursDuration, minutesToHM } from '../utils/format'
 import { MANAGEMENT_ROLES, TIMESHEET_STATUS_TONE } from '../utils/labels'
 import { isTimesheetEditable } from '../utils/timesheetForm'
@@ -65,9 +66,12 @@ export default function ServiceOrdersPage() {
   const [deletingEntry, setDeletingEntry] = useState(null)
   // Detalhes: linhas expandidas mostrando os apontamentos de cada OS.
   const [expandedKeys, setExpandedKeys] = useState(() => new Set())
-  // Impressão: null (nada), 'all' (botão do topo — todas as OS filtradas)
-  // ou a orderKey de uma linha específica (botão Imprimir da linha).
+  // Impressão: null (nada), 'all' (botão do topo — lista de todas as OS
+  // filtradas, agrupada por consultor, ver ServiceOrderListPrintSheet) ou
+  // a orderKey de uma linha específica (botão Imprimir da linha — o
+  // documento oficial de UMA OS, ver ServiceOrderPrintSheet).
   const [printTarget, setPrintTarget] = useState(null)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     resourcesApi.listResources().then(setResources).catch(() => {})
@@ -180,6 +184,48 @@ export default function ServiceOrdersPage() {
     setEditingEntry({ ...activity, date: order.date, project_id: order.project_id })
   }
 
+  /** Resumo dos filtros ativos (rótulos, não os ids crus) pro cabeçalho da
+   * impressão da lista (ServiceOrderListPrintSheet) — sempre mostra o
+   * período; Consultor/Cliente/Projeto só entram quando o filtro está
+   * ativo. */
+  const filterSummaryLines = useMemo(() => {
+    const lines = [`${t('Período')}: ${formatDate(filters.start)} – ${formatDate(filters.end)}`]
+    if (filters.resource_id) {
+      const resource = resourceOptions.find((r) => r.id === filters.resource_id)
+      if (resource) lines.push(`${t('Consultor')}: ${resource.userName}`)
+    }
+    if (filters.client_id) {
+      const client = clients.find((c) => c.id === filters.client_id)
+      if (client) lines.push(`${t('Cliente')}: ${client.legal_name}`)
+    }
+    if (filters.project_id) {
+      const project = projects.find((p) => p.id === filters.project_id)
+      if (project) lines.push(`${t('Projeto')}: ${project.code} — ${project.name}`)
+    }
+    return lines
+  }, [filters, resourceOptions, clients, projects, t])
+
+  async function handleExport() {
+    setExporting(true)
+    setError('')
+    try {
+      await reportsApi.downloadServiceOrdersXlsx(
+        {
+          resource_id: filters.resource_id || undefined,
+          client_id: filters.client_id || undefined,
+          project_id: filters.project_id || undefined,
+          start: filters.start || undefined,
+          end: filters.end || undefined,
+        },
+        `ordens_de_servico_${filters.start}_${filters.end}.xlsx`,
+      )
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const printOrders = useMemo(() => {
     if (!printTarget) return []
     if (printTarget === 'all') return orders
@@ -212,9 +258,15 @@ export default function ServiceOrdersPage() {
           'Cada Ordem de Serviço agrupa os apontamentos de um consultor, projeto e dia — clique em Detalhes para ver os itens.',
         )}
         action={
-          <Button variant="secondary" onClick={() => setPrintTarget('all')} disabled={orders.length === 0}>
-            {t('Imprimir')}
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={handleExport} disabled={exporting || orders.length === 0}>
+              <DownloadIcon size={16} />
+              {t('Exportar (Excel)')}
+            </Button>
+            <Button variant="secondary" onClick={() => setPrintTarget('all')} disabled={orders.length === 0}>
+              {t('Imprimir')}
+            </Button>
+          </div>
         }
       />
 
@@ -496,9 +548,11 @@ export default function ServiceOrdersPage() {
       {printOrders.length > 0 &&
         createPortal(
           <div className="hidden print:block">
-            {printOrders.map((order) => (
-              <ServiceOrderPrintSheet key={orderKey(order)} order={order} tasksById={tasksById} />
-            ))}
+            {printTarget === 'all' ? (
+              <ServiceOrderListPrintSheet orders={printOrders} filterSummary={filterSummaryLines} />
+            ) : (
+              printOrders.map((order) => <ServiceOrderPrintSheet key={orderKey(order)} order={order} tasksById={tasksById} />)
+            )}
           </div>,
           document.body,
         )}
