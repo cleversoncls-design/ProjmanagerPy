@@ -61,10 +61,9 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
       <div className="mt-3 grid grid-cols-2 gap-4 border-b border-black pb-2 text-[11px]">
         <div>
           <p className="font-bold">RESULTAR SERVICIOS Y SOLUCIONES S.R.L.</p>
-          <p>KM 4 - BARRIO CHE LA REINA - EDIFICIO ISAURA</p>
+          <p>Patricio Colman, Edificio Centenario - Piso 2 - Sala B</p>
           <p>CIUDAD DEL ESTE - ALTO PARANÁ</p>
           <p>PARAGUAI</p>
-          <p>Tel: +595 61 572600 - Interno 213 / 214</p>
           <p>https://oeste.totvs.com/</p>
         </div>
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 self-start justify-self-end text-right">
@@ -119,7 +118,8 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
           </p>
 
           <p className="mt-2">Tareas ejecutadas según planificación:</p>
-          <p className="os-field mt-1 inline-block">{activity.description || '—'}</p>
+          <p className="os-field mt-1 inline-block font-bold">{tareaLabel(activity)}</p>
+          {activity.description && <p className="os-field mt-1 inline-block">{activity.description}</p>}
         </div>
       ))}
 
