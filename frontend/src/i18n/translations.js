@@ -92,6 +92,7 @@ export const es = {
   'Em espera': 'En espera',
   Concluído: 'Concluido',
   Cancelado: 'Cancelado',
+  Modelo: 'Modelo',
   // Status de tarefa
   'Não iniciada': 'No iniciada',
   'Em andamento': 'En curso',
@@ -285,6 +286,12 @@ export const es = {
   'Remover': 'Quitar',
   'Restaurar padrão': 'Restaurar predeterminado',
   'Restaurar período do projeto': 'Restaurar período del proyecto',
+  'Copiar estrutura de outro projeto': 'Copiar estructura de otro proyecto',
+  'Copia WBS/EAP, descrição, duração, horas, tipo, predecessoras (com tipo de atraso) e marcos de todas as tarefas do projeto escolhido — sem nenhum recurso alocado. As datas planejadas são recalculadas a partir do início deste projeto.':
+    'Copia WBS/EDT, descripción, duración, horas, tipo, predecesoras (con tipo de retraso) e hitos de todas las tareas del proyecto elegido — sin ningún recurso asignado. Las fechas planificadas se recalculan a partir del inicio de este proyecto.',
+  'Projeto de origem': 'Proyecto de origen',
+  'Copiar estrutura': 'Copiar estructura',
+  'Copiando…': 'Copiando…',
   'Salvar linha de base': 'Guardar línea base',
   'Selecione a tarefa predecessora.': 'Seleccione la tarea predecesora.',
   'Selecione o recurso e informe as horas alocadas.': 'Seleccione el recurso e indique las horas asignadas.',

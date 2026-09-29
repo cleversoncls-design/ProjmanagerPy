@@ -296,6 +296,99 @@ def recalculate_schedule(session: Session, project_id: str, cal: BusinessCalenda
     return updated
 
 
+def copy_project_tasks(session: Session, source_project_id: str, target_project: Project, cal: BusinessCalendar) -> list[Task]:
+    """Copia a estrutura de tarefas de `source_project_id` pro
+    `target_project` (botão "Copiar estrutura de outro projeto") — WBS/EAP,
+    nome, duração, horas, tipo, milestone, hierarquia (parent_task_id
+    remapeado) e as dependências (predecessoras + tipo/atraso, via
+    TaskDependency), SEM nenhuma TaskAssignment: recurso alocado é sempre
+    um vínculo novo, específico de cada projeto — nunca copiado.
+
+    Datas planejadas: a tarefa de origem com o planned_start_date mais
+    cedo vira a "tarefa 1" — todas as datas são deslocadas em dias
+    corridos (mesmo delta da original) pra essa tarefa cair em
+    `target_project.start_date` (ou hoje, se o projeto novo não tiver
+    início definido), preservando o espaçamento relativo do modelo
+    original. planned_end_date de cada uma é recalculada a partir da
+    duration_days copiada + o calendário do projeto NOVO (não do
+    original) via `_end_date_from_duration`, pra nascer consistente com o
+    resto do motor de agendamento. Tarefas de origem sem
+    planned_start_date ficam sem data também na cópia (nada pra
+    deslocar). Isso é só o deslocamento "ingênuo" — tarefas com
+    predecessora são recalculadas de novo (com prioridade sobre esse
+    valor inicial) por quem chama esta função, via `recalculate_schedule`
+    no projeto novo (ver routers/tasks.py copy_project_tasks_endpoint):
+    esta função só cria as linhas, não mexe em dependência entre projetos
+    diferentes.
+
+    Levanta ValueError se o projeto de origem não tiver tarefas, ou se o
+    projeto novo já tiver alguma (pra não arriscar colidir wbs_code nem
+    misturar duas estruturas na mesma EAP)."""
+    source_tasks = list(
+        session.scalars(select(Task).where(Task.project_id == source_project_id).order_by(Task.wbs_code)).all()
+    )
+    if not source_tasks:
+        raise ValueError("O projeto de origem não tem tarefas para copiar")
+    if session.scalar(select(Task.id).where(Task.project_id == target_project.id).limit(1)):
+        raise ValueError("O projeto de destino já tem tarefas — a cópia de estrutura só vale para um projeto vazio")
+
+    starts = [t.planned_start_date for t in source_tasks if t.planned_start_date]
+    source_min_start = min(starts) if starts else None
+    anchor = target_project.start_date or date.today()
+
+    old_to_new: dict[str, Task] = {}
+    for source in source_tasks:
+        if source.planned_start_date and source_min_start:
+            new_start = anchor + timedelta(days=(source.planned_start_date - source_min_start).days)
+            new_end = _end_date_from_duration(cal, new_start, source.duration_days)
+        else:
+            new_start = None
+            new_end = None
+        new_task = Task(
+            project_id=target_project.id,
+            name=source.name,
+            wbs_code=source.wbs_code,
+            task_type=source.task_type,
+            duration_days=source.duration_days,
+            estimated_hours=source.estimated_hours,
+            sort_order=source.sort_order,
+            planned_start_date=new_start,
+            planned_end_date=new_end,
+            is_milestone=source.is_milestone,
+            notes=source.notes,
+        )
+        session.add(new_task)
+        old_to_new[source.id] = new_task
+
+    session.flush()  # gera os ids novos, precisos pro remapeamento abaixo
+
+    for source in source_tasks:
+        if source.parent_task_id and source.parent_task_id in old_to_new:
+            old_to_new[source.id].parent_task_id = old_to_new[source.parent_task_id].id
+
+    source_ids = set(old_to_new.keys())
+    source_deps = list(
+        session.scalars(
+            select(TaskDependency).where(
+                TaskDependency.predecessor_task_id.in_(source_ids),
+                TaskDependency.successor_task_id.in_(source_ids),
+            )
+        ).all()
+    )
+    for dep in source_deps:
+        session.add(
+            TaskDependency(
+                predecessor_task_id=old_to_new[dep.predecessor_task_id].id,
+                successor_task_id=old_to_new[dep.successor_task_id].id,
+                dependency_type=dep.dependency_type,
+                lag_days=dep.lag_days,
+            )
+        )
+
+    session.flush()
+    return list(old_to_new.values())
+
+
 def calendar_for_project(session: Session, project: Project) -> BusinessCalendar:
     """Calendário efetivo do projeto: o que estiver em Project.calendar_id,
     ou o padrão (segunda a sexta, sem feriados) se nenhum foi atribuído."""

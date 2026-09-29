@@ -11,7 +11,7 @@ from ..database import get_db
 from ..deps import EXTERNAL_ROLES, INTERNAL_ROLES, get_current_user, require_project_access, require_roles
 from ..exports import build_service_orders_workbook, build_tasks_workbook
 from ..i18n import t as translate
-from ..models import Project, Resource, Task, TaskDependency, TaskStatus, User, UserRole
+from ..models import Project, ProjectStatus, Resource, Task, TaskDependency, TaskStatus, User, UserRole
 from ..schemas import (
     DashboardResponse,
     EvmMetrics,
@@ -51,7 +51,13 @@ def _get_project_or_404(db: Session, project_id: str, lang: str) -> Project:
 
 
 def _scoped_projects(db: Session, user: User) -> list[Project]:
-    stmt = select(Project)
+    # Projeto MODELO nunca entra em indicador/dashboard/portfólio — ele só
+    # existe como base de estrutura pro botão "Copiar estrutura de outro
+    # projeto" (ver routers/projects.py copy_tasks_from), não é trabalho
+    # real em andamento. Endpoints por project_id direto (report/evm/
+    # statistics/schedule/gantt) continuam acessíveis normalmente — é assim
+    # que o usuário abre e mantém a estrutura do próprio Modelo.
+    stmt = select(Project).where(Project.status != ProjectStatus.MODELO)
     if user.role in EXTERNAL_ROLES:
         stmt = stmt.where(Project.client_id == user.client_id)
     return list(db.scalars(stmt).all())
@@ -179,7 +185,10 @@ def roi(
     if project_id:
         _get_project_or_404(db, project_id, user.language)
         return [project_roi(db, project_id)]
-    projects = list(db.scalars(select(Project)).all())
+    # Mesma regra de _scoped_projects: projeto MODELO fica fora do ROI
+    # agregado (só é chamado direto por project_id, não como parte da
+    # listagem "todos os projetos").
+    projects = list(db.scalars(select(Project).where(Project.status != ProjectStatus.MODELO)).all())
     return [project_roi(db, project.id) for project in projects]
 
 

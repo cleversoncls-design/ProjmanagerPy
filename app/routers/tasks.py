@@ -30,6 +30,7 @@ from ..services import (
     apply_effort_driven,
     calendar_for_project,
     calendar_from_db,
+    copy_project_tasks,
     move_task,
     recalculate_schedule,
     recalculate_wbs,
@@ -434,6 +435,55 @@ def recalculate_project_wbs(
     db.commit()
     for item in updated:
         db.refresh(item)
+    return {"tasks": updated}
+
+
+@router.post("/projects/{project_id}/copy-tasks-from/{source_project_id}", response_model=WbsRecalculateResponse, status_code=status.HTTP_201_CREATED)
+def copy_tasks_from_project(
+    project_id: str,
+    source_project_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Botão "Copiar estrutura de outro projeto" — WBS/EAP, nome, duração,
+    horas, tipo, milestone, hierarquia e predecessoras (com tipo/atraso) de
+    `source_project_id` pra dentro de `project_id`, sem nenhum recurso
+    alocado (ver services.copy_project_tasks). `project_id` precisa estar
+    vazio (sem tarefas) — o fluxo é sempre criar o projeto primeiro, depois
+    usar este botão nele, nunca misturar com uma estrutura já existente. O
+    projeto de origem pode ter qualquer status (inclusive MODELO, o uso
+    mais comum, mas não exigido)."""
+    target = db.get(Project, project_id)
+    if not target:
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
+    require_project_access(target, user, write=True)
+    source = db.get(Project, source_project_id)
+    if not source:
+        raise HTTPException(status_code=404, detail=translate("Projeto de origem não encontrado", user.language))
+    require_project_access(source, user)
+    if source.id == target.id:
+        raise HTTPException(status_code=422, detail=translate("O projeto de origem precisa ser diferente do projeto de destino", user.language))
+
+    cal = calendar_for_project(db, target)
+    try:
+        copied = copy_project_tasks(db, source_project_id, target, cal)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Datas de quem tem predecessora foram só um chute inicial em
+    # copy_project_tasks — recalcula o projeto novo inteiro agora que as
+    # TaskDependency já existem, pra essas tarefas derivarem da cascata
+    # (mesma regra de reschedule_project), sobrepondo o chute.
+    recalculate_schedule(db, target.id, cal)
+    record_audit(
+        db,
+        entity_type="project",
+        entity_id=target.id,
+        action=AuditAction.UPDATE,
+        user_id=user.id,
+        details={"action": "copy_tasks_from", "source_project_id": source_project_id, "tasks_copied": len(copied)},
+    )
+    db.commit()
+    updated = list(db.scalars(select(Task).where(Task.project_id == target.id).order_by(Task.wbs_code)).all())
     return {"tasks": updated}
 
 
