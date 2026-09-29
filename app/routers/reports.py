@@ -120,6 +120,7 @@ def dashboard(
 @router.get("/reports/portfolio", response_model=list[ProjectPortfolioRow])
 def portfolio(
     client_id: str | None = None,
+    manager_id: str | None = None,
     status: ProjectStatus | None = None,
     include_modelo: bool = False,
     user: User = Depends(get_current_user),
@@ -129,16 +130,22 @@ def portfolio(
     referenciado nas ferramentas de mercado (Monday.com, MS Project).
     `client_id` (filtro da tela de Projetos) só se aplica pra quem enxerga
     mais de um cliente — perfil externo já é travado num cliente só (ver
-    _scoped_projects). `include_modelo` é o botão "Mostrar projetos
-    Modelo" da tela de Projetos — sem ele (padrão) o Modelo fica de fora
-    daqui igual no Dashboard; com ele, aparece misturado no resultado
-    (pedir status=MODELO junto implica include_modelo, pra não devolver
-    uma lista vazia por engano)."""
+    _scoped_projects). `manager_id` (pedido do usuário: filtro por gerente
+    do projeto na tela de Projetos) não precisa de tratamento especial por
+    papel — o gerente é sempre ADMIN/INTERNAL_PM, então filtrar por ele
+    nunca vaza projeto de fora do escopo já resolvido por
+    _scoped_projects/client_id acima. `include_modelo` é o botão "Mostrar
+    projetos Modelo" da tela de Projetos — sem ele (padrão) o Modelo fica
+    de fora daqui igual no Dashboard; com ele, aparece misturado no
+    resultado (pedir status=MODELO junto implica include_modelo, pra não
+    devolver uma lista vazia por engano)."""
     if status == ProjectStatus.MODELO:
         include_modelo = True
     projects = _scoped_projects(db, user, include_modelo=include_modelo)
     if client_id and user.role not in EXTERNAL_ROLES:
         projects = [p for p in projects if p.client_id == client_id]
+    if manager_id:
+        projects = [p for p in projects if p.manager_id == manager_id]
     if status:
         projects = [p for p in projects if p.status == status]
     return portfolio_rows(db, projects, include_financials=user.role not in EXTERNAL_ROLES)
