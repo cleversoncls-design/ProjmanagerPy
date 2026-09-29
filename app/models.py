@@ -339,6 +339,28 @@ class TaskAssignment(Base):
     task: Mapped[Task] = relationship(back_populates="assignments")
 
 
+class ProjectResource(Base):
+    """Vínculo direto recurso↔projeto (pedido do usuário: "vincular os
+    usuários ao projeto principal" pra não ter que alocar tarefa por
+    tarefa) — pensado pra projetos pequenos, conduzidos por 1 ou 2
+    consultores no máximo. Não substitui TaskAssignment: uma tarefa que já
+    tem alocação própria continua restrita só a quem está alocado nela
+    (ver `_resolve_task_and_project` em routers/timesheets.py — busca
+    primeiro no TaskAssignment da tarefa, só cai pra este vínculo quando a
+    tarefa não tem nenhuma alocação específica). Sem `allocated_hours`
+    (diferente de TaskAssignment): é só uma lista de quem pode apontar
+    horas no projeto como um todo, não uma alocação de capacidade."""
+
+    __tablename__ = "project_resources"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    resource_id: Mapped[str] = mapped_column(ForeignKey("resources.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    __table_args__ = (UniqueConstraint("project_id", "resource_id", name="uq_project_resource"),)
+    project: Mapped[Project] = relationship()
+    resource: Mapped[Resource] = relationship()
+
+
 class Timesheet(Base):
     __tablename__ = "timesheets"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))

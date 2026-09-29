@@ -17,14 +17,16 @@ from ..models import (
     Client,
     Project,
     ProjectExpense,
+    ProjectResource,
     ProjectStatus,
+    Resource,
     Risk,
     Task,
     Timesheet,
     User,
     UserRole,
 )
-from ..schemas import ProjectCreate, ProjectDetail, ProjectSummary, ProjectUpdate
+from ..schemas import ProjectCreate, ProjectDetail, ProjectResourceCreate, ProjectResourceRead, ProjectSummary, ProjectUpdate
 from ..services import project_financials
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -247,4 +249,64 @@ def delete_project(
         )
     record_audit(db, entity_type="project", entity_id=project.id, action=AuditAction.DELETE, user_id=user.id, details={"code": project.code})
     db.delete(project)  # passou por todas as checagens acima — não sobra filho nenhum pra cascata apagar
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Recursos do projeto — vínculo direto recurso↔projeto (pedido do usuário:
+# "vincular os usuários ao projeto principal" pra não alocar tarefa por
+# tarefa em projetos pequenos, conduzidos por 1-2 consultores). Ver
+# ProjectResource em app/models.py e a busca em cascata (tarefa → projeto)
+# em `_resolve_task_and_project` (app/routers/timesheets.py).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{project_id}/resources", response_model=list[ProjectResourceRead])
+def list_project_resources(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[ProjectResource]:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
+    require_project_access(project, user)
+    return list(db.scalars(select(ProjectResource).where(ProjectResource.project_id == project_id)).all())
+
+
+@router.post("/{project_id}/resources", response_model=ProjectResourceRead, status_code=status.HTTP_201_CREATED)
+def add_project_resource(
+    project_id: str,
+    data: ProjectResourceCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProjectResource:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
+    # Parte de "Administrar projetos" — mesma regra de update_project
+    # (Consultor não vincula recurso a projeto, nem via API direta).
+    require_project_access(project, user, write=True, allow_consultant_write=False)
+    if not db.get(Resource, data.resource_id):
+        raise HTTPException(status_code=404, detail=translate("Recurso não encontrado", user.language))
+    if db.scalar(select(ProjectResource).where(ProjectResource.project_id == project_id, ProjectResource.resource_id == data.resource_id)):
+        raise HTTPException(status_code=409, detail=translate("Recurso já vinculado a este projeto", user.language))
+    link = ProjectResource(project_id=project_id, resource_id=data.resource_id)
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return link
+
+
+@router.delete("/{project_id}/resources/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_project_resource(
+    project_id: str,
+    resource_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
+    require_project_access(project, user, write=True, allow_consultant_write=False)
+    link = db.scalar(select(ProjectResource).where(ProjectResource.project_id == project_id, ProjectResource.resource_id == resource_id))
+    if not link:
+        raise HTTPException(status_code=404, detail=translate("Vínculo não encontrado", user.language))
+    db.delete(link)
     db.commit()

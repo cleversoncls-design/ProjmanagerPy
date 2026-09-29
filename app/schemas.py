@@ -366,6 +366,22 @@ class TaskAssignmentRead(ORMModel):
 
 
 # ---------------------------------------------------------------------------
+# Recursos do projeto (vínculo direto recurso-projeto, sem passar por
+# tarefa — ver ProjectResource em app/models.py)
+# ---------------------------------------------------------------------------
+
+
+class ProjectResourceCreate(BaseModel):
+    resource_id: str
+
+
+class ProjectResourceRead(ORMModel):
+    id: str
+    project_id: str
+    resource_id: str
+
+
+# ---------------------------------------------------------------------------
 # Resources
 # ---------------------------------------------------------------------------
 
@@ -655,6 +671,7 @@ class ProjectPortfolioRow(BaseModel):
     code: str
     name: str
     status: ProjectStatus
+    manager_name: str
     percent_complete: Decimal
     tasks_total: int
     tasks_remaining: int

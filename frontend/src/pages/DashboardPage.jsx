@@ -5,6 +5,7 @@ import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import StatTile from '../components/StatTile'
 import CategoryBars from '../components/CategoryBars'
+import DonutChart from '../components/DonutChart'
 import StatusPill from '../components/StatusPill'
 import Table from '../components/Table'
 import Spinner from '../components/Spinner'
@@ -20,6 +21,19 @@ function toBarItems(counts, labelMap, colorMap) {
   return Object.entries(counts || {})
     .map(([key, value]) => ({ key, label: labelMap[key] || key, value, color: colorMap[key] }))
     .sort((a, b) => b.value - a.value)
+}
+
+// Só os 3 status "em andamento" entram no donut (pedido do usuário) —
+// Concluído/Cancelado viram KPI à parte (todo projeto finalizado, não faz
+// sentido fatiar % de "quanto do portfólio terminou" junto com o que ainda
+// está em curso). Ordem fixa (nunca por valor) e cor reaproveitada do
+// mesmo mapa de tom que StatusPill/StatTile já usam pra estes status —
+// nunca uma paleta nova só pro gráfico.
+const PROJECT_STATUS_CHART_ORDER = ['PLANNING', 'ACTIVE', 'ON_HOLD']
+const PROJECT_STATUS_CHART_COLOR = {
+  PLANNING: 'var(--text-muted)',
+  ACTIVE: 'var(--status-good)',
+  ON_HOLD: 'var(--status-warning)',
 }
 
 export default function DashboardPage() {
@@ -60,7 +74,21 @@ export default function DashboardPage() {
               tone={data.tasks_overdue > 0 ? 'critical' : 'good'}
             />
             <StatTile label={t('Progresso médio')} value={formatPercent(data.avg_progress_percentage)} tone="good" />
+            <StatTile label={t('Projetos concluídos')} value={data.projects_by_status?.COMPLETED || 0} tone="good" />
+            <StatTile label={t('Projetos cancelados')} value={data.projects_by_status?.CANCELLED || 0} tone="critical" />
           </div>
+
+          <Card title={t('Projetos por status')}>
+            <DonutChart
+              items={PROJECT_STATUS_CHART_ORDER.map((status) => ({
+                key: status,
+                label: labels.PROJECT_STATUS_LABELS[status] || status,
+                value: data.projects_by_status?.[status] || 0,
+                color: PROJECT_STATUS_CHART_COLOR[status],
+              }))}
+              centerLabel={t('Projetos')}
+            />
+          </Card>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Card title={t('Tarefas por status')}>

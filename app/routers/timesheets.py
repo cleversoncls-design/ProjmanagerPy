@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,6 +14,7 @@ from ..i18n import t as translate
 from ..models import (
     AuditAction,
     Project,
+    ProjectResource,
     ProjectStatus,
     Resource,
     ResourceSchedule,
@@ -110,7 +112,26 @@ def _resolve_task_and_project(
             select(TaskAssignment).where(TaskAssignment.task_id == task.id, TaskAssignment.resource_id == resource.id)
         )
         if not assignment:
-            raise HTTPException(status_code=403, detail=translate("Recurso não está alocado nesta tarefa", user.language))
+            # Busca em cascata (pedido do usuário): "sempre busca primeiro
+            # na tarefa e depois no projeto". Este recurso não está alocado
+            # NESTA tarefa — mas se a tarefa não tem NENHUM recurso alocado
+            # (não foi restrita a ninguém em particular), cai pro vínculo
+            # do recurso com o projeto inteiro (ProjectResource, "Recursos
+            # do projeto" na tela de Projeto). Uma tarefa que já tem
+            # alocação própria (pra outro recurso) continua fechada só pra
+            # quem está nela — o vínculo de projeto nunca abre uma tarefa
+            # que o PM deixou restrita de propósito.
+            task_has_any_assignment = db.scalar(select(TaskAssignment.id).where(TaskAssignment.task_id == task.id)) is not None
+            resource_linked_to_project = not task_has_any_assignment and (
+                db.scalar(
+                    select(ProjectResource).where(
+                        ProjectResource.project_id == project.id, ProjectResource.resource_id == resource.id
+                    )
+                )
+                is not None
+            )
+            if not resource_linked_to_project:
+                raise HTTPException(status_code=403, detail=translate("Recurso não está alocado nesta tarefa nem no projeto", user.language))
     elif data.project_id:
         # Apontamento avulso (sem task na EAP) mas alocado a um projeto —
         # ex.: reunião com o cliente, suporte pontual. Continua exigindo
@@ -284,6 +305,8 @@ def list_timesheets(
     task_id: str | None = None,
     resource_id: str | None = None,
     status_filter: TimesheetStatus | None = None,
+    start: date | None = None,
+    end: date | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Timesheet]:
@@ -292,7 +315,12 @@ def list_timesheets(
     (status_filter=PENDING), sem precisar de project_id/task_id. Perfil não
     gerencial (fora de ADMIN/INTERNAL_PM) nunca enxerga apontamento de
     outro recurso: `resource_id` é sempre forçado pro recurso do próprio
-    usuário, ignorando qualquer valor de terceiro que venha na query."""
+    usuário, ignorando qualquer valor de terceiro que venha na query.
+
+    `start`/`end` (pedido do usuário: filtro por período na lista de
+    apontamentos, tanto "Meus apontamentos" quanto Aprovações pendentes)
+    filtram por `Timesheet.date`, inclusive nos dois extremos — igual ao
+    padrão já usado em GET /reports/service-orders."""
     is_manager = user.role in _MANAGEMENT_ROLES
     if not is_manager:
         own_resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
@@ -312,15 +340,19 @@ def list_timesheets(
             raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
         require_project_access(project, user)
         stmt = stmt.where(or_(Task.project_id == project_id, Timesheet.project_id == project_id))
-    elif not (resource_id or status_filter):
+    elif not (resource_id or status_filter or start or end):
         raise HTTPException(
             status_code=422,
-            detail=translate("Informe ao menos um filtro (project_id, task_id, resource_id ou status_filter)", user.language),
+            detail=translate("Informe ao menos um filtro (project_id, task_id, resource_id, status_filter, start ou end)", user.language),
         )
     if resource_id:
         stmt = stmt.where(Timesheet.resource_id == resource_id)
     if status_filter:
         stmt = stmt.where(Timesheet.status == status_filter)
+    if start:
+        stmt = stmt.where(Timesheet.date >= start)
+    if end:
+        stmt = stmt.where(Timesheet.date <= end)
     return list(db.scalars(stmt.order_by(Timesheet.date.desc())).all())
 
 
