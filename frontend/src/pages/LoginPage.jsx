@@ -64,17 +64,22 @@ export default function LoginPage() {
       </button>
 
       <div className="w-full max-w-sm rounded-2xl border p-7" style={{ backgroundColor: 'var(--nav-card)', borderColor: 'var(--nav-border)' }}>
+        {/* Logotipo ao lado esquerdo do nome (pedido do usuário) — antes
+         * ficava empilhado acima do título, centralizado; agora os dois
+         * ficam na mesma linha, como um grupo centralizado. */}
         <div className="flex flex-col items-center text-center">
-          <div
-            className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border"
-            style={{ borderColor: 'var(--nav-border)', backgroundColor: 'var(--nav-bg)' }}
-          >
-            <img src={logo} alt="Resultar Servicios" className="h-8 w-8 object-contain" />
+          <div className="mb-3 flex items-center justify-center gap-3">
+            <div
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border"
+              style={{ borderColor: 'var(--nav-border)', backgroundColor: 'var(--nav-bg)' }}
+            >
+              <img src={logo} alt="Resultar Servicios" className="h-6 w-6 object-contain" />
+            </div>
+            <p className="text-lg font-extrabold tracking-tight" style={{ color: 'var(--nav-fg-strong)' }}>
+              RESULTAR SERVICIOS
+            </p>
           </div>
-          <p className="text-lg font-extrabold tracking-tight" style={{ color: 'var(--nav-fg-strong)' }}>
-            RESULTAR SERVICIOS
-          </p>
-          <p className="mt-1 text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--nav-fg-muted)' }}>
+          <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--nav-fg-muted)' }}>
             Gestión de Proyectos
           </p>
         </div>
@@ -165,12 +170,14 @@ export default function LoginPage() {
           <p className="mt-1 text-[11px] leading-relaxed" style={{ color: 'var(--nav-fg-muted)' }}>
             {t('Os usuários e permissões são administrados pelo Administrador.')}
           </p>
+          {/* Versão movida pra dentro do card, logo abaixo do aviso de
+           * acesso administrado (pedido do usuário) — antes ficava fixa no
+           * rodapé da viewport, fora do card. */}
+          <p className="mt-3 text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--nav-fg-muted)' }}>
+            GESTIÓN DE PROYECTOS · V1.0
+          </p>
         </div>
       </div>
-
-      <p className="fixed bottom-5 left-1/2 -translate-x-1/2 text-[10px] font-bold uppercase tracking-wide" style={{ color: 'var(--nav-fg-muted)' }}>
-        GESTIÓN DE PROYECTOS · V1.0
-      </p>
     </div>
   )
 }

@@ -637,15 +637,14 @@ export const es = {
   'Todos': 'Todos',
   'Data inicial': 'Fecha inicial',
   'Data final': 'Fecha final',
-  'Mostrando o período filtrado (Data inicial/final) em vez do calendário mensal. Limpe as datas para voltar ao mês.':
-    'Mostrando el período filtrado (Fecha inicial/final) en lugar del calendario mensual. Borre las fechas para volver al mes.',
+  'Mostrando o mês normalmente — os agendamentos fora do período informado ficam ocultos nos dias do calendário.':
+    'Mostrando el mes normalmente — las agendas fuera del período informado quedan ocultas en los días del calendario.',
   'Mês anterior': 'Mes anterior',
   'Próximo mês': 'Mes siguiente',
   'Hoje': 'Hoy',
   'Novo agendamento': 'Nueva agenda',
   'Editar agendamento': 'Editar agenda',
   '+{n} mais': '+{n} más',
-  'Nenhum agendamento no período filtrado.': 'Ninguna agenda en el período filtrado.',
   'Hora início': 'Hora de inicio',
   'Hora fim': 'Hora de fin',
   'Confirmar exclusão?': '¿Confirmar eliminación?',

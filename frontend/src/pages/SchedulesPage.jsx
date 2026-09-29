@@ -14,7 +14,7 @@ import Modal from '../components/Modal'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
 import { FormField, TextInput, Select, TextArea } from '../components/FormField'
-import { ChevronLeftIcon, ChevronRightIcon, PencilIcon, PlusIcon } from '../components/icons'
+import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from '../components/icons'
 import { formatTime } from '../utils/format'
 import { MANAGEMENT_ROLES } from '../utils/labels'
 import { DEFAULT_PROJECT_COLOR, contrastTextColor } from '../utils/colorPalette'
@@ -118,7 +118,6 @@ export default function SchedulesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resourceOptions, canManage])
 
-  const listMode = Boolean(filters.start && filters.end)
   const projectOptions = useMemo(
     () => (filters.client_id ? projects.filter((p) => p.client_id === filters.client_id) : projects),
     [projects, filters.client_id],
@@ -133,36 +132,42 @@ export default function SchedulesPage() {
     [labels.WEEKDAY_LABELS],
   )
 
+  // Sempre carrega o mês inteiro visível na grade — o calendário nunca
+  // "desmonta" pra virar lista, nem quando Data inicial/final estão
+  // preenchidas (pedido do usuário). O recorte por período fica só do lado
+  // do cliente, em `schedulesByDate` abaixo: os blocos fora do intervalo
+  // simplesmente não aparecem nos dias do mês, sem trocar o formato da
+  // tela.
   function loadSchedules() {
     setLoading(true)
     setError('')
-    const range = listMode
-      ? { start: filters.start, end: filters.end }
-      : { start: toIsoDate(monthCells[0]), end: toIsoDate(monthCells[monthCells.length - 1]) }
     schedulesApi
       .listSchedules({
         resource_id: filters.resource_id || undefined,
         client_id: filters.client_id || undefined,
         project_id: filters.project_id || undefined,
-        ...range,
+        start: toIsoDate(monthCells[0]),
+        end: toIsoDate(monthCells[monthCells.length - 1]),
       })
       .then(setSchedules)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }
 
-  useEffect(loadSchedules, [viewDate, filters.resource_id, filters.client_id, filters.project_id, filters.start, filters.end])
+  useEffect(loadSchedules, [viewDate, filters.resource_id, filters.client_id, filters.project_id])
 
   const schedulesByDate = useMemo(() => {
     const map = {}
     for (const schedule of schedules) {
+      if (filters.start && schedule.date < filters.start) continue
+      if (filters.end && schedule.date > filters.end) continue
       ;(map[schedule.date] ||= []).push(schedule)
     }
     for (const list of Object.values(map)) {
       list.sort((a, b) => a.start_time.localeCompare(b.start_time))
     }
     return map
-  }, [schedules])
+  }, [schedules, filters.start, filters.end])
 
   function updateFilter(field) {
     return (event) => setFilters((prev) => ({ ...prev, [field]: event.target.value }))
@@ -219,49 +224,47 @@ export default function SchedulesPage() {
             <TextInput type="date" value={filters.end} onChange={updateFilter('end')} />
           </FormField>
         </div>
-        {listMode && (
+        {(filters.start || filters.end) && (
           <p className="mt-3 text-xs text-[var(--text-muted)]">
-            {t('Mostrando o período filtrado (Data inicial/final) em vez do calendário mensal. Limpe as datas para voltar ao mês.')}
+            {t('Mostrando o mês normalmente — os agendamentos fora do período informado ficam ocultos nos dias do calendário.')}
           </p>
         )}
       </Card>
 
       <ErrorBanner message={error} />
 
-      {!listMode && (
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-1">
-            <IconButton
-              icon={ChevronLeftIcon}
-              label={t('Mês anterior')}
-              onClick={() => setViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
-            />
-            <IconButton
-              icon={ChevronRightIcon}
-              label={t('Próximo mês')}
-              onClick={() => setViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
-            />
-            <Button
-              variant="secondary"
-              onClick={() => setViewDate(() => { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), 1) })}
-            >
-              {t('Hoje')}
-            </Button>
-          </div>
-          <p className="text-sm font-semibold capitalize text-[var(--text-primary)]">{monthLabel}</p>
-          {canManage ? (
-            <Button onClick={() => setFormTarget({ date: toIsoDate(new Date()) })}>
-              <PlusIcon size={16} /> {t('Novo agendamento')}
-            </Button>
-          ) : (
-            <span />
-          )}
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <IconButton
+            icon={ChevronLeftIcon}
+            label={t('Mês anterior')}
+            onClick={() => setViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+          />
+          <IconButton
+            icon={ChevronRightIcon}
+            label={t('Próximo mês')}
+            onClick={() => setViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+          />
+          <Button
+            variant="secondary"
+            onClick={() => setViewDate(() => { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), 1) })}
+          >
+            {t('Hoje')}
+          </Button>
         </div>
-      )}
+        <p className="text-sm font-semibold capitalize text-[var(--text-primary)]">{monthLabel}</p>
+        {canManage ? (
+          <Button onClick={() => setFormTarget({ date: toIsoDate(new Date()) })}>
+            <PlusIcon size={16} /> {t('Novo agendamento')}
+          </Button>
+        ) : (
+          <span />
+        )}
+      </div>
 
       {loading && <Spinner />}
 
-      {!loading && !listMode && (
+      {!loading && (
         <Card dense>
           <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold text-[var(--text-secondary)]">
             {weekdayLabelsSundayFirst.map((day, index) => (
@@ -356,35 +359,6 @@ export default function SchedulesPage() {
               )
             })}
           </div>
-        </Card>
-      )}
-
-      {!loading && listMode && (
-        <Card>
-          {schedules.length === 0 ? (
-            <p className="text-sm text-[var(--text-secondary)]">{t('Nenhum agendamento no período filtrado.')}</p>
-          ) : (
-            <div className="space-y-1.5">
-              {schedules.map((schedule) => {
-                const color = projectsById[schedule.project_id]?.color || DEFAULT_PROJECT_COLOR
-                return (
-                  <div
-                    key={schedule.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
-                      <span className="font-medium text-[var(--text-primary)]">{schedule.date}</span>
-                      <span className="text-[var(--text-secondary)]">{scheduleLabel(schedule)}</span>
-                    </div>
-                    {canManage && (
-                      <IconButton icon={PencilIcon} label={t('Editar')} onClick={() => setFormTarget({ schedule })} />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
         </Card>
       )}
 
