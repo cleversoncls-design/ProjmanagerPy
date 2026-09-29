@@ -271,6 +271,7 @@ export const es = {
   'Progresso': 'Progreso',
   'Progresso médio': 'Progreso promedio',
   'Projeto': 'Proyecto',
+  'Projetos Modelo': 'Proyectos Modelo',
   'Próximo marco': 'Próximo hito',
   'Razão social': 'Razón social',
   'Real': 'Real',

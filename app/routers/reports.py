@@ -50,14 +50,22 @@ def _get_project_or_404(db: Session, project_id: str, lang: str) -> Project:
     return project
 
 
-def _scoped_projects(db: Session, user: User) -> list[Project]:
-    # Projeto MODELO nunca entra em indicador/dashboard/portfólio — ele só
-    # existe como base de estrutura pro botão "Copiar estrutura de outro
-    # projeto" (ver routers/projects.py copy_tasks_from), não é trabalho
-    # real em andamento. Endpoints por project_id direto (report/evm/
-    # statistics/schedule/gantt) continuam acessíveis normalmente — é assim
-    # que o usuário abre e mantém a estrutura do próprio Modelo.
-    stmt = select(Project).where(Project.status != ProjectStatus.MODELO)
+def _scoped_projects(db: Session, user: User, include_modelo: bool = False) -> list[Project]:
+    # Projeto MODELO nunca entra em indicador/dashboard — ele só existe
+    # como base de estrutura pro botão "Copiar estrutura de outro projeto"
+    # (ver routers/projects.py copy_tasks_from), não é trabalho real em
+    # andamento. `dashboard()` abaixo sempre chama isto com o padrão
+    # (include_modelo=False, nenhum indicador nunca conta Modelo). Já a
+    # tela de Projetos (GET /reports/portfolio) é só uma listagem — o
+    # usuário pode querer ver o Modelo ali pra abrir e manter a estrutura
+    # dele, daí o botão "Mostrar projetos Modelo" que liga include_modelo
+    # nesse endpoint. Endpoints por project_id direto (report/evm/
+    # statistics/schedule/gantt) continuam acessíveis normalmente sempre,
+    # independente disto — é assim que o usuário abre e mantém a estrutura
+    # do próprio Modelo mesmo sem passar por aqui.
+    stmt = select(Project)
+    if not include_modelo:
+        stmt = stmt.where(Project.status != ProjectStatus.MODELO)
     if user.role in EXTERNAL_ROLES:
         stmt = stmt.where(Project.client_id == user.client_id)
     return list(db.scalars(stmt).all())
@@ -105,6 +113,7 @@ def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_
 def portfolio(
     client_id: str | None = None,
     status: ProjectStatus | None = None,
+    include_modelo: bool = False,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[dict]:
@@ -112,10 +121,14 @@ def portfolio(
     referenciado nas ferramentas de mercado (Monday.com, MS Project).
     `client_id` (filtro da tela de Projetos) só se aplica pra quem enxerga
     mais de um cliente — perfil externo já é travado num cliente só (ver
-    _scoped_projects). `status` filtra dentro do que _scoped_projects
-    já devolve, então nunca inclui MODELO mesmo se pedido (ele já foi
-    excluído antes de chegar aqui — ver _scoped_projects)."""
-    projects = _scoped_projects(db, user)
+    _scoped_projects). `include_modelo` é o botão "Mostrar projetos
+    Modelo" da tela de Projetos — sem ele (padrão) o Modelo fica de fora
+    daqui igual no Dashboard; com ele, aparece misturado no resultado
+    (pedir status=MODELO junto implica include_modelo, pra não devolver
+    uma lista vazia por engano)."""
+    if status == ProjectStatus.MODELO:
+        include_modelo = True
+    projects = _scoped_projects(db, user, include_modelo=include_modelo)
     if client_id and user.role not in EXTERNAL_ROLES:
         projects = [p for p in projects if p.client_id == client_id]
     if status:
