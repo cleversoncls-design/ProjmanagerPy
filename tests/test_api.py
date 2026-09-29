@@ -95,6 +95,45 @@ def test_only_admin_can_create_client(client, setup):
     assert allowed.status_code == 201
 
 
+def test_consultant_cannot_administer_project_or_tasks(client, setup):
+    """Revisão de acessos do usuário: "Administrar projetos"/"Administrar
+    tarefas" ficaram só com Admin/Gerente de Projetos — Consultor perdeu a
+    tela de Projetos inteira, então também não pode mais escrever ali via
+    API direta (allow_consultant_write=False em require_project_access).
+    PM continua podendo — só o Consultor é restringido."""
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    pm_headers = auth_headers(client, setup["pm"].email)
+    project_id = setup["project_a"].id
+
+    denied_project = client.patch(f"/projects/{project_id}", json={"name": "Novo nome"}, headers=consultant_headers)
+    assert denied_project.status_code == 403
+
+    task_payload = {"name": "Tarefa", "wbs_code": "1", "duration_days": "1"}
+    denied_task = client.post(f"/projects/{project_id}/tasks", json=task_payload, headers=consultant_headers)
+    assert denied_task.status_code == 403
+
+    allowed_task = client.post(f"/projects/{project_id}/tasks", json=task_payload, headers=pm_headers)
+    assert allowed_task.status_code == 201
+
+
+def test_dashboard_restricted_to_admin_and_client_roles(client, setup):
+    """Revisão de acessos do usuário: Dashboard ficou só com Admin e os
+    perfis externos do cliente — Gerente de Projetos e Consultor perderam
+    esse item de menu, restrito aqui também na API (não só escondido na
+    UI)."""
+    denied_pm = client.get("/dashboard", headers=auth_headers(client, setup["pm"].email))
+    assert denied_pm.status_code == 403
+
+    denied_consultant = client.get("/dashboard", headers=auth_headers(client, setup["consultant"].email))
+    assert denied_consultant.status_code == 403
+
+    allowed_admin = client.get("/dashboard", headers=setup["admin_headers"])
+    assert allowed_admin.status_code == 200
+
+    allowed_client_pm = client.get("/dashboard", headers=auth_headers(client, setup["client_pm_a"].email))
+    assert allowed_client_pm.status_code == 200
+
+
 def test_list_users_filters_by_role_and_is_restricted_to_management(client, setup):
     consultant_headers = auth_headers(client, setup["consultant"].email)
     denied = client.get("/users", headers=consultant_headers)

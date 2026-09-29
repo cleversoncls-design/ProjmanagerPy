@@ -59,11 +59,12 @@ def require_roles(*roles: UserRole):
     return dependency
 
 
-def require_project_access(project: Project, user: User, write: bool = False) -> None:
+def require_project_access(project: Project, user: User, write: bool = False, allow_consultant_write: bool = True) -> None:
     """Aplica o isolamento por cliente e a regra de escrita.
 
-    - Perfis internos (ADMIN, INTERNAL_PM, CONSULTANT) enxergam e escrevem em
-      qualquer projeto.
+    - Perfis internos (ADMIN, INTERNAL_PM, CONSULTANT) enxergam qualquer
+      projeto; escrevem também, exceto onde `allow_consultant_write=False`
+      tira o Consultor (ver abaixo).
     - Perfis externos (CLIENT_PM, CLIENT_USER) só enxergam projetos do
       próprio `client_id`.
     - Dentro do escopo do cliente, CLIENT_PM pode escrever; CLIENT_USER é
@@ -74,8 +75,22 @@ def require_project_access(project: Project, user: User, write: bool = False) ->
     por definição já exige `user.role in {CLIENT_PM, CLIENT_USER}` — as duas
     condições nunca eram verdadeiras ao mesmo tempo, então a restrição de
     escrita nunca era aplicada.)
-    """
+
+    `allow_consultant_write=False` (revisão de acessos do usuário:
+    "Administrar projetos"/"Administrar tarefas" ficaram só com
+    Administrador/Gerente de Projetos — Consultor não tem mais essa tela)
+    bloqueia especificamente o Consultor nas rotas de administração de
+    projeto/tarefa/risco/mudança/linha-base/despesa, mesmo que ele chame a
+    API direto (sem passar pela UI, que já esconde essas telas dele). Só o
+    Consultor é afetado — nunca muda o comportamento de CLIENT_PM, que já
+    tinha (e continua tendo) escrita dentro do próprio escopo de cliente.
+    O default (True) preserva o comportamento de sempre, usado por rotas
+    onde o Consultor tem escrita legítima (ex.: Registro de Horas, que
+    reaproveita esta função só pra checar escopo de cliente/projeto ativo,
+    não pra "administrar" o projeto em si)."""
     if user.role in EXTERNAL_ROLES and project.client_id != user.client_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=t("Projeto fora do escopo do cliente", user.language))
     if write and user.role == UserRole.CLIENT_USER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=t("Perfil sem permissão de escrita", user.language))
+    if write and not allow_consultant_write and user.role == UserRole.CONSULTANT:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=t("Perfil sem permissão de escrita", user.language))

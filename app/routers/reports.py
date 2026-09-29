@@ -72,7 +72,15 @@ def _scoped_projects(db: Session, user: User, include_modelo: bool = False) -> l
 
 
 @router.get("/dashboard", response_model=DashboardResponse)
-def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+def dashboard(
+    # Dashboard ficou só com Admin e os perfis externos do cliente (revisão
+    # de acessos do usuário) — Gerente de Projetos e Consultor perderam
+    # esse item de menu; mesmos perfis de DASHBOARD_ROLES no frontend
+    # (utils/labels.js), restrito aqui também pra não depender só da UI
+    # esconder a rota.
+    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.CLIENT_PM, UserRole.CLIENT_USER)),
+    db: Session = Depends(get_db),
+) -> dict:
     """Visão geral do portfólio: contagens por status, tarefas por tipo,
     tarefas atrasadas e a listagem "portfolio" (uma linha por projeto).
     Perfis externos enxergam só os projetos do próprio cliente, e sem
