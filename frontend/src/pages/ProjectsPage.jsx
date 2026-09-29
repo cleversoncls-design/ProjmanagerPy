@@ -36,7 +36,7 @@ const EMPTY_FORM = {
   end_date: '',
 }
 
-const EMPTY_FILTERS = { status: '', client_id: '' }
+const EMPTY_FILTERS = { status: '', client_id: '', includeModelo: false }
 
 export default function ProjectsPage() {
   const { user } = useAuth()
@@ -69,13 +69,14 @@ export default function ProjectsPage() {
       .getPortfolio({
         status: filters.status || undefined,
         client_id: filters.client_id || undefined,
+        include_modelo: filters.includeModelo || undefined,
       })
       .then(setRows)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }
 
-  useEffect(loadRows, [filters.status, filters.client_id])
+  useEffect(loadRows, [filters.status, filters.client_id, filters.includeModelo])
 
   useEffect(() => {
     if (canFilterByClient) {
@@ -93,6 +94,18 @@ export default function ProjectsPage() {
 
   function updateFilter(field) {
     return (event) => setFilters((prev) => ({ ...prev, [field]: event.target.value }))
+  }
+
+  // Botão "Mostrar projetos Modelo": desligar enquanto o filtro de Status
+  // está travado em MODELO não faria sentido (lista sempre vazia), então
+  // volta o Status pra "Todos" junto.
+  function toggleIncludeModelo(event) {
+    const includeModelo = event.target.checked
+    setFilters((prev) => ({
+      ...prev,
+      includeModelo,
+      status: !includeModelo && prev.status === 'MODELO' ? '' : prev.status,
+    }))
   }
 
   const soldValuePreview = useMemo(() => {
@@ -135,15 +148,15 @@ export default function ProjectsPage() {
       />
 
       <Card className="mb-4">
-        <div className={`grid grid-cols-2 gap-3 ${canFilterByClient ? 'md:grid-cols-2' : 'md:grid-cols-1'}`}>
+        <div className={`grid grid-cols-2 gap-3 ${canFilterByClient ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
           <FormField label={t('Status')}>
             <Select value={filters.status} onChange={updateFilter('status')}>
               <option value="">{t('Todos')}</option>
-              {/* MODELO nunca aparece nesta lista — ela não entra no
-                  portfólio mesmo sem filtro (ver _scoped_projects no
-                  backend), então oferecer o filtro seria enganoso. */}
               {Object.keys(PROJECT_STATUS_LABELS)
-                .filter((status) => status !== 'MODELO')
+                // MODELO só entra na lista quando "Mostrar projetos Modelo"
+                // está ligado — do contrário selecioná-lo sempre voltaria
+                // uma lista vazia (ver _scoped_projects no backend).
+                .filter((status) => status !== 'MODELO' || filters.includeModelo)
                 .map((status) => (
                   <option key={status} value={status}>
                     {labels.PROJECT_STATUS_LABELS[status] || status}
@@ -163,6 +176,12 @@ export default function ProjectsPage() {
               </Select>
             </FormField>
           )}
+          <FormField label={t('Projetos Modelo')}>
+            <label className="flex h-[38px] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text-secondary)]">
+              <input type="checkbox" checked={filters.includeModelo} onChange={toggleIncludeModelo} />
+              {t('Mostrar')}
+            </label>
+          </FormField>
         </div>
       </Card>
 
