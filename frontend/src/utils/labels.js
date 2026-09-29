@@ -11,6 +11,34 @@ export const ROLE_LABELS = {
 export const MANAGEMENT_ROLES = ['ADMIN', 'INTERNAL_PM']
 export const INTERNAL_ROLES = ['ADMIN', 'INTERNAL_PM', 'CONSULTANT']
 
+// --- Menu por perfil (pedido do usuário: Administrativo / Gerentes de
+// Projetos / Consultores) — MANAGEMENT_ROLES/INTERNAL_ROLES acima continuam
+// valendo pra quem PODE ESCREVER em cada tela (criar projeto/tarefa,
+// aprovar apontamento etc.), que não mudou; os grupos abaixo são só pra
+// decidir quais itens aparecem no menu de cada perfil. ---
+// Só o Administrador administra Clientes e Usuários — Gerente de Projetos
+// perdeu esses dois itens do menu (confirmado com o usuário).
+export const ADMIN_ONLY_ROLES = ['ADMIN']
+// Dashboard: Administrador e os perfis externos do cliente (perfil externo
+// não entrou nesta reorganização, mantido como já era) — Gerente de
+// Projetos e Consultor não têm mais esse item no menu.
+export const DASHBOARD_ROLES = ['ADMIN', 'CLIENT_PM', 'CLIENT_USER']
+// Projetos (lista + detalhe do projeto): todo mundo, menos Consultor —
+// que perdeu esse item no menu (continua vendo Agenda de Consultores,
+// Apontamento de horas e Ordens de Serviço).
+export const PROJECTS_VISIBLE_ROLES = ['ADMIN', 'INTERNAL_PM', 'CLIENT_PM', 'CLIENT_USER']
+
+// Primeira tela de cada perfil ao logar (ou ao cair em "/" depois de ser
+// barrado por ProtectedRoute em alguma rota) — precisa ser uma rota que o
+// próprio perfil tenha acesso, senão vira redirecionamento em loop.
+export const ROLE_HOME_PATH = {
+  ADMIN: '/',
+  INTERNAL_PM: '/projects',
+  CONSULTANT: '/schedules',
+  CLIENT_PM: '/',
+  CLIENT_USER: '/',
+}
+
 export const PROJECT_STATUS_LABELS = {
   PLANNING: 'Planejamento',
   ACTIVE: 'Ativo',
