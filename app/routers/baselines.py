@@ -34,7 +34,9 @@ def create_baseline(
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
-    require_project_access(project, user, write=True)
+    # Linha de base é parte de "Administrar projetos" — Consultor perdeu
+    # essa tela (ver allow_consultant_write em require_project_access).
+    require_project_access(project, user, write=True, allow_consultant_write=False)
     tasks = db.scalars(select(Task).where(Task.project_id == project_id)).all()
     # Tarefa-pai (WBS) nunca tem planned_start_date/planned_end_date/
     # estimated_hours própria preenchida — o motor de agendamento só

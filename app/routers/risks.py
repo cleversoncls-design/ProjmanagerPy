@@ -23,7 +23,9 @@ def _get_project_or_404(db: Session, project_id: str, lang: str) -> Project:
 @router.post("/projects/{project_id}/risks", response_model=RiskRead, status_code=201)
 def create_risk(project_id: str, data: RiskCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Risk:
     project = _get_project_or_404(db, project_id, user.language)
-    require_project_access(project, user, write=True)
+    # Gestão de risco é parte de "Administrar projetos" — Consultor perdeu
+    # essa tela (ver allow_consultant_write em require_project_access).
+    require_project_access(project, user, write=True, allow_consultant_write=False)
     risk = Risk(project_id=project_id, **data.model_dump())
     db.add(risk)
     db.commit()
@@ -43,7 +45,7 @@ def update_risk(risk_id: str, data: RiskUpdate, user: User = Depends(get_current
     risk = db.get(Risk, risk_id)
     if not risk:
         raise HTTPException(status_code=404, detail=translate("Risco não encontrado", user.language))
-    require_project_access(risk.project, user, write=True)
+    require_project_access(risk.project, user, write=True, allow_consultant_write=False)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(risk, field, value)
     db.commit()

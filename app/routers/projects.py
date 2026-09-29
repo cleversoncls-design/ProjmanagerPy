@@ -143,7 +143,10 @@ def update_project(
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
-    require_project_access(project, user, write=True)
+    # "Administrar projetos" ficou só com Admin/Gerente de Projetos —
+    # Consultor não edita projeto mesmo via API direta (ver
+    # allow_consultant_write em require_project_access).
+    require_project_access(project, user, write=True, allow_consultant_write=False)
     changes = data.model_dump(exclude_unset=True)
     if "manager_id" in changes:
         manager = db.get(User, changes["manager_id"])

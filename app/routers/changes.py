@@ -29,7 +29,9 @@ def create_change_request(
     db: Session = Depends(get_db),
 ) -> ChangeRequest:
     project = _get_project_or_404(db, project_id, user.language)
-    require_project_access(project, user, write=True)
+    # Solicitação de mudança é parte de "Administrar projetos" — Consultor
+    # perdeu essa tela (ver allow_consultant_write em require_project_access).
+    require_project_access(project, user, write=True, allow_consultant_write=False)
     change = ChangeRequest(project_id=project_id, requested_by=user.id, **data.model_dump())
     db.add(change)
     db.commit()

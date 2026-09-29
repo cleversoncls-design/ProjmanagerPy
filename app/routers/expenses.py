@@ -28,7 +28,9 @@ def create_expense(
     db: Session = Depends(get_db),
 ) -> ProjectExpense:
     project = _get_project_or_404(db, project_id, user.language)
-    require_project_access(project, user, write=True)
+    # Despesa de projeto é parte de "Administrar projetos" — Consultor
+    # perdeu essa tela (ver allow_consultant_write em require_project_access).
+    require_project_access(project, user, write=True, allow_consultant_write=False)
     expense = ProjectExpense(project_id=project_id, **data.model_dump())
     db.add(expense)
     db.commit()

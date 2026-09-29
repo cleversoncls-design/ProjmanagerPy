@@ -40,6 +40,14 @@ from ..services import (
 
 router = APIRouter(tags=["tasks"])
 
+# "Administrar tarefas" ficou só com Admin/Gerente de Projetos (revisão de
+# acessos do usuário) — todo `require_project_access(..., write=True)` deste
+# arquivo passa `allow_consultant_write=False`, barrando o Consultor mesmo
+# via API direta (a UI já não mostra mais a tela de Projetos pra ele, ver
+# PROJECTS_VISIBLE_ROLES no frontend). `review_task_client_approval` abaixo
+# não entra nessa regra — usa write=False (é o fluxo de aprovação do
+# cliente, não edição da tarefa).
+
 
 def _get_task_or_404(db: Session, task_id: str, lang: str) -> Task:
     task = db.get(Task, task_id)
@@ -58,7 +66,7 @@ def create_task(
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
-    require_project_access(project, user, write=True)
+    require_project_access(project, user, write=True, allow_consultant_write=False)
     if data.parent_task_id:
         parent = db.get(Task, data.parent_task_id)
         if not parent or parent.project_id != project_id:
@@ -123,7 +131,7 @@ def update_task(
     db: Session = Depends(get_db),
 ) -> Task:
     task = _get_task_or_404(db, task_id, user.language)
-    require_project_access(task.project, user, write=True)
+    require_project_access(task.project, user, write=True, allow_consultant_write=False)
     changes = data.model_dump(exclude_unset=True)
     # Duração/Trabalho passam pelo motor effort-driven (mesma regra de
     # create_task): informar um recalcula o outro; informar os dois, quem
@@ -192,7 +200,7 @@ def delete_task(
     banco — TaskDependency/TaskAssignment não são histórico de trabalho
     feito, só vínculos estruturais)."""
     task = _get_task_or_404(db, task_id, user.language)
-    require_project_access(task.project, user, write=True)
+    require_project_access(task.project, user, write=True, allow_consultant_write=False)
     if db.scalar(select(Task.id).where(Task.parent_task_id == task_id)):
         raise HTTPException(status_code=409, detail=translate("Não é possível apagar uma tarefa que tem tarefas-filhas. Mova ou apague as filhas primeiro.", user.language))
     if db.scalar(select(Timesheet.id).where(Timesheet.task_id == task_id)):
@@ -221,7 +229,7 @@ def submit_task_for_approval(
     cliente validar. Pode ser chamado de novo depois de uma rejeição, para
     reenviar."""
     task = _get_task_or_404(db, task_id, user.language)
-    require_project_access(task.project, user, write=True)
+    require_project_access(task.project, user, write=True, allow_consultant_write=False)
     if task.client_approval_status == TaskApprovalStatus.PENDING:
         raise HTTPException(status_code=409, detail=translate("Tarefa já está aguardando validação do cliente", user.language))
     task.client_approval_status = TaskApprovalStatus.PENDING
@@ -283,7 +291,7 @@ def create_dependency(
         raise HTTPException(status_code=422, detail=translate("Predecessora e sucessora precisam pertencer ao mesmo projeto", user.language))
     if predecessor.id == successor.id:
         raise HTTPException(status_code=422, detail=translate("Uma tarefa não pode depender de si mesma", user.language))
-    require_project_access(predecessor.project, user, write=True)
+    require_project_access(predecessor.project, user, write=True, allow_consultant_write=False)
     if db.scalar(
         select(TaskDependency).where(
             TaskDependency.predecessor_task_id == predecessor.id,
@@ -321,7 +329,7 @@ def delete_dependency(
     if not dependency:
         raise HTTPException(status_code=404, detail=translate("Dependência não encontrada", user.language))
     successor = _get_task_or_404(db, dependency.successor_task_id, user.language)
-    require_project_access(successor.project, user, write=True)
+    require_project_access(successor.project, user, write=True, allow_consultant_write=False)
     db.delete(dependency)
     record_audit(
         db,
@@ -360,7 +368,7 @@ def reschedule_task(
     essa função existia em `app/services.py` mas não era acionável pela API.
     """
     task = _get_task_or_404(db, task_id, user.language)
-    require_project_access(task.project, user, write=True)
+    require_project_access(task.project, user, write=True, allow_consultant_write=False)
     try:
         cal = calendar_from_db(db, data.calendar_id) if data.calendar_id else calendar_for_project(db, task.project)
         updated = reschedule_cascade(db, task_id, cal)
@@ -380,7 +388,7 @@ def assign_resource(
     db: Session = Depends(get_db),
 ) -> TaskAssignment:
     task = _get_task_or_404(db, task_id, user.language)
-    require_project_access(task.project, user, write=True)
+    require_project_access(task.project, user, write=True, allow_consultant_write=False)
     resource = db.get(Resource, data.resource_id)
     if not resource:
         raise HTTPException(status_code=404, detail=translate("Recurso não encontrado", user.language))
@@ -420,7 +428,7 @@ def remove_assignment(
     db: Session = Depends(get_db),
 ) -> None:
     task = _get_task_or_404(db, task_id, user.language)
-    require_project_access(task.project, user, write=True)
+    require_project_access(task.project, user, write=True, allow_consultant_write=False)
     assignment = db.get(TaskAssignment, assignment_id)
     if not assignment or assignment.task_id != task_id:
         raise HTTPException(status_code=404, detail=translate("Alocação não encontrada", user.language))
@@ -452,7 +460,7 @@ def recalculate_project_wbs(
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
-    require_project_access(project, user, write=True)
+    require_project_access(project, user, write=True, allow_consultant_write=False)
     updated = recalculate_wbs(db, project_id)
     record_audit(db, entity_type="project", entity_id=project_id, action=AuditAction.UPDATE, user_id=user.id, details={"action": "recalculate_wbs"})
     db.commit()
@@ -479,7 +487,7 @@ def copy_tasks_from_project(
     target = db.get(Project, project_id)
     if not target:
         raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
-    require_project_access(target, user, write=True)
+    require_project_access(target, user, write=True, allow_consultant_write=False)
     source = db.get(Project, source_project_id)
     if not source:
         raise HTTPException(status_code=404, detail=translate("Projeto de origem não encontrado", user.language))
@@ -521,7 +529,7 @@ def move_task_endpoint(
     services.move_task. Não recalcula WBS nem datas automaticamente:
     chame recalculate-wbs / reschedule depois, se necessário."""
     task = _get_task_or_404(db, task_id, user.language)
-    require_project_access(task.project, user, write=True)
+    require_project_access(task.project, user, write=True, allow_consultant_write=False)
     try:
         moved = move_task(db, task_id, new_parent_id=data.new_parent_id, before_task_id=data.before_task_id)
     except ValueError as exc:
@@ -554,7 +562,7 @@ def reschedule_project(
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
-    require_project_access(project, user, write=True)
+    require_project_access(project, user, write=True, allow_consultant_write=False)
     cal = calendar_from_db(db, data.calendar_id) if data.calendar_id else calendar_for_project(db, project)
     updated = recalculate_schedule(db, project_id, cal)
     record_audit(db, entity_type="project", entity_id=project_id, action=AuditAction.UPDATE, user_id=user.id, details={"action": "reschedule_all"})
