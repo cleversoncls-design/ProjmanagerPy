@@ -36,7 +36,7 @@ const EMPTY_FORM = {
   end_date: '',
 }
 
-const EMPTY_FILTERS = { status: '', client_id: '', includeModelo: false }
+const EMPTY_FILTERS = { status: '', client_id: '', manager_id: '', includeModelo: false }
 
 export default function ProjectsPage() {
   const { user } = useAuth()
@@ -48,6 +48,17 @@ export default function ProjectsPage() {
   // com um só. Mesmo grupo de papéis que o backend aceita em client_id
   // (GET /reports/portfolio).
   const canFilterByClient = INTERNAL_ROLES.includes(user.role)
+  // Filtro por gerente (pedido do usuário) reaproveita a mesma lista de
+  // ADMIN/INTERNAL_PM já carregada pra popular "Gerente responsável" no
+  // form de Novo projeto — GET /users só é liberado pra esses dois papéis
+  // (ver require_roles em routers/users.py), então só faz sentido mostrar
+  // o filtro pra quem também tem canCreate (o mesmo conjunto de papéis).
+  const canFilterByManager = canCreate
+  // Classes literais (não geradas via template) pra o scanner do Tailwind
+  // JIT conseguir achar cada uma no código-fonte — ver mesmo padrão já
+  // usado antes pra Cliente/Projetos Modelo.
+  const filterColumnsClass =
+    canFilterByClient && canFilterByManager ? 'md:grid-cols-4' : canFilterByClient || canFilterByManager ? 'md:grid-cols-3' : 'md:grid-cols-2'
 
   const [rows, setRows] = useState([])
   const [clients, setClients] = useState([])
@@ -77,6 +88,7 @@ export default function ProjectsPage() {
       .getPortfolio({
         status: filters.status || undefined,
         client_id: filters.client_id || undefined,
+        manager_id: filters.manager_id || undefined,
         include_modelo: filters.includeModelo || undefined,
       })
       .then(setRows)
@@ -84,7 +96,7 @@ export default function ProjectsPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(loadRows, [filters.status, filters.client_id, filters.includeModelo])
+  useEffect(loadRows, [filters.status, filters.client_id, filters.manager_id, filters.includeModelo])
 
   useEffect(() => {
     if (canFilterByClient) {
@@ -184,7 +196,7 @@ export default function ProjectsPage() {
       />
 
       <Card className="mb-4">
-        <div className={`grid grid-cols-2 gap-3 ${canFilterByClient ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
+        <div className={`grid grid-cols-2 gap-3 ${filterColumnsClass}`}>
           <FormField label={t('Status')}>
             <Select value={filters.status} onChange={updateFilter('status')}>
               <option value="">{t('Todos')}</option>
@@ -207,6 +219,18 @@ export default function ProjectsPage() {
                 {clients.map((client) => (
                   <option key={client.id} value={client.id}>
                     {client.legal_name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          )}
+          {canFilterByManager && (
+            <FormField label={t('Gerente')}>
+              <Select value={filters.manager_id} onChange={updateFilter('manager_id')}>
+                <option value="">{t('Todos')}</option>
+                {managers.map((manager) => (
+                  <option key={manager.id} value={manager.id}>
+                    {manager.name}
                   </option>
                 ))}
               </Select>

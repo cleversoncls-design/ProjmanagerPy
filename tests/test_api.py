@@ -467,6 +467,22 @@ def test_portfolio_row_includes_manager_name(client, setup):
     assert row["manager_name"] == setup["pm"].name
 
 
+def test_portfolio_filter_by_manager(client, db_session, setup):
+    """Pedido do usuário: filtro por gerente do projeto na tela de
+    Projetos — project_a/project_b (fixture `setup`) são geridos pelo
+    mesmo `pm`; cria um projeto extra gerido por outro INTERNAL_PM e
+    confirma que filtrar por manager_id devolve só os do gerente pedido."""
+    admin_headers = setup["admin_headers"]
+    other_pm = make_user(db_session, role=UserRole.INTERNAL_PM, email="outro.pm@example.com")
+    other_project = make_project(db_session, client_id=setup["client_a"].id, manager_id=other_pm.id, code="PRJ-C")
+
+    filtered = client.get("/reports/portfolio", params={"manager_id": setup["pm"].id}, headers=admin_headers)
+    assert filtered.status_code == 200
+    ids = {row["id"] for row in filtered.json()}
+    assert ids == {setup["project_a"].id, setup["project_b"].id}
+    assert other_project.id not in ids
+
+
 def test_approving_timesheet_updates_task_actual_hours(client, setup):
     """Regressão: Task.actual_hours nunca era recalculado a partir dos
     timesheets aprovados (ficava sempre em 0)."""
