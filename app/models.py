@@ -56,6 +56,12 @@ class ProjectStatus(StrEnum):
     ON_HOLD = "ON_HOLD"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
+    # Projeto-modelo: só existe pra servir de base pro botão "Copiar
+    # estrutura de outro projeto" (ver routers/projects.py copy_tasks_from)
+    # — nunca entra em indicador/dashboard (ver _scoped_projects e roi() em
+    # routers/reports.py) e, por não ser ACTIVE, apontamento de horas já
+    # fica bloqueado nele pela regra existente em routers/timesheets.py.
+    MODELO = "MODELO"
 
 
 class DependencyType(StrEnum):

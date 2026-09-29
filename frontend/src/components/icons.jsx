@@ -259,3 +259,12 @@ export const GlobeIcon = (props) => (
     <path d="M12 3c2.8 2.5 4.3 5.7 4.3 9s-1.5 6.5-4.3 9c-2.8-2.5-4.3-5.7-4.3-9s1.5-6.5 4.3-9Z" />
   </Icon>
 )
+
+// "Copiar estrutura de outro projeto" (aba Tarefas, projeto vazio) — duas
+// folhas sobrepostas, ícone padrão de "duplicar/copiar".
+export const CopyIcon = (props) => (
+  <Icon {...props}>
+    <rect x="8.5" y="8.5" width="11" height="11" rx="1.5" />
+    <path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8a1.5 1.5 0 0 0 1.5 1.5h2.5" />
+  </Icon>
+)

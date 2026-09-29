@@ -24,6 +24,10 @@ export function recalculateWbs(projectId) {
   return api.post(`/projects/${projectId}/tasks/recalculate-wbs`, {})
 }
 
+export function copyTasksFrom(projectId, sourceProjectId) {
+  return api.post(`/projects/${projectId}/copy-tasks-from/${sourceProjectId}`, {})
+}
+
 export function rescheduleTask(taskId, payload = {}) {
   return api.post(`/tasks/${taskId}/reschedule`, payload)
 }

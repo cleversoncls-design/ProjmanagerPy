@@ -25,7 +25,7 @@ import CategoryBars from '../components/CategoryBars'
 import { FormField, TextInput, Select, TextArea } from '../components/FormField'
 import ColorListPicker from '../components/ColorListPicker'
 import { DEFAULT_PROJECT_COLOR } from '../utils/colorPalette'
-import { ColumnsIcon, DownloadIcon, FlagIcon, HashIcon, MoveIcon, PencilIcon, PlusIcon, RefreshIcon, TrashIcon } from '../components/icons'
+import { ColumnsIcon, CopyIcon, DownloadIcon, FlagIcon, HashIcon, MoveIcon, PencilIcon, PlusIcon, RefreshIcon, TrashIcon } from '../components/icons'
 import { formatCurrency, formatDate, formatIndex, formatNumber, formatPercent, parseApiDate } from '../utils/format'
 import {
   APPROVAL_STATUS_TONE,
@@ -587,6 +587,74 @@ function BaselineModal({ projectId, onClose, onSaved }) {
   )
 }
 
+/** "Copiar estrutura de outro projeto" (botão só aparece com o projeto
+ * ainda vazio, ver TasksTab) — origem pode ser qualquer projeto (não só
+ * status Modelo), a lista não filtra por status de propósito. Ver
+ * services.copy_project_tasks no backend pro que exatamente é copiado
+ * (sem recurso alocado) e como as datas planejadas são recalculadas. */
+function CopyTasksModal({ projectId, onClose, onCopied }) {
+  const { t } = useLanguage()
+  const [projects, setProjects] = useState([])
+  const [sourceProjectId, setSourceProjectId] = useState('')
+  const [loadingProjects, setLoadingProjects] = useState(true)
+  const [copying, setCopying] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    projectsApi
+      .listProjects()
+      .then((rows) => setProjects(rows.filter((p) => p.id !== projectId)))
+      .catch((err) => setError(err.message))
+      .finally(() => setLoadingProjects(false))
+  }, [projectId])
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    if (!sourceProjectId) return
+    setCopying(true)
+    setError('')
+    try {
+      await tasksApi.copyTasksFrom(projectId, sourceProjectId)
+      onCopied()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setCopying(false)
+    }
+  }
+
+  return (
+    <Modal title={t('Copiar estrutura de outro projeto')} onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <p className="text-sm text-[var(--text-secondary)]">
+          {t(
+            'Copia WBS/EAP, descrição, duração, horas, tipo, predecessoras (com tipo de atraso) e marcos de todas as tarefas do projeto escolhido — sem nenhum recurso alocado. As datas planejadas são recalculadas a partir do início deste projeto.',
+          )}
+        </p>
+        <FormField label={t('Projeto de origem')} required>
+          <Select required value={sourceProjectId} onChange={(event) => setSourceProjectId(event.target.value)} disabled={loadingProjects}>
+            <option value="">{t('Selecione…')}</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.code} — {project.name}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="submit" disabled={copying || !sourceProjectId}>
+            {copying ? t('Copiando…') : t('Copiar estrutura')}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 /** Achata a árvore de tarefas (parent_task_id) em ordem de exibição —
  * mesma regra de desempate de services.recalculate_wbs (sort_order, com
  * wbs_code como critério estável), pra grade e os seletores de
@@ -810,6 +878,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
   const [deletingTask, setDeletingTask] = useState(null)
   const [showBaselineModal, setShowBaselineModal] = useState(false)
   const [showColumnsModal, setShowColumnsModal] = useState(false)
+  const [showCopyTasksModal, setShowCopyTasksModal] = useState(false)
   const [columnPrefs, setColumnPrefs] = useState(loadTaskColumnPrefs)
 
   function loadSchedule() {
@@ -900,6 +969,12 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
   function handleBaselineSaved() {
     setShowBaselineModal(false)
     loadSchedule()
+  }
+
+  function handleTasksCopied() {
+    setShowCopyTasksModal(false)
+    loadSchedule()
+    onTaskCreated?.()
   }
 
   function handleTaskDeleted() {
@@ -1100,6 +1175,14 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
           {/* Exportar não depende de canWrite: é leitura, então também fica
               disponível para perfis externos (CLIENT_PM/CLIENT_USER). */}
           <IconButton icon={DownloadIcon} label={t('Exportar (Excel)')} disabled={Boolean(busyMessage)} onClick={handleExport} />
+          {canWrite && !loading && orderedTasks.length === 0 && (
+            <IconButton
+              icon={CopyIcon}
+              label={t('Copiar estrutura de outro projeto')}
+              disabled={Boolean(busyMessage)}
+              onClick={() => setShowCopyTasksModal(true)}
+            />
+          )}
           {canWrite && (
             <>
               <IconButton icon={FlagIcon} label={t('Salvar linha de base')} disabled={Boolean(busyMessage)} onClick={() => setShowBaselineModal(true)} />
@@ -1140,6 +1223,10 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
       )}
 
       {showBaselineModal && <BaselineModal projectId={projectId} onClose={() => setShowBaselineModal(false)} onSaved={handleBaselineSaved} />}
+
+      {showCopyTasksModal && (
+        <CopyTasksModal projectId={projectId} onClose={() => setShowCopyTasksModal(false)} onCopied={handleTasksCopied} />
+      )}
 
       {showColumnsModal && (
         <ColumnsModal

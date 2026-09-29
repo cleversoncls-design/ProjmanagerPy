@@ -17,6 +17,10 @@ export const PROJECT_STATUS_LABELS = {
   ON_HOLD: 'Em espera',
   COMPLETED: 'Concluído',
   CANCELLED: 'Cancelado',
+  // Projeto-base pro botão "Copiar estrutura de outro projeto" — nunca
+  // entra em indicador/dashboard (ver _scoped_projects/roi() em
+  // routers/reports.py).
+  MODELO: 'Modelo',
 }
 
 // Cor de status "semânfora" (good/warning/serious/critical) — reservada,
@@ -27,6 +31,7 @@ export const PROJECT_STATUS_TONE = {
   ON_HOLD: 'warning',
   COMPLETED: 'good',
   CANCELLED: 'critical',
+  MODELO: 'muted',
 }
 
 export const TASK_STATUS_LABELS = {
