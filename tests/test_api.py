@@ -79,6 +79,22 @@ def test_only_admin_can_create_user(client, setup):
     assert response.status_code == 201
 
 
+def test_only_admin_can_create_client(client, setup):
+    """Revisão de acessos do usuário: "Administrar clientes" ficou só com o
+    Administrador — Gerente de Projetos perdeu esse item (continua
+    enxergando a lista via GET /clients, que ele ainda precisa pra montar o
+    dropdown de Cliente ao criar/editar projeto)."""
+    pm_headers = auth_headers(client, setup["pm"].email)
+    denied = client.post("/clients", json={"code": "CLI-NEW", "legal_name": "Novo Cliente"}, headers=pm_headers)
+    assert denied.status_code == 403
+
+    still_lists = client.get("/clients", headers=pm_headers)
+    assert still_lists.status_code == 200
+
+    allowed = client.post("/clients", json={"code": "CLI-NEW", "legal_name": "Novo Cliente"}, headers=setup["admin_headers"])
+    assert allowed.status_code == 201
+
+
 def test_list_users_filters_by_role_and_is_restricted_to_management(client, setup):
     consultant_headers = auth_headers(client, setup["consultant"].email)
     denied = client.get("/users", headers=consultant_headers)

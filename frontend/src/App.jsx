@@ -4,8 +4,8 @@ import { LanguageProvider } from './context/LanguageContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 import Layout from './components/Layout'
+import HomeRoute from './components/HomeRoute'
 import LoginPage from './pages/LoginPage'
-import DashboardPage from './pages/DashboardPage'
 import ProjectsPage from './pages/ProjectsPage'
 import ProjectDetailPage from './pages/ProjectDetailPage'
 import ClientsPage from './pages/ClientsPage'
@@ -14,7 +14,7 @@ import CalendarsPage from './pages/CalendarsPage'
 import SchedulesPage from './pages/SchedulesPage'
 import TimesheetsPage from './pages/TimesheetsPage'
 import ServiceOrdersPage from './pages/ServiceOrdersPage'
-import { INTERNAL_ROLES, MANAGEMENT_ROLES } from './utils/labels'
+import { ADMIN_ONLY_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECTS_VISIBLE_ROLES } from './utils/labels'
 
 export default function App() {
   return (
@@ -27,9 +27,12 @@ export default function App() {
 
               <Route element={<ProtectedRoute />}>
                 <Route element={<Layout />}>
-                  <Route path="/" element={<DashboardPage />} />
-                  <Route path="/projects" element={<ProjectsPage />} />
-                  <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+                  <Route path="/" element={<HomeRoute />} />
+
+                  <Route element={<ProtectedRoute roles={PROJECTS_VISIBLE_ROLES} />}>
+                    <Route path="/projects" element={<ProjectsPage />} />
+                    <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+                  </Route>
 
                   <Route element={<ProtectedRoute roles={INTERNAL_ROLES} />}>
                     <Route path="/schedules" element={<SchedulesPage />} />
@@ -37,9 +40,12 @@ export default function App() {
                     <Route path="/service-orders" element={<ServiceOrdersPage />} />
                   </Route>
 
-                  <Route element={<ProtectedRoute roles={MANAGEMENT_ROLES} />}>
+                  <Route element={<ProtectedRoute roles={ADMIN_ONLY_ROLES} />}>
                     <Route path="/clients" element={<ClientsPage />} />
                     <Route path="/users" element={<UsersPage />} />
+                  </Route>
+
+                  <Route element={<ProtectedRoute roles={MANAGEMENT_ROLES} />}>
                     <Route path="/calendars" element={<CalendarsPage />} />
                   </Route>
                 </Route>

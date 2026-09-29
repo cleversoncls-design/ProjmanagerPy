@@ -16,7 +16,12 @@ router = APIRouter(prefix="/clients", tags=["clients"])
 @router.post("", response_model=ClientRead, status_code=status.HTTP_201_CREATED)
 def create_client(
     data: ClientCreate,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    # "Administrar clientes" ficou só com o Administrador (revisão de
+    # acessos do usuário) — Gerente de Projetos perdeu esse item do menu,
+    # então também não pode mais criar cliente por aqui, mesmo direto pela
+    # API. Continua enxergando a lista (GET abaixo, INTERNAL_ROLES) — só
+    # precisa dela pra escolher o cliente ao criar/editar projeto.
+    user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ) -> Client:
     if db.scalar(select(Client).where(Client.code == data.code)):
