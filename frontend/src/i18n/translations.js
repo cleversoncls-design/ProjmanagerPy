@@ -651,6 +651,8 @@ export const es = {
   'Confirmar exclusão?': '¿Confirmar eliminación?',
   'Não é possível trocar o consultor de um agendamento já criado — exclua e crie um novo.':
     'No es posible cambiar el consultor de una agenda ya creada — elimínela y cree una nueva.',
+  'Mover agendamento?': '¿Mover agenda?',
+  'Mover de {from} para {to}?': '¿Mover de {from} a {to}?',
 
   // --- Apontamento de horas (Fase 2 do agendamento) ---
   'Apontamento de horas': 'Registro de horas',

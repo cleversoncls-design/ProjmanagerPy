@@ -77,6 +77,16 @@ export default function SchedulesPage() {
 
   const [formTarget, setFormTarget] = useState(null) // { schedule } pra editar, ou { date } pra criar novo
 
+  // Arrastar-e-soltar um bloco da agenda pra outro dia (pedido do usuário)
+  // — draggedSchedule guarda o agendamento sendo arrastado (só setado por
+  // quem tem canManage, já que Consultor só visualiza); dragOverDate só
+  // controla o realce visual da célula sob o cursor; moveTarget abre o
+  // modal de confirmação antes de efetivar a troca de data — nada é salvo
+  // só por soltar o bloco.
+  const [draggedSchedule, setDraggedSchedule] = useState(null)
+  const [dragOverDate, setDragOverDate] = useState('')
+  const [moveTarget, setMoveTarget] = useState(null) // { schedule, newDate }
+
   // Referência (recursos/usuários/clientes/projetos) carregada uma vez —
   // usada pros filtros e pra montar os rótulos/cores dos blocos da agenda.
   useEffect(() => {
@@ -266,10 +276,34 @@ export default function SchedulesPage() {
               const inMonth = cellDate.getMonth() === viewDate.getMonth()
               const daySchedules = schedulesByDate[iso] || []
               const isToday = iso === toIsoDate(new Date())
+              const isDragOver = canManage && dragOverDate === iso && draggedSchedule && draggedSchedule.date !== iso
               return (
                 <div
                   key={iso}
-                  className={`min-h-[92px] rounded-lg border p-1.5 ${inMonth ? 'border-[var(--border)]' : 'border-transparent opacity-40'}`}
+                  onDragOver={
+                    canManage
+                      ? (event) => {
+                          event.preventDefault()
+                          setDragOverDate(iso)
+                        }
+                      : undefined
+                  }
+                  onDragLeave={canManage ? () => setDragOverDate((prev) => (prev === iso ? '' : prev)) : undefined}
+                  onDrop={
+                    canManage
+                      ? (event) => {
+                          event.preventDefault()
+                          setDragOverDate('')
+                          const schedule = draggedSchedule
+                          setDraggedSchedule(null)
+                          if (!schedule || schedule.date === iso) return
+                          setMoveTarget({ schedule, newDate: iso })
+                        }
+                      : undefined
+                  }
+                  className={`min-h-[92px] rounded-lg border p-1.5 transition-colors ${
+                    inMonth ? 'border-[var(--border)]' : 'border-transparent opacity-40'
+                  } ${isDragOver ? 'border-[var(--series-1)] bg-[var(--page)] ring-1 ring-[var(--series-1)]' : ''}`}
                 >
                   <div className="mb-1 flex items-center justify-between">
                     <span
@@ -295,9 +329,19 @@ export default function SchedulesPage() {
                         <button
                           key={schedule.id}
                           type="button"
+                          draggable={canManage}
                           title={scheduleLabel(schedule)}
                           onClick={() => setFormTarget({ schedule })}
-                          className="block w-full truncate rounded px-1 py-0.5 text-left text-[10.5px] font-medium"
+                          onDragStart={
+                            canManage
+                              ? (event) => {
+                                  setDraggedSchedule(schedule)
+                                  event.dataTransfer.effectAllowed = 'move'
+                                }
+                              : undefined
+                          }
+                          onDragEnd={canManage ? () => { setDraggedSchedule(null); setDragOverDate('') } : undefined}
+                          className={`block w-full truncate rounded px-1 py-0.5 text-left text-[10.5px] font-medium ${canManage ? 'cursor-grab active:cursor-grabbing' : ''}`}
                           style={{ backgroundColor: color, color: contrastTextColor(color) }}
                         >
                           {formatTime(schedule.start_time)} {resourcesById[schedule.resource_id]?.userName || '—'}
@@ -358,7 +402,78 @@ export default function SchedulesPage() {
           }}
         />
       )}
+
+      {moveTarget && (
+        <MoveScheduleConfirmModal
+          schedule={moveTarget.schedule}
+          newDate={moveTarget.newDate}
+          resourceName={resourcesById[moveTarget.schedule.resource_id]?.userName || '—'}
+          projectLabel={
+            projectsById[moveTarget.schedule.project_id]
+              ? `${projectsById[moveTarget.schedule.project_id].code} — ${projectsById[moveTarget.schedule.project_id].name}`
+              : '—'
+          }
+          onClose={() => setMoveTarget(null)}
+          onMoved={() => {
+            setMoveTarget(null)
+            loadSchedules()
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/** Confirmação antes de efetivar o arrastar-e-soltar de um bloco da agenda
+ * pra outro dia — só troca `date` (PATCH parcial), preservando
+ * horário/projeto/descrição; o backend revalida sobreposição de horário do
+ * recurso no dia de destino (_check_overlap em routers/schedules.py) e
+ * devolve 409 se já houver outro agendamento dele no mesmo horário — o erro
+ * aparece aqui em vez de mover silenciosamente pra um horário conflitante. */
+function MoveScheduleConfirmModal({ schedule, newDate, resourceName, projectLabel, onClose, onMoved }) {
+  const { t } = useLanguage()
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function handleConfirm() {
+    setSaving(true)
+    setError('')
+    try {
+      await schedulesApi.updateSchedule(schedule.id, { date: newDate })
+      onMoved()
+    } catch (err) {
+      setError(err.message)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={t('Mover agendamento?')} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="rounded-lg border border-[var(--border)] p-3 text-sm">
+          <p className="font-medium text-[var(--text-primary)]">
+            {resourceName} · {projectLabel}
+          </p>
+          <p className="mt-0.5 text-[var(--text-secondary)]">
+            {formatTime(schedule.start_time)}–{formatTime(schedule.end_time)}
+          </p>
+        </div>
+        <p className="text-sm text-[var(--text-secondary)]">
+          {t('Mover de {from} para {to}?', { from: schedule.date, to: newDate })}
+        </p>
+
+        <ErrorBanner message={error} />
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="button" disabled={saving} onClick={handleConfirm}>
+            {saving ? t('Movendo…') : t('Confirmar')}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
