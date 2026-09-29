@@ -1285,6 +1285,20 @@ const EMPTY_TASK_FORM = {
   notes: '',
 }
 
+/** Sugestão de Código WBS pra "Nova tarefa" — mesma convenção de
+ * services.recalculate_wbs (índice sequencial dentro do escopo do pai,
+ * "1", "1.1", "1.2", "2"...): próximo índice = nº de irmãs já existentes
+ * sob esse pai + 1. Só um PONTO DE PARTIDA editável (o campo continua
+ * obrigatório e digitável) — se a EAP tiver buracos (por exclusão de
+ * tarefa, por exemplo) o usuário ainda pode ajustar à mão, ou usar
+ * "Recalcular WBS/EAP" depois pra renumerar tudo de vez. */
+function suggestWbsCode(allTasks, parentId) {
+  const parent = parentId ? allTasks.find((t) => t.id === parentId) : null
+  const siblings = allTasks.filter((t) => (t.parent_task_id || 'root') === (parentId || 'root'))
+  const nextIndex = siblings.length + 1
+  return parent ? `${parent.wbs_code}.${nextIndex}` : `${nextIndex}`
+}
+
 function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, initialDependencies, initialAssignments, onClose, onSaved }) {
   const { labels, t } = useLanguage()
   const isEdit = Boolean(task)
@@ -1304,12 +1318,17 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           is_milestone: task.is_milestone,
           notes: task.notes || '',
         }
-      : EMPTY_TASK_FORM,
+      : { ...EMPTY_TASK_FORM, wbs_code: suggestWbsCode(allTasks, '') },
   )
   // Qual dos dois campos do par Duração/Trabalho o usuário editou por
   // último — decide o que vai no payload (ver services.apply_effort_driven:
   // informar um recalcula o outro; os dois nunca vão juntos).
   const [effortField, setEffortField] = useState(null)
+  // Usuário já mexeu no Código WBS manualmente? Enquanto não mexer, trocar
+  // a Tarefa pai (só existe em "Nova tarefa") continua atualizando a
+  // sugestão automaticamente; depois que ele digita algo, o valor dele
+  // nunca mais é sobrescrito (mesmo trocando o pai de novo).
+  const [wbsTouched, setWbsTouched] = useState(false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -1323,9 +1342,18 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
   function updateField(field) {
     return (event) => {
       const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value
-      setForm((prev) => ({ ...prev, [field]: value }))
+      setForm((prev) => {
+        const next = { ...prev, [field]: value }
+        // Só em "Nova tarefa" (isEdit trava o Código WBS, ver campo abaixo)
+        // e só enquanto o usuário não tiver digitado nada nele ainda.
+        if (!isEdit && field === 'parent_task_id' && !wbsTouched) {
+          next.wbs_code = suggestWbsCode(allTasks, value)
+        }
+        return next
+      })
       if (field === 'duration_days') setEffortField('duration')
       if (field === 'estimated_hours') setEffortField('hours')
+      if (field === 'wbs_code') setWbsTouched(true)
     }
   }
 
@@ -1339,7 +1367,11 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           name: form.name,
           task_type: form.task_type,
           planned_start_date: form.planned_start_date || null,
-          planned_end_date: form.planned_end_date || null,
+          // Fim planejado nunca vai no payload — o backend sempre recalcula
+          // a partir de Início + Duração (ver routers/tasks.py
+          // update_task), então mandar o valor do formulário só arriscava
+          // "travar" um Fim desatualizado ou zerá-lo por engano quando o
+          // campo ainda estava vazio (era exatamente o bug relatado).
           progress_percentage: form.progress_percentage,
           status: form.status,
           is_milestone: form.is_milestone,
@@ -1358,7 +1390,9 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
         if (form.notes) payload.notes = form.notes
         if (form.parent_task_id) payload.parent_task_id = form.parent_task_id
         if (form.planned_start_date) payload.planned_start_date = form.planned_start_date
-        if (form.planned_end_date) payload.planned_end_date = form.planned_end_date
+        // Fim planejado não vai no payload de criação pelo mesmo motivo do
+        // update acima — sempre calculado no backend a partir de Início +
+        // Duração (ver routers/tasks.py create_task).
         if (effortField === 'duration' && form.duration_days) payload.duration_days = form.duration_days
         if (effortField === 'hours' && form.estimated_hours) payload.estimated_hours = form.estimated_hours
         await tasksApi.createTask(projectId, payload)
@@ -1439,7 +1473,11 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
     <Modal title={isEdit ? `${t('Editar tarefa')} — ${task.wbs_code} ${task.name}` : t('Nova tarefa')} onClose={onClose} wide>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
-          <FormField label={t('Código WBS')} required hint={isEdit ? t('Use "Recalcular WBS/EAP" para renumerar.') : t('Ex.: "1.2"')}>
+          <FormField
+            label={t('Código WBS')}
+            required
+            hint={isEdit ? t('Use "Recalcular WBS/EAP" para renumerar.') : t('Sugerido a partir da Tarefa pai — pode editar.')}
+          >
             <TextInput required disabled={isEdit} value={form.wbs_code} onChange={updateField('wbs_code')} />
           </FormField>
           <FormField label={t('Nome')} required>
@@ -1493,8 +1531,8 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           <FormField label={t('Início planejado')} hint={t('Sem predecessora, esta data fica manual.')}>
             <TextInput type="date" value={form.planned_start_date} onChange={updateField('planned_start_date')} />
           </FormField>
-          <FormField label={t('Fim planejado')}>
-            <TextInput type="date" value={form.planned_end_date} onChange={updateField('planned_end_date')} />
+          <FormField label={t('Fim planejado')} hint={t('Calculado automaticamente (Início + Duração).')}>
+            <TextInput type="date" disabled value={form.planned_end_date} onChange={updateField('planned_end_date')} />
           </FormField>
         </div>
         {isEdit && (

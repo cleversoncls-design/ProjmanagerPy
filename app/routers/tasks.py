@@ -31,6 +31,7 @@ from ..services import (
     calendar_for_project,
     calendar_from_db,
     copy_project_tasks,
+    end_date_from_duration,
     move_task,
     recalculate_schedule,
     recalculate_wbs,
@@ -77,6 +78,19 @@ def create_task(
         estimated_hours=data.estimated_hours if data.duration_days is None else None,
         capacity_hours_per_day=DEFAULT_CAPACITY_HOURS_PER_DAY,
     )
+    # Fim planejado = Início + Duração (dias úteis) sempre que a tarefa já
+    # nasce com Início planejado informado — sem isso, uma tarefa SEM
+    # predecessora (a maioria, ver recalculate_schedule/reschedule_cascade:
+    # nenhuma das duas mexe em quem não tem predecessora) nascia sem Fim
+    # planejado, precisando de edição manual depois. Sobrepõe qualquer
+    # planned_end_date que tenha vindo no payload — Duração é sempre a
+    # fonte da verdade (mesma regra do motor de agendamento). Sem Início
+    # planejado ainda não há o que calcular; fica como veio (normalmente
+    # None, ou um valor explícito pra um caso como marco sem data de
+    # início própria).
+    if task.planned_start_date:
+        cal = calendar_for_project(db, project)
+        task.planned_end_date = end_date_from_duration(cal, task.planned_start_date, task.duration_days)
     db.add(task)
     db.flush()
     record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.CREATE, user_id=user.id)
@@ -140,9 +154,18 @@ def update_task(
         changes["duration_days"] = duration_days if duration_days is not None else task.duration_days
         changes["estimated_hours"] = task.estimated_hours
     if schedule_fields_changed:
+        cal = calendar_for_project(db, task.project)
+        # Fim planejado = Início + Duração (dias úteis) — mesma regra de
+        # create_task, reaplicada aqui sempre que Início/Duração/Trabalho/
+        # Fim mudam nesta edição, pra essa tarefa (a que está sendo editada
+        # diretamente, não suas sucessoras — essas o reschedule_cascade
+        # logo abaixo já cobre) nunca ficar com um Fim planejado
+        # desatualizado ou nulo. Sobrepõe qualquer planned_end_date que
+        # tenha vindo no payload, igual em create_task.
+        if task.planned_start_date:
+            task.planned_end_date = end_date_from_duration(cal, task.planned_start_date, task.duration_days)
         db.flush()
         try:
-            cal = calendar_for_project(db, task.project)
             reschedule_cascade(db, task.id, cal)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
