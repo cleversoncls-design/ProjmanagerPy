@@ -109,6 +109,18 @@ def _end_date_from_duration(cal: BusinessCalendar, start: date, duration_days: D
     return cal.add_working_days(aligned_start, _whole_days(duration_days) - 1)
 
 
+def end_date_from_duration(cal: BusinessCalendar, start: date, duration_days: Decimal) -> date:
+    """Versão pública de `_end_date_from_duration` — para uso fora deste
+    módulo. `reschedule_cascade`/`recalculate_schedule` já preenchem o Fim
+    planejado das SUCESSORAS (quem tem predecessora); esta função cobre a
+    tarefa que está sendo diretamente criada/editada (ver
+    routers/tasks.py create_task/update_task), que não passa por nenhuma
+    das duas — sem isso, uma tarefa sem predecessora nascia (ou ficava,
+    numa edição) sem Fim planejado, precisando de "Recalcular tudo" pra
+    ganhar um."""
+    return _end_date_from_duration(cal, start, duration_days)
+
+
 def _successor_start(cal: BusinessCalendar, predecessor: Task, successor: Task, dependency: TaskDependency) -> date:
     pred_start = predecessor.planned_start_date or predecessor.planned_end_date
     pred_end = predecessor.planned_end_date or predecessor.planned_start_date
