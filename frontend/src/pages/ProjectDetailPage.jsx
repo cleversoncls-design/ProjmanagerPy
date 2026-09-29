@@ -40,6 +40,7 @@ const TABS = [
   { key: 'overview', label: 'Visão geral' },
   { key: 'tasks', label: 'Tarefas' },
   { key: 'gantt', label: 'Gantt' },
+  { key: 'resources', label: 'Recursos' },
 ]
 
 export default function ProjectDetailPage() {
@@ -119,6 +120,7 @@ export default function ProjectDetailPage() {
       {tab === 'overview' && <OverviewTab project={project} report={report} evm={evm} />}
       {tab === 'tasks' && <TasksTab projectId={projectId} canWrite={canWrite} onTaskCreated={loadProject} />}
       {tab === 'gantt' && <GanttTab projectId={projectId} project={project} />}
+      {tab === 'resources' && <ProjectResourcesTab projectId={projectId} canWrite={canWrite} />}
 
       {showEditModal && (
         <ProjectEditModal
@@ -217,6 +219,135 @@ function OverviewTab({ project, report, evm }) {
         </Card>
       </div>
     </div>
+  )
+}
+
+/** Aba "Recursos" — vincula recursos diretamente ao projeto (pedido do
+ * usuário: "não ter que vincular o usuário tarefa por tarefa" em
+ * projetos pequenos, conduzidos por 1-2 consultores). Ao apontar horas
+ * numa tarefa sem alocação própria, o backend cai pro vínculo daqui (ver
+ * `_resolve_task_and_project` em app/routers/timesheets.py) — uma tarefa
+ * que já tem alocação específica continua restrita só a quem está nela,
+ * mesmo que outro recurso esteja vinculado ao projeto aqui. */
+function ProjectResourcesTab({ projectId, canWrite }) {
+  const { t } = useLanguage()
+  const [links, setLinks] = useState([])
+  const [resources, setResources] = useState([])
+  const [users, setUsers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [resourceId, setResourceId] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [removingId, setRemovingId] = useState(null)
+
+  function load() {
+    setLoading(true)
+    setError('')
+    // GET /resources e GET /users são restritos a perfis internos (mesma
+    // observação de TasksTab) — perfil externo (CLIENT_PM/CLIENT_USER)
+    // recebe 403 aqui; a aba degrada mostrando só a lista de vínculos.
+    Promise.all([projectsApi.listProjectResources(projectId), resourcesApi.listResources().catch(() => []), usersApi.listUsers().catch(() => [])])
+      .then(([linksResult, resourcesResult, usersResult]) => {
+        setLinks(linksResult)
+        setResources(resourcesResult)
+        setUsers(usersResult)
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(load, [projectId])
+
+  const usersById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
+  const resourcesById = useMemo(() => Object.fromEntries(resources.map((r) => [r.id, r])), [resources])
+  function resourceLabel(id) {
+    const resource = resourcesById[id]
+    if (!resource) return id
+    return usersById[resource.user_id]?.name || resource.role_title
+  }
+  const linkedIds = useMemo(() => new Set(links.map((link) => link.resource_id)), [links])
+  const availableResources = useMemo(() => resources.filter((r) => !linkedIds.has(r.id)), [resources, linkedIds])
+
+  async function handleAdd(event) {
+    event.preventDefault()
+    if (!resourceId) return
+    setAdding(true)
+    setError('')
+    try {
+      await projectsApi.addProjectResource(projectId, { resource_id: resourceId })
+      setResourceId('')
+      load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  async function handleRemove(resourceIdToRemove) {
+    setRemovingId(resourceIdToRemove)
+    setError('')
+    try {
+      await projectsApi.removeProjectResource(projectId, resourceIdToRemove)
+      load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRemovingId(null)
+    }
+  }
+
+  if (loading) return <Spinner />
+
+  return (
+    <Card
+      title={t('Recursos do projeto')}
+      action={
+        <span className="text-xs text-[var(--text-muted)]">
+          {t('Quem está aqui pode apontar horas em qualquer tarefa deste projeto sem alocação própria.')}
+        </span>
+      }
+    >
+      <ErrorBanner message={error} />
+      {links.length === 0 ? (
+        <p className="text-sm text-[var(--text-muted)]">{t('Nenhum recurso vinculado ao projeto ainda — apontamento continua exigindo alocação por tarefa.')}</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {links.map((link) => (
+            <li key={link.id} className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm">
+              <span>{resourceLabel(link.resource_id)}</span>
+              {canWrite && (
+                <button
+                  type="button"
+                  disabled={removingId === link.resource_id}
+                  onClick={() => handleRemove(link.resource_id)}
+                  className="text-xs text-[var(--status-critical)] hover:underline disabled:opacity-50"
+                >
+                  {t('Remover')}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {canWrite && (
+        <form onSubmit={handleAdd} className="mt-3 flex flex-wrap items-end gap-2">
+          <FormField label={t('Recurso')}>
+            <Select value={resourceId} onChange={(event) => setResourceId(event.target.value)}>
+              <option value="">{t('Selecione…')}</option>
+              {availableResources.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {resourceLabel(r.id)}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <Button type="submit" variant="secondary" disabled={adding || !resourceId}>
+            {t('Adicionar')}
+          </Button>
+        </form>
+      )}
+    </Card>
   )
 }
 

@@ -39,8 +39,8 @@ _ES: dict[str, str] = {
     "Feriado não encontrado": "Feriado no encontrado",
     "Fora do escopo do cliente": "Fuera del alcance del cliente",
     "Hora final precisa ser depois da hora inicial": "La hora final debe ser posterior a la hora inicial",
-    "Informe ao menos um filtro (project_id, task_id, resource_id ou status_filter)": (
-        "Informe al menos un filtro (project_id, task_id, resource_id o status_filter)"
+    "Informe ao menos um filtro (project_id, task_id, resource_id, status_filter, start ou end)": (
+        "Informe al menos un filtro (project_id, task_id, resource_id, status_filter, start o end)"
     ),
     "Informe project_id ou task_id": "Informe project_id o task_id",
     "Intervalo não pode ser maior ou igual ao tempo entre a hora inicial e a final": (
@@ -72,7 +72,7 @@ _ES: dict[str, str] = {
     "Recurso já alocado nesta tarefa": "Recurso ya asignado a esta tarea",
     "Recurso já tem agendamento nesse horário": "El recurso ya tiene una agenda en ese horario",
     "Recurso não encontrado": "Recurso no encontrado",
-    "Recurso não está alocado nesta tarefa": "El recurso no está asignado a esta tarea",
+    "Recurso não está alocado nesta tarefa nem no projeto": "El recurso no está asignado a esta tarea ni al proyecto",
     "O recurso deste usuário está alocado em uma ou mais tarefas — remova as alocações antes de excluir": (
         "El recurso de este usuario está asignado a una o más tareas — quite las asignaciones antes de eliminarlo"
     ),

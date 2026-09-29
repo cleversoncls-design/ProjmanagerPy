@@ -987,6 +987,12 @@ def portfolio_rows(session: Session, projects: list[Project], *, include_financi
     usada tanto por GET /reports/portfolio quanto pela seção `portfolio` de
     GET /dashboard. `include_financials=False` (perfis externos) omite a
     margem, no mesmo padrão de ocultação usado em ProjectDetail."""
+    # Nome do gerente responsável (pedido do usuário: aparecer na lista de
+    # Projetos) — um lookup em lote (nunca N+1 por linha).
+    manager_ids = {project.manager_id for project in projects}
+    managers_by_id = (
+        {u.id: u.name for u in session.scalars(select(User).where(User.id.in_(manager_ids))).all()} if manager_ids else {}
+    )
     rows: list[dict] = []
     for project in projects:
         tasks = list(session.scalars(select(Task).where(Task.project_id == project.id)).all())
@@ -1001,6 +1007,7 @@ def portfolio_rows(session: Session, projects: list[Project], *, include_financi
                 "code": project.code,
                 "name": project.name,
                 "status": project.status,
+                "manager_name": managers_by_id.get(project.manager_id, "—"),
                 "percent_complete": progress["percent_complete"],
                 "tasks_total": progress["tasks_total"],
                 "tasks_remaining": progress["tasks_remaining"],

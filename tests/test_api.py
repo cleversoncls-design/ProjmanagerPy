@@ -285,6 +285,151 @@ def test_timesheet_requires_assignment_active_project_and_allows_same_day_duplic
     assert duplicate.status_code == 201
 
 
+def test_only_admin_pm_manage_project_resources_consultant_falls_back_to_it(client, setup):
+    """Pedido do usuário: "vincular os usuários ao projeto principal" pra
+    não alocar tarefa por tarefa em projetos pequenos — POST/DELETE
+    /projects/{id}/resources é Admin/PM (mesma regra de "Administrar
+    projetos", Consultor sem acesso nem via API direta), e uma tarefa SEM
+    nenhuma alocação própria cai pro vínculo de projeto na hora de apontar
+    horas (busca primeiro na tarefa, depois no projeto)."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    pm_headers = auth_headers(client, setup["pm"].email)
+
+    resource = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    ).json()
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Sem alocação", "wbs_code": "1"}, headers=admin_headers
+    ).json()
+    timesheet_payload = {"task_id": task["id"], "date": "2026-08-25", "start_time": "09:00", "end_time": "10:00"}
+
+    # Sem vínculo nenhum ainda -> bloqueado.
+    denied = client.post("/timesheets", json=timesheet_payload, headers=consultant_headers)
+    assert denied.status_code == 403
+
+    # Consultor não vincula recurso a projeto, nem a si mesmo.
+    denied_link = client.post(f"/projects/{project_id}/resources", json={"resource_id": resource["id"]}, headers=consultant_headers)
+    assert denied_link.status_code == 403
+
+    linked = client.post(f"/projects/{project_id}/resources", json={"resource_id": resource["id"]}, headers=pm_headers)
+    assert linked.status_code == 201
+
+    listed = client.get(f"/projects/{project_id}/resources", headers=pm_headers)
+    assert listed.status_code == 200
+    assert [row["resource_id"] for row in listed.json()] == [resource["id"]]
+
+    # Agora com o vínculo de projeto, a tarefa sem alocação própria libera.
+    allowed = client.post("/timesheets", json=timesheet_payload, headers=consultant_headers)
+    assert allowed.status_code == 201
+
+
+def test_task_assignment_still_restricts_even_with_project_link(client, setup):
+    """Uma tarefa que já tem alocação própria (pra outro recurso) continua
+    fechada só pra quem está alocado nela — o vínculo de projeto nunca
+    "abre" uma tarefa que o PM deixou restrita de propósito (pedido
+    explícito do usuário: "posso ter tarefas específicas que quero
+    atribuir a um consultor e não deixar abertas todas as tarefas a
+    ele")."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+
+    resource_a = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    ).json()
+    other_user_resp = client.post(
+        "/users",
+        json={"name": "Outro Consultor", "email": "outro.consultor.b@example.com", "password": PASSWORD, "role": "CONSULTANT"},
+        headers=admin_headers,
+    ).json()
+    resource_b = client.post(
+        "/resources",
+        json={
+            "user_id": other_user_resp["id"],
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    ).json()
+
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Restrita a outro", "wbs_code": "2"}, headers=admin_headers
+    ).json()
+    # Aloca só resource_b na tarefa.
+    assign = client.post(
+        f"/tasks/{task['id']}/assignments", json={"resource_id": resource_b["id"], "allocated_hours": "10"}, headers=admin_headers
+    )
+    assert assign.status_code == 201
+
+    # resource_a vinculado ao PROJETO (não à tarefa).
+    linked = client.post(f"/projects/{project_id}/resources", json={"resource_id": resource_a["id"]}, headers=admin_headers)
+    assert linked.status_code == 201
+
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    timesheet_payload = {"task_id": task["id"], "date": "2026-08-25", "start_time": "09:00", "end_time": "10:00"}
+    denied = client.post("/timesheets", json=timesheet_payload, headers=consultant_headers)
+    assert denied.status_code == 403
+
+
+def test_timesheets_filter_by_date_range(client, setup):
+    """Pedido do usuário: filtro por período na lista de apontamentos."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    resource = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    ).json()
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    client.post(f"/projects/{project_id}/resources", json={"resource_id": resource["id"]}, headers=admin_headers)
+    task = client.post(f"/projects/{project_id}/tasks", json={"name": "T", "wbs_code": "3"}, headers=admin_headers).json()
+
+    for day in ("2026-08-10", "2026-08-20"):
+        resp = client.post(
+            "/timesheets",
+            json={"task_id": task["id"], "date": day, "start_time": "09:00", "end_time": "10:00"},
+            headers=consultant_headers,
+        )
+        assert resp.status_code == 201
+
+    filtered = client.get(
+        "/timesheets", params={"resource_id": resource["id"], "start": "2026-08-15", "end": "2026-08-31"}, headers=admin_headers
+    )
+    assert filtered.status_code == 200
+    dates = [row["date"] for row in filtered.json()]
+    assert dates == ["2026-08-20"]
+
+
+def test_portfolio_row_includes_manager_name(client, setup):
+    """Pedido do usuário: mostrar o nome do gerente na lista de Projetos."""
+    response = client.get("/reports/portfolio", headers=setup["admin_headers"])
+    assert response.status_code == 200
+    row = next(r for r in response.json() if r["id"] == setup["project_a"].id)
+    assert row["manager_name"] == setup["pm"].name
+
+
 def test_approving_timesheet_updates_task_actual_hours(client, setup):
     """Regressão: Task.actual_hours nunca era recalculado a partir dos
     timesheets aprovados (ficava sempre em 0)."""

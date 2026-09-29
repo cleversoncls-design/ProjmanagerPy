@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useLanguage } from '../context/LanguageContext'
 import { FormField, TextInput, Select, TextArea } from './FormField'
 
@@ -10,6 +11,22 @@ import { FormField, TextInput, Select, TextArea } from './FormField'
  * inline em TimesheetsPage, `<Modal>` em TimesheetEditModal). */
 export default function TimesheetFieldsForm({ form, updateField, projects, taskOptions, formTypeLabel, preview }) {
   const { t } = useLanguage()
+  // Só projetos ativos no dropdown pra lançar hora nova (pedido do
+  // usuário — não faz sentido apontar num projeto ainda em planejamento ou
+  // já parado/concluído; a API já bloqueia isso, ver
+  // "Só é possível apontar horas em projetos ativos" em routers/
+  // timesheets.py). Mantém o projeto atual na lista mesmo que não esteja
+  // mais ativo, senão editar um apontamento antigo de um projeto que
+  // fechou depois ficaria com o campo Projeto em branco.
+  const projectOptions = useMemo(() => {
+    const active = projects.filter((p) => p.status === 'ACTIVE')
+    if (form.project_id && !active.some((p) => p.id === form.project_id)) {
+      const current = projects.find((p) => p.id === form.project_id)
+      if (current) return [...active, current]
+    }
+    return active
+  }, [projects, form.project_id])
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
@@ -19,7 +36,7 @@ export default function TimesheetFieldsForm({ form, updateField, projects, taskO
         <FormField label={t('Projeto')} hint={t('Deixe em branco para hora administrativa interna.')}>
           <Select value={form.project_id} onChange={updateField('project_id')}>
             <option value="">{t('Interno')}</option>
-            {projects.map((project) => (
+            {projectOptions.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.code} — {project.name}
               </option>

@@ -16,6 +16,7 @@ import StatusPill from '../components/StatusPill'
 import TimesheetFieldsForm from '../components/TimesheetFieldsForm'
 import TimesheetDeleteModal from '../components/TimesheetDeleteModal'
 import IconButton from '../components/IconButton'
+import { FormField, TextInput, Select } from '../components/FormField'
 import { CheckIcon, XIcon, PencilIcon, TrashIcon } from '../components/icons'
 import { formatDate, formatTime, formatHoursDuration } from '../utils/format'
 import { MANAGEMENT_ROLES, TIMESHEET_STATUS_TONE } from '../utils/labels'
@@ -49,6 +50,12 @@ export default function TimesheetsPage() {
   const [listError, setListError] = useState('')
   const [actingId, setActingId] = useState(null)
 
+  // Filtro por período (pedido do usuário) na lista de baixo — "Meus
+  // apontamentos" só por período; pro aprovador, período + consultor +
+  // projeto em "Aprovações pendentes".
+  const [mineFilters, setMineFilters] = useState({ start: '', end: '' })
+  const [pendingFilters, setPendingFilters] = useState({ start: '', end: '', resource_id: '', project_id: '' })
+
   useEffect(() => {
     projectsApi
       .listProjects()
@@ -79,26 +86,40 @@ export default function TimesheetsPage() {
     }
     setLoadingMine(true)
     timesheetsApi
-      .listTimesheets({ resource_id: ownResource.id })
+      .listTimesheets({ resource_id: ownResource.id, start: mineFilters.start || undefined, end: mineFilters.end || undefined })
       .then(setMine)
       .catch((err) => setListError(err.message))
       .finally(() => setLoadingMine(false))
   }
 
-  useEffect(loadMine, [ownResource])
+  useEffect(loadMine, [ownResource, mineFilters.start, mineFilters.end])
 
   function loadPending() {
     if (!canManage) return
     setLoadingPending(true)
     timesheetsApi
-      .listTimesheets({ status_filter: 'PENDING' })
+      .listTimesheets({
+        status_filter: 'PENDING',
+        start: pendingFilters.start || undefined,
+        end: pendingFilters.end || undefined,
+        resource_id: pendingFilters.resource_id || undefined,
+        project_id: pendingFilters.project_id || undefined,
+      })
       .then(setPending)
       .catch((err) => setListError(err.message))
       .finally(() => setLoadingPending(false))
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(loadPending, [canManage])
+  useEffect(loadPending, [canManage, pendingFilters.start, pendingFilters.end, pendingFilters.resource_id, pendingFilters.project_id])
+
+  function updateMineFilter(field) {
+    return (event) => setMineFilters((prev) => ({ ...prev, [field]: event.target.value }))
+  }
+
+  function updatePendingFilter(field) {
+    return (event) => setPendingFilters((prev) => ({ ...prev, [field]: event.target.value }))
+  }
 
   function updateField(field) {
     return (event) => {
@@ -223,6 +244,14 @@ export default function TimesheetsPage() {
       <ErrorBanner message={listError} />
 
       <Card title={t('Meus apontamentos')} className="mb-4">
+        <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <FormField label={t('Data inicial')}>
+            <TextInput type="date" value={mineFilters.start} onChange={updateMineFilter('start')} />
+          </FormField>
+          <FormField label={t('Data final')}>
+            <TextInput type="date" value={mineFilters.end} onChange={updateMineFilter('end')} />
+          </FormField>
+        </div>
         {loadingMine ? (
           <Spinner />
         ) : (
@@ -270,6 +299,34 @@ export default function TimesheetsPage() {
 
       {canManage && (
         <Card title={t('Aprovações pendentes')}>
+          <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <FormField label={t('Data inicial')}>
+              <TextInput type="date" value={pendingFilters.start} onChange={updatePendingFilter('start')} />
+            </FormField>
+            <FormField label={t('Data final')}>
+              <TextInput type="date" value={pendingFilters.end} onChange={updatePendingFilter('end')} />
+            </FormField>
+            <FormField label={t('Consultor')}>
+              <Select value={pendingFilters.resource_id} onChange={updatePendingFilter('resource_id')}>
+                <option value="">{t('Todos')}</option>
+                {resources.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {resourcesById[r.id]?.userName || r.role_title}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label={t('Projeto')}>
+              <Select value={pendingFilters.project_id} onChange={updatePendingFilter('project_id')}>
+                <option value="">{t('Todos')}</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.code} — {project.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </div>
           {loadingPending ? (
             <Spinner />
           ) : pending.length === 0 ? (

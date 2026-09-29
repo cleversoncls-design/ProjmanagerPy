@@ -19,7 +19,7 @@ import { FormField, TextInput, Select } from '../components/FormField'
 import ColorListPicker from '../components/ColorListPicker'
 import { formatCurrency, formatPercent } from '../utils/format'
 import { INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECT_STATUS_LABELS, PROJECT_STATUS_TONE } from '../utils/labels'
-import { DEFAULT_PROJECT_COLOR, PROJECT_COLOR_PALETTE, projectColorStyle } from '../utils/colorPalette'
+import { DEFAULT_PROJECT_COLOR, PROJECT_COLOR_PALETTE } from '../utils/colorPalette'
 import { useLanguage } from '../context/LanguageContext'
 
 const EMPTY_FORM = {
@@ -231,13 +231,13 @@ export default function ProjectsPage() {
               {
                 key: 'code',
                 header: t('Projeto'),
+                // Pedido do usuário: a bolinha de cor (usada pra identificar o
+                // projeto na Agenda de consultores) não precisa aparecer
+                // aqui — a lista de Projetos já tem Status pra isso; a cor
+                // continua valendo normalmente na Agenda e no editor de
+                // projeto (ColorListPicker).
                 render: (row) => (
-                  <Link to={`/projects/${row.id}`} className="inline-flex items-center gap-2 font-medium text-[var(--series-1)] hover:underline">
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      title={row.color_striped ? t('Projeto finalizado (Concluído/Cancelado) exibe o padrão listrado — a cor original fica guardada e volta se o projeto for reativado.') : undefined}
-                      style={projectColorStyle({ ...row, color: row.color || DEFAULT_PROJECT_COLOR })}
-                    />
+                  <Link to={`/projects/${row.id}`} className="font-medium text-[var(--series-1)] hover:underline">
                     {row.code} — {row.name}
                   </Link>
                 ),
@@ -247,6 +247,9 @@ export default function ProjectsPage() {
                 header: t('Status'),
                 render: (row) => <StatusPill label={labels.PROJECT_STATUS_LABELS[row.status] || row.status} tone={PROJECT_STATUS_TONE[row.status]} />,
               },
+              // Gerente responsável — pedido do usuário, pra não precisar
+              // abrir o projeto só pra ver quem o conduz.
+              { key: 'manager_name', header: t('Gerente'), render: (row) => row.manager_name || '—' },
               { key: 'percent_complete', header: t('% concluído'), align: 'right', render: (row) => formatPercent(row.percent_complete) },
               { key: 'tasks_remaining', header: t('Tarefas restantes'), align: 'right' },
               {
