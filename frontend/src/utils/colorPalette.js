@@ -292,3 +292,22 @@ export function contrastTextColor(hex) {
   const yiq = (r * 299 + g * 587 + b * 114) / 1000
   return yiq >= 150 ? '#000000' : '#FFFFFF'
 }
+
+// Padrão listrado branco/vermelho fixo pra projeto finalizado (Concluído
+// ou Cancelado — ver Project.color_striped no backend): a cor real
+// (`project.color`) some da tela e some no lugar dela, liberando o hex pra
+// outro projeto ativo usar. Sempre o mesmo padrão pra qualquer projeto
+// finalizado — não é configurável por projeto (pedido do usuário: "um
+// listrado (branco e vermelho) para os projetos finalizados").
+export const PROJECT_STRIPED_PATTERN = {
+  backgroundImage: 'repeating-linear-gradient(45deg, #FFFFFF 0px, #FFFFFF 4px, #DC2626 4px, #DC2626 8px)',
+}
+
+// Estilo de fundo pra bolinha/amostra de cor de um projeto — listrado se
+// finalizado, a cor real caso contrário. Único ponto de decisão dessa
+// regra visual, usado em toda tela que mostra a cor de um projeto
+// (ProjectsPage, ColorListPicker no formulário de edição).
+export function projectColorStyle(project) {
+  if (project?.color_striped) return PROJECT_STRIPED_PATTERN
+  return { backgroundColor: project?.color || 'transparent' }
+}

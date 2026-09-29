@@ -269,6 +269,8 @@ export const es = {
   'Precisa ser ADMIN ou gerente de projetos interno.': 'Debe ser ADMIN o gerente de proyectos interno.',
   'Predecessora(s)': 'Predecesora(s)',
   'Predecessoras': 'Predecesoras',
+  'Predecessoras e recursos escolhidos aqui são gravados junto com a tarefa ao clicar em "Salvar".':
+    'Las predecesoras y recursos elegidos aquí se guardan junto con la tarea al hacer clic en "Guardar".',
   'Progresso': 'Progreso',
   'Progresso médio': 'Progreso promedio',
   'Projeto': 'Proyecto',
@@ -358,6 +360,11 @@ export const es = {
   'Selecione uma cor': 'Seleccione un color',
   'Buscar cor por nome...': 'Buscar color por nombre...',
   'Nenhuma cor encontrada.': 'Ningún color encontrado.',
+  // --- Exclusividade de cor entre projetos ativos (item 1) ---
+  'Já em uso por {project}': 'Ya está en uso por {project}',
+  'Listrado (projeto finalizado)': 'Rayado (proyecto finalizado)',
+  'Projeto finalizado (Concluído/Cancelado) exibe o padrão listrado — a cor original fica guardada e volta se o projeto for reativado.':
+    'Proyecto finalizado (Concluido/Cancelado) muestra el patrón rayado — el color original queda guardado y vuelve si el proyecto se reactiva.',
 
   // --- Nomes das 256 cores da paleta de projeto (utils/colorPalette.js /
   // app/color_palette.py) — usados por ColorListPicker.jsx via t(entry.name).

@@ -87,13 +87,13 @@ def _recalculate_actual_hours(db: Session, task_id: str | None) -> None:
 
 
 def _resolve_task_and_project(
-    data: TimesheetCreate, resource: Resource, user: User, db: Session, *, exclude_timesheet_id: str | None = None
+    data: TimesheetCreate, resource: Resource, user: User, db: Session
 ) -> tuple[Task | None, Project | None]:
-    """Validações de escopo/projeto ativo/alocação e a checagem de
-    apontamento duplicado (mesmo recurso+tarefa+data) — compartilhadas por
-    create_timesheet e update_timesheet. `exclude_timesheet_id` tira o
-    próprio registro da checagem de duplicado ao editar (senão ele sempre
-    "colidiria" consigo mesmo)."""
+    """Validações de escopo/projeto ativo/alocação — compartilhadas por
+    create_timesheet e update_timesheet. Mais de um apontamento do mesmo
+    recurso na mesma tarefa no mesmo dia é permitido de propósito (ex.:
+    dois períodos de trabalho no mesmo dia) — não há checagem de
+    duplicado aqui."""
     task: Task | None = None
     project: Project | None = None
 
@@ -111,17 +111,6 @@ def _resolve_task_and_project(
         )
         if not assignment:
             raise HTTPException(status_code=403, detail=translate("Recurso não está alocado nesta tarefa", user.language))
-
-        duplicate_stmt = select(Timesheet).where(
-            Timesheet.task_id == task.id,
-            Timesheet.resource_id == resource.id,
-            Timesheet.date == data.date,
-        )
-        if exclude_timesheet_id:
-            duplicate_stmt = duplicate_stmt.where(Timesheet.id != exclude_timesheet_id)
-        duplicate = db.scalar(duplicate_stmt)
-        if duplicate:
-            raise HTTPException(status_code=409, detail=translate("Já existe um apontamento deste recurso nesta tarefa para esta data", user.language))
     elif data.project_id:
         # Apontamento avulso (sem task na EAP) mas alocado a um projeto —
         # ex.: reunião com o cliente, suporte pontual. Continua exigindo
@@ -239,7 +228,7 @@ def update_timesheet(
     # _recalculate_actual_hours no final).
     old_task_id = entry.task_id
 
-    task, project = _resolve_task_and_project(data, resource, user, db, exclude_timesheet_id=entry.id)
+    task, project = _resolve_task_and_project(data, resource, user, db)
     hours_spent = _compute_hours(data, user.language)
     schedule, unscheduled = _resolve_schedule(data, resource, project, user, db)
 

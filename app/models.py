@@ -218,6 +218,18 @@ class Project(Base):
     # agenda (ResourceSchedule) deste projeto na tela "Agenda de
     # consultores", sem escolha manual por agendamento.
     color: Mapped[str] = mapped_column(String(20), nullable=False, default=DEFAULT_PROJECT_COLOR)
+    # Enquanto o projeto está "ativo" (status fora de COMPLETED/CANCELLED/
+    # MODELO), a cor acima é exclusiva dele — nenhum outro projeto ativo
+    # pode usar o mesmo hex (ver _ensure_color_available em
+    # routers/projects.py). Ao virar COMPLETED ou CANCELLED, este flag liga
+    # sozinho: a cor real (`color`, nunca apagada) some da tela e o
+    # projeto passa a aparecer com o padrão listrado branco/vermelho fixo
+    # (ver PROJECT_STRIPED_PATTERN no frontend), liberando o hex pra outro
+    # projeto ativo escolher. Volta a False sozinho se o projeto for
+    # reativado (status muda de volta pra fora desse grupo) — nesse
+    # momento a cor original pode já ter sido tomada por outro projeto
+    # nesse meio tempo, então update_project revalida a exclusividade.
+    color_striped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     client: Mapped[Client] = relationship(back_populates="projects")

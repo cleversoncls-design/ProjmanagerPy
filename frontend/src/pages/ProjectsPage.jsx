@@ -19,7 +19,7 @@ import { FormField, TextInput, Select } from '../components/FormField'
 import ColorListPicker from '../components/ColorListPicker'
 import { formatCurrency, formatPercent } from '../utils/format'
 import { INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECT_STATUS_LABELS, PROJECT_STATUS_TONE } from '../utils/labels'
-import { DEFAULT_PROJECT_COLOR } from '../utils/colorPalette'
+import { DEFAULT_PROJECT_COLOR, PROJECT_COLOR_PALETTE, projectColorStyle } from '../utils/colorPalette'
 import { useLanguage } from '../context/LanguageContext'
 
 const EMPTY_FORM = {
@@ -60,6 +60,14 @@ export default function ProjectsPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // Map<hex em maiúsculo, "código — nome"> dos projetos que já disputam a
+  // exclusividade de cor (fora de COMPLETED/CANCELLED/MODELO — mesmo
+  // escopo de _ensure_color_available no backend), pra desabilitar essas
+  // opções no ColorListPicker. Buscado à parte de `rows` (que reflete os
+  // filtros da tela) porque um filtro de Status/Cliente não pode influenciar
+  // quais cores já estão em uso — o cálculo precisa sempre do universo
+  // completo do escopo do usuário, não só do que está sendo exibido agora.
+  const [usedColors, setUsedColors] = useState(new Map())
 
   const [deletingProject, setDeletingProject] = useState(null)
 
@@ -91,6 +99,34 @@ export default function ProjectsPage() {
       .then((internalPms) => usersApi.listUsers({ role: 'ADMIN' }).then((admins) => setManagers([...admins, ...internalPms])))
       .catch(() => {})
   }, [canCreate])
+
+  // Cores já em uso — recarrega toda vez que o modal "Novo projeto" abre,
+  // pra pegar projetos criados/finalizados desde a última vez (mesmo
+  // escopo global "todos os clientes" confirmado pelo usuário).
+  useEffect(() => {
+    if (!showModal) return
+    projectsApi
+      .listProjects()
+      .then((allProjects) => {
+        const map = new Map()
+        for (const project of allProjects) {
+          if (['COMPLETED', 'CANCELLED', 'MODELO'].includes(project.status)) continue
+          map.set((project.color || '').toUpperCase(), `${project.code} — ${project.name}`)
+        }
+        setUsedColors(map)
+        // Cor padrão (DEFAULT_PROJECT_COLOR) já em uso por outro projeto
+        // ativo? Com a exclusividade agora valendo, manter sempre o mesmo
+        // default faria quase toda "Novo projeto" colidir depois da
+        // primeira vez — troca pra primeira cor da paleta ainda livre
+        // (só se o usuário não tiver mexido no campo).
+        setForm((prev) => {
+          if (prev.color !== DEFAULT_PROJECT_COLOR || !map.has(DEFAULT_PROJECT_COLOR)) return prev
+          const free = PROJECT_COLOR_PALETTE.find((entry) => !map.has(entry.hex))
+          return free ? { ...prev, color: free.hex } : prev
+        })
+      })
+      .catch(() => {})
+  }, [showModal])
 
   function updateFilter(field) {
     return (event) => setFilters((prev) => ({ ...prev, [field]: event.target.value }))
@@ -197,7 +233,11 @@ export default function ProjectsPage() {
                 header: t('Projeto'),
                 render: (row) => (
                   <Link to={`/projects/${row.id}`} className="inline-flex items-center gap-2 font-medium text-[var(--series-1)] hover:underline">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: row.color || DEFAULT_PROJECT_COLOR }} />
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      title={row.color_striped ? t('Projeto finalizado (Concluído/Cancelado) exibe o padrão listrado — a cor original fica guardada e volta se o projeto for reativado.') : undefined}
+                      style={projectColorStyle({ ...row, color: row.color || DEFAULT_PROJECT_COLOR })}
+                    />
                     {row.code} — {row.name}
                   </Link>
                 ),
@@ -279,7 +319,7 @@ export default function ProjectsPage() {
             </div>
 
             <FormField label={t('Cor do projeto')} hint={t('Usada na Agenda de consultores para identificar este projeto.')}>
-              <ColorListPicker value={form.color} onChange={(color) => setForm((prev) => ({ ...prev, color }))} />
+              <ColorListPicker value={form.color} onChange={(color) => setForm((prev) => ({ ...prev, color }))} usedColors={usedColors} />
             </FormField>
 
             <div className="rounded-lg border border-[var(--border)] p-4">

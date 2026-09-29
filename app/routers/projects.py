@@ -17,6 +17,7 @@ from ..models import (
     Client,
     Project,
     ProjectExpense,
+    ProjectStatus,
     Risk,
     Task,
     Timesheet,
@@ -29,6 +30,32 @@ from ..services import project_financials
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 _FINANCIAL_FIELDS = ("management_hours", "management_rate", "consulting_hours", "consulting_rate")
+
+# Projeto nesses status não disputa exclusividade de cor: MODELO nunca é um
+# projeto "de verdade" (ver comentário em ProjectStatus, models.py) e
+# COMPLETED/CANCELLED já perderam a cor pro padrão listrado
+# (Project.color_striped) — ver pedido do usuário: cor exclusiva "enquanto
+# não estiver finalizado", liberando em Concluído e Cancelado, escopo
+# global entre todos os clientes.
+_COLOR_POOL_EXCLUDED_STATUSES = {ProjectStatus.COMPLETED, ProjectStatus.CANCELLED, ProjectStatus.MODELO}
+_STRIPED_STATUSES = {ProjectStatus.COMPLETED, ProjectStatus.CANCELLED}
+
+
+def _ensure_color_available(db: Session, color: str, language: str, *, exclude_project_id: str | None = None) -> None:
+    """Levanta 409 se `color` já estiver em uso por outro projeto que ainda
+    disputa a exclusividade (fora de COMPLETED/CANCELLED/MODELO). Chamado só
+    quando o projeto em questão (o que está sendo criado, ou o resultado da
+    atualização) também vai ficar fora desse grupo — um projeto finalizado
+    ou Modelo pode ter qualquer cor guardada, ela só não aparece disputando
+    a tela enquanto ele estiver nesse estado."""
+    stmt = select(Project.id).where(
+        Project.color == color,
+        Project.status.not_in(_COLOR_POOL_EXCLUDED_STATUSES),
+    )
+    if exclude_project_id:
+        stmt = stmt.where(Project.id != exclude_project_id)
+    if db.scalar(stmt) is not None:
+        raise HTTPException(status_code=409, detail=translate("Esta cor já está em uso por outro projeto ativo", language))
 
 
 def _recompute_sold_value(project: Project) -> None:
@@ -58,8 +85,13 @@ def create_project(
         raise HTTPException(status_code=404, detail=translate("Calendário não encontrado", user.language))
     if data.color.upper() not in PROJECT_COLOR_HEXES:
         raise HTTPException(status_code=422, detail=translate("Cor do projeto inválida", user.language))
+    color = data.color.upper()
+    # Projeto novo sempre nasce em PLANNING (ProjectCreate não aceita
+    # `status`) — fora do grupo COMPLETED/CANCELLED/MODELO, então sempre
+    # disputa a exclusividade de cor.
+    _ensure_color_available(db, color, user.language)
     project_data = data.model_dump()
-    project_data["color"] = data.color.upper()
+    project_data["color"] = color
     project = Project(**project_data)
     _recompute_sold_value(project)
     db.add(project)
@@ -123,6 +155,25 @@ def update_project(
         if changes["color"].upper() not in PROJECT_COLOR_HEXES:
             raise HTTPException(status_code=422, detail=translate("Cor do projeto inválida", user.language))
         changes["color"] = changes["color"].upper()
+    # Status efetivo/cor efetiva depois desta atualização (change parcial —
+    # o que não vier em `changes` continua valendo o que já está salvo).
+    effective_status = changes.get("status", project.status)
+    effective_color = changes.get("color", project.color)
+    was_excluded = project.status in _COLOR_POOL_EXCLUDED_STATUSES
+    now_excluded = effective_status in _COLOR_POOL_EXCLUDED_STATUSES
+    if not now_excluded and ("color" in changes or (was_excluded and not now_excluded)):
+        # Dispara a checagem de exclusividade quando: a cor está mudando, ou
+        # o projeto está saindo do grupo finalizado/modelo (reativação) —
+        # nesse caso a cor original pode já ter sido tomada por outro
+        # projeto enquanto este estava parado.
+        _ensure_color_available(db, effective_color, user.language, exclude_project_id=project_id)
+    if "status" in changes:
+        if effective_status in _STRIPED_STATUSES:
+            changes["color_striped"] = True
+        elif was_excluded:
+            # Reativação (saiu de COMPLETED/CANCELLED/MODELO): volta a
+            # mostrar a cor real — já revalidada acima quando aplicável.
+            changes["color_striped"] = False
     if user.role in EXTERNAL_ROLES:
         for field in _FINANCIAL_FIELDS:
             changes.pop(field, None)
