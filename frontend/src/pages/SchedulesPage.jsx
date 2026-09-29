@@ -350,6 +350,7 @@ export default function SchedulesPage() {
           defaultDate={formTarget.date}
           resourceOptions={resourceOptions}
           projects={projects}
+          canManage={canManage}
           onClose={() => setFormTarget(null)}
           onSaved={() => {
             setFormTarget(null)
@@ -363,10 +364,19 @@ export default function SchedulesPage() {
 
 /** Cria ou edita um bloco de agenda. A cor não é escolhida aqui — segue
  * automaticamente `project.color` (decisão do usuário: "Fixa por
- * projeto") — por isso não existe nenhum ColorSwatchPicker neste form. */
-function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, onClose, onSaved }) {
+ * projeto") — por isso não existe nenhum ColorSwatchPicker neste form.
+ *
+ * Quem não está em MANAGEMENT_ROLES (Consultor) só pode VISUALIZAR: o
+ * clique no bloco do calendário mensal abre este modal pra qualquer
+ * perfil interno (pra dar consulta aos detalhes — dia, horário,
+ * descrição — que não cabem no bloco), mas com `canManage=false` os
+ * campos ficam desabilitados e os botões Salvar/Excluir somem, sobrando
+ * só "Fechar". Reforça na UI o que a API já impõe (_MANAGE_ROLES em
+ * routers/schedules.py). */
+function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, canManage, onClose, onSaved }) {
   const { t } = useLanguage()
   const isEdit = Boolean(schedule)
+  const readOnly = !canManage
   const [form, setForm] = useState({
     resource_id: schedule?.resource_id || '',
     project_id: schedule?.project_id || '',
@@ -386,6 +396,7 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, o
 
   async function handleSubmit(event) {
     event.preventDefault()
+    if (readOnly) return
     setError('')
     setSaving(true)
     try {
@@ -407,6 +418,7 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, o
   }
 
   async function handleDelete() {
+    if (readOnly) return
     setDeleting(true)
     setError('')
     try {
@@ -426,7 +438,7 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, o
           required
           hint={isEdit ? t('Não é possível trocar o consultor de um agendamento já criado — exclua e crie um novo.') : undefined}
         >
-          <Select required disabled={isEdit} value={form.resource_id} onChange={updateField('resource_id')}>
+          <Select required disabled={isEdit || readOnly} value={form.resource_id} onChange={updateField('resource_id')}>
             <option value="">{t('Selecione…')}</option>
             {resourceOptions.map((resource) => (
               <option key={resource.id} value={resource.id}>
@@ -436,7 +448,7 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, o
           </Select>
         </FormField>
         <FormField label={t('Projeto')} required>
-          <Select required value={form.project_id} onChange={updateField('project_id')}>
+          <Select required disabled={readOnly} value={form.project_id} onChange={updateField('project_id')}>
             <option value="">{t('Selecione…')}</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
@@ -446,52 +458,60 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, o
           </Select>
         </FormField>
         <FormField label={t('Data')} required>
-          <TextInput type="date" required value={form.date} onChange={updateField('date')} />
+          <TextInput type="date" required disabled={readOnly} value={form.date} onChange={updateField('date')} />
         </FormField>
         <div className="grid grid-cols-2 gap-4">
           <FormField label={t('Hora início')} required>
-            <TextInput type="time" required value={form.start_time} onChange={updateField('start_time')} />
+            <TextInput type="time" required disabled={readOnly} value={form.start_time} onChange={updateField('start_time')} />
           </FormField>
           <FormField label={t('Hora fim')} required>
-            <TextInput type="time" required value={form.end_time} onChange={updateField('end_time')} />
+            <TextInput type="time" required disabled={readOnly} value={form.end_time} onChange={updateField('end_time')} />
           </FormField>
         </div>
         <FormField label={t('Descrição')}>
-          <TextArea rows={2} value={form.description} onChange={updateField('description')} />
+          <TextArea rows={2} disabled={readOnly} value={form.description} onChange={updateField('description')} />
         </FormField>
 
         <ErrorBanner message={error} />
 
-        <div className="flex items-center justify-between gap-2 pt-1">
-          <div>
-            {isEdit && !confirmingDelete && (
-              <Button type="button" variant="ghost" style={{ color: 'var(--status-critical)' }} onClick={() => setConfirmingDelete(true)}>
-                {t('Excluir')}
-              </Button>
-            )}
-            {isEdit && confirmingDelete && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--text-secondary)]">{t('Confirmar exclusão?')}</span>
-                <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
-                  {deleting ? t('Excluindo…') : t('Confirmar')}
+        {readOnly ? (
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Button type="button" variant="secondary" onClick={onClose}>
+              {t('Fechar')}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <div>
+              {isEdit && !confirmingDelete && (
+                <Button type="button" variant="ghost" style={{ color: 'var(--status-critical)' }} onClick={() => setConfirmingDelete(true)}>
+                  {t('Excluir')}
                 </Button>
-                <Button type="button" variant="secondary" onClick={() => setConfirmingDelete(false)}>
+              )}
+              {isEdit && confirmingDelete && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[var(--text-secondary)]">{t('Confirmar exclusão?')}</span>
+                  <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
+                    {deleting ? t('Excluindo…') : t('Confirmar')}
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={() => setConfirmingDelete(false)}>
+                    {t('Cancelar')}
+                  </Button>
+                </div>
+              )}
+            </div>
+            {!confirmingDelete && (
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" onClick={onClose}>
                   {t('Cancelar')}
+                </Button>
+                <Button type="submit" disabled={saving}>
+                  {saving ? t('Salvando…') : t('Salvar')}
                 </Button>
               </div>
             )}
           </div>
-          {!confirmingDelete && (
-            <div className="flex gap-2">
-              <Button type="button" variant="secondary" onClick={onClose}>
-                {t('Cancelar')}
-              </Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? t('Salvando…') : t('Salvar')}
-              </Button>
-            </div>
-          )}
-        </div>
+        )}
       </form>
     </Modal>
   )
