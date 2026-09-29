@@ -97,28 +97,33 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <label className="text-xs font-semibold" style={{ color: 'var(--nav-fg)' }}>
-                {t('Senha')}
-              </label>
+            <label className="mb-1.5 block text-xs font-semibold" style={{ color: 'var(--nav-fg)' }}>
+              {t('Senha')}
+            </label>
+            {/* Botão "Mostrar/Ocultar" dentro da própria caixa do campo
+             * (pedido do usuário, pra ficar igual à tela de referência do
+             * Controle de Viagens) — input com padding à direita reservando
+             * espaço, botão posicionado em absolute e centralizado
+             * verticalmente dentro da mesma caixa. */}
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="w-full rounded-lg border py-2 pl-3 pr-16 text-sm outline-none transition-colors"
+                style={fieldStyle}
+              />
               <button
                 type="button"
                 onClick={() => setShowPassword((value) => !value)}
-                className="text-[11px] font-semibold hover:underline"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold hover:underline"
                 style={{ color: 'var(--nav-accent)' }}
               >
                 {showPassword ? t('Ocultar') : t('Mostrar')}
               </button>
             </div>
-            <input
-              type={showPassword ? 'text' : 'password'}
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors"
-              style={fieldStyle}
-            />
           </div>
 
           {error && (
