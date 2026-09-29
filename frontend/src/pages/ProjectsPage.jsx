@@ -18,7 +18,7 @@ import { TrashIcon } from '../components/icons'
 import { FormField, TextInput, Select } from '../components/FormField'
 import ColorListPicker from '../components/ColorListPicker'
 import { formatCurrency, formatPercent } from '../utils/format'
-import { MANAGEMENT_ROLES, PROJECT_STATUS_TONE } from '../utils/labels'
+import { INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECT_STATUS_LABELS, PROJECT_STATUS_TONE } from '../utils/labels'
 import { DEFAULT_PROJECT_COLOR } from '../utils/colorPalette'
 import { useLanguage } from '../context/LanguageContext'
 
@@ -36,16 +36,25 @@ const EMPTY_FORM = {
   end_date: '',
 }
 
+const EMPTY_FILTERS = { status: '', client_id: '' }
+
 export default function ProjectsPage() {
   const { user } = useAuth()
   const { labels, t } = useLanguage()
   const canCreate = MANAGEMENT_ROLES.includes(user.role)
+  // Filtro por cliente só faz sentido pra quem enxerga mais de um cliente
+  // — perfil externo (CLIENT_PM/CLIENT_USER) já é travado no próprio
+  // cliente (ver _scoped_projects no backend), então a lista viria sempre
+  // com um só. Mesmo grupo de papéis que o backend aceita em client_id
+  // (GET /reports/portfolio).
+  const canFilterByClient = INTERNAL_ROLES.includes(user.role)
 
   const [rows, setRows] = useState([])
   const [clients, setClients] = useState([])
   const [managers, setManagers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
 
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
@@ -57,22 +66,34 @@ export default function ProjectsPage() {
   function loadRows() {
     setLoading(true)
     reportsApi
-      .getPortfolio()
+      .getPortfolio({
+        status: filters.status || undefined,
+        client_id: filters.client_id || undefined,
+      })
       .then(setRows)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }
 
-  useEffect(loadRows, [])
+  useEffect(loadRows, [filters.status, filters.client_id])
+
+  useEffect(() => {
+    if (canFilterByClient) {
+      clientsApi.listClients().then(setClients).catch(() => {})
+    }
+  }, [canFilterByClient])
 
   useEffect(() => {
     if (!canCreate) return
-    clientsApi.listClients().then(setClients).catch(() => {})
     usersApi
       .listUsers({ role: 'INTERNAL_PM' })
       .then((internalPms) => usersApi.listUsers({ role: 'ADMIN' }).then((admins) => setManagers([...admins, ...internalPms])))
       .catch(() => {})
   }, [canCreate])
+
+  function updateFilter(field) {
+    return (event) => setFilters((prev) => ({ ...prev, [field]: event.target.value }))
+  }
 
   const soldValuePreview = useMemo(() => {
     const managementHours = Number(form.management_hours) || 0
@@ -112,6 +133,38 @@ export default function ProjectsPage() {
         subtitle={t('Portfólio de projetos no seu escopo.')}
         action={canCreate && <Button onClick={() => setShowModal(true)}>{t('Novo projeto')}</Button>}
       />
+
+      <Card className="mb-4">
+        <div className={`grid grid-cols-2 gap-3 ${canFilterByClient ? 'md:grid-cols-2' : 'md:grid-cols-1'}`}>
+          <FormField label={t('Status')}>
+            <Select value={filters.status} onChange={updateFilter('status')}>
+              <option value="">{t('Todos')}</option>
+              {/* MODELO nunca aparece nesta lista — ela não entra no
+                  portfólio mesmo sem filtro (ver _scoped_projects no
+                  backend), então oferecer o filtro seria enganoso. */}
+              {Object.keys(PROJECT_STATUS_LABELS)
+                .filter((status) => status !== 'MODELO')
+                .map((status) => (
+                  <option key={status} value={status}>
+                    {labels.PROJECT_STATUS_LABELS[status] || status}
+                  </option>
+                ))}
+            </Select>
+          </FormField>
+          {canFilterByClient && (
+            <FormField label={t('Cliente')}>
+              <Select value={filters.client_id} onChange={updateFilter('client_id')}>
+                <option value="">{t('Todos')}</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.legal_name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          )}
+        </div>
+      </Card>
 
       {loading && <Spinner />}
       <ErrorBanner message={error} />
