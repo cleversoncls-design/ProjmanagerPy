@@ -13,6 +13,7 @@ from ..deps import get_current_user, require_project_access, require_roles
 from ..i18n import t as translate
 from ..models import (
     AuditAction,
+    Client,
     Project,
     ProjectResource,
     ProjectStatus,
@@ -304,6 +305,7 @@ def list_timesheets(
     project_id: str | None = None,
     task_id: str | None = None,
     resource_id: str | None = None,
+    client_id: str | None = None,
     status_filter: TimesheetStatus | None = None,
     start: date | None = None,
     end: date | None = None,
@@ -320,7 +322,13 @@ def list_timesheets(
     `start`/`end` (pedido do usuário: filtro por período na lista de
     apontamentos, tanto "Meus apontamentos" quanto Aprovações pendentes)
     filtram por `Timesheet.date`, inclusive nos dois extremos — igual ao
-    padrão já usado em GET /reports/service-orders."""
+    padrão já usado em GET /reports/service-orders.
+
+    `client_id` (pedido do usuário: filtro por cliente em "Meus
+    apontamentos") não existe direto em Timesheet — resolve pra um
+    subquery com os `project_id` do cliente e aplica o mesmo OR
+    Task.project_id/Timesheet.project_id usado no filtro por projeto logo
+    abaixo, pra pegar tanto apontamento em tarefa quanto avulso."""
     is_manager = user.role in _MANAGEMENT_ROLES
     if not is_manager:
         own_resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
@@ -340,13 +348,20 @@ def list_timesheets(
             raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
         require_project_access(project, user)
         stmt = stmt.where(or_(Task.project_id == project_id, Timesheet.project_id == project_id))
-    elif not (resource_id or status_filter or start or end):
+    elif not (resource_id or client_id or status_filter or start or end):
         raise HTTPException(
             status_code=422,
-            detail=translate("Informe ao menos um filtro (project_id, task_id, resource_id, status_filter, start ou end)", user.language),
+            detail=translate(
+                "Informe ao menos um filtro (project_id, task_id, resource_id, client_id, status_filter, start ou end)", user.language
+            ),
         )
     if resource_id:
         stmt = stmt.where(Timesheet.resource_id == resource_id)
+    if client_id:
+        if not db.get(Client, client_id):
+            raise HTTPException(status_code=404, detail=translate("Cliente não encontrado", user.language))
+        client_project_ids = select(Project.id).where(Project.client_id == client_id)
+        stmt = stmt.where(or_(Task.project_id.in_(client_project_ids), Timesheet.project_id.in_(client_project_ids)))
     if status_filter:
         stmt = stmt.where(Timesheet.status == status_filter)
     if start:

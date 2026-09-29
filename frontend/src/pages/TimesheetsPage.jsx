@@ -3,6 +3,7 @@ import * as timesheetsApi from '../api/timesheets'
 import * as resourcesApi from '../api/resources'
 import * as usersApi from '../api/users'
 import * as projectsApi from '../api/projects'
+import * as clientsApi from '../api/clients'
 import * as tasksApi from '../api/tasks'
 import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
@@ -36,6 +37,7 @@ export default function TimesheetsPage() {
   const [allTasks, setAllTasks] = useState([])
   const [resources, setResources] = useState([])
   const [users, setUsers] = useState([])
+  const [clients, setClients] = useState([])
 
   const [form, setForm] = useState(() => emptyTimesheetForm(todayIso()))
   const [formError, setFormError] = useState('')
@@ -51,9 +53,9 @@ export default function TimesheetsPage() {
   const [actingId, setActingId] = useState(null)
 
   // Filtro por período (pedido do usuário) na lista de baixo — "Meus
-  // apontamentos" só por período; pro aprovador, período + consultor +
-  // projeto em "Aprovações pendentes".
-  const [mineFilters, setMineFilters] = useState({ start: '', end: '' })
+  // apontamentos" por período + cliente + projeto; pro aprovador, período +
+  // consultor + projeto em "Aprovações pendentes".
+  const [mineFilters, setMineFilters] = useState({ start: '', end: '', client_id: '', project_id: '' })
   const [pendingFilters, setPendingFilters] = useState({ start: '', end: '', resource_id: '', project_id: '' })
 
   useEffect(() => {
@@ -66,6 +68,7 @@ export default function TimesheetsPage() {
       .catch(() => {})
     resourcesApi.listResources().then(setResources).catch(() => {})
     usersApi.listUsers().then(setUsers).catch(() => {})
+    clientsApi.listClients().then(setClients).catch(() => {})
   }, [])
 
   const usersById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
@@ -77,6 +80,13 @@ export default function TimesheetsPage() {
   const tasksById = useMemo(() => Object.fromEntries(allTasks.map((task) => [task.id, task])), [allTasks])
   const taskOptions = useMemo(() => allTasks.filter((task) => task.project_id === form.project_id), [allTasks, form.project_id])
   const ownResource = useMemo(() => resources.find((r) => r.user_id === user.id) || null, [resources, user.id])
+  // Projeto do filtro de "Meus apontamentos" — quando um cliente é
+  // escolhido, restringe a lista aos projetos daquele cliente (mesmo
+  // padrão de projectOptions já usado no form de novo apontamento acima).
+  const mineProjectOptions = useMemo(
+    () => (mineFilters.client_id ? projects.filter((p) => p.client_id === mineFilters.client_id) : projects),
+    [projects, mineFilters.client_id],
+  )
 
   function loadMine() {
     if (!ownResource) {
@@ -86,13 +96,19 @@ export default function TimesheetsPage() {
     }
     setLoadingMine(true)
     timesheetsApi
-      .listTimesheets({ resource_id: ownResource.id, start: mineFilters.start || undefined, end: mineFilters.end || undefined })
+      .listTimesheets({
+        resource_id: ownResource.id,
+        start: mineFilters.start || undefined,
+        end: mineFilters.end || undefined,
+        client_id: mineFilters.client_id || undefined,
+        project_id: mineFilters.project_id || undefined,
+      })
       .then(setMine)
       .catch((err) => setListError(err.message))
       .finally(() => setLoadingMine(false))
   }
 
-  useEffect(loadMine, [ownResource, mineFilters.start, mineFilters.end])
+  useEffect(loadMine, [ownResource, mineFilters.start, mineFilters.end, mineFilters.client_id, mineFilters.project_id])
 
   function loadPending() {
     if (!canManage) return
@@ -114,7 +130,13 @@ export default function TimesheetsPage() {
   useEffect(loadPending, [canManage, pendingFilters.start, pendingFilters.end, pendingFilters.resource_id, pendingFilters.project_id])
 
   function updateMineFilter(field) {
-    return (event) => setMineFilters((prev) => ({ ...prev, [field]: event.target.value }))
+    return (event) => {
+      const value = event.target.value
+      // Trocar o cliente limpa o projeto selecionado, já que a lista de
+      // projetos do filtro muda (mineProjectOptions) — evita ficar com um
+      // project_id de outro cliente aplicado sem aparecer mais no <select>.
+      setMineFilters((prev) => (field === 'client_id' ? { ...prev, client_id: value, project_id: '' } : { ...prev, [field]: value }))
+    }
   }
 
   function updatePendingFilter(field) {
@@ -250,6 +272,26 @@ export default function TimesheetsPage() {
           </FormField>
           <FormField label={t('Data final')}>
             <TextInput type="date" value={mineFilters.end} onChange={updateMineFilter('end')} />
+          </FormField>
+          <FormField label={t('Cliente')}>
+            <Select value={mineFilters.client_id} onChange={updateMineFilter('client_id')}>
+              <option value="">{t('Todos')}</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.legal_name}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField label={t('Projeto')}>
+            <Select value={mineFilters.project_id} onChange={updateMineFilter('project_id')}>
+              <option value="">{t('Todos')}</option>
+              {mineProjectOptions.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.code} — {project.name}
+                </option>
+              ))}
+            </Select>
           </FormField>
         </div>
         {loadingMine ? (

@@ -1730,24 +1730,13 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
   return (
     <Modal title={isEdit ? `${t('Editar tarefa')} — ${task.wbs_code} ${task.name}` : t('Nova tarefa')} onClose={onClose} wide>
       <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Ordem dos campos pedida pelo usuário: Nome, Tarefa pai, WBS/EAP,
+         * Tipo (na edição, "Tarefa pai" não se aplica — trocar de pai é a
+         * ação "Mover tarefa" à parte — então o Status ocupa o mesmo lugar,
+         * mantendo o layout consistente entre criar/editar). */}
         <div className="grid grid-cols-2 gap-4">
-          <FormField
-            label={t('Código WBS')}
-            required
-            hint={isEdit ? t('Use "Recalcular WBS/EAP" para renumerar.') : t('Sugerido a partir da Tarefa pai — pode editar.')}
-          >
-            <TextInput required disabled={isEdit} value={form.wbs_code} onChange={updateField('wbs_code')} />
-          </FormField>
           <FormField label={t('Nome')} required>
             <TextInput required value={form.name} onChange={updateField('name')} />
-          </FormField>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <FormField label={t('Tipo')} required>
-            <Select required value={form.task_type} onChange={updateField('task_type')}>
-              <option value="CONSULTING">{t('Consultoria')}</option>
-              <option value="MANAGEMENT">{t('Gestão')}</option>
-            </Select>
           </FormField>
           {!isEdit ? (
             <FormField label={t('Tarefa pai')} hint={t('Deixe em branco para uma tarefa de topo (raiz).')}>
@@ -1771,6 +1760,21 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
               </Select>
             </FormField>
           )}
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            label={t('Código WBS')}
+            required
+            hint={isEdit ? t('Use "Recalcular WBS/EAP" para renumerar.') : t('Sugerido a partir da Tarefa pai — pode editar.')}
+          >
+            <TextInput required disabled={isEdit} value={form.wbs_code} onChange={updateField('wbs_code')} />
+          </FormField>
+          <FormField label={t('Tipo')} required>
+            <Select required value={form.task_type} onChange={updateField('task_type')}>
+              <option value="CONSULTING">{t('Consultoria')}</option>
+              <option value="MANAGEMENT">{t('Gestão')}</option>
+            </Select>
+          </FormField>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <FormField label={t('Duração (dias)')} hint={t('Editar recalcula o Trabalho.')}>

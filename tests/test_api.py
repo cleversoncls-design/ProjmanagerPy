@@ -422,6 +422,43 @@ def test_timesheets_filter_by_date_range(client, setup):
     assert dates == ["2026-08-20"]
 
 
+def test_timesheets_filter_by_client(client, setup):
+    """Pedido do usuário: filtro por cliente em "Meus apontamentos" — não
+    existe client_id em Timesheet, resolve via os projetos do cliente (ver
+    comentário em list_timesheets)."""
+    admin_headers = setup["admin_headers"]
+    resource = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    ).json()
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    client.post(f"/projects/{setup['project_a'].id}/resources", json={"resource_id": resource["id"]}, headers=admin_headers)
+    client.post(f"/projects/{setup['project_b'].id}/resources", json={"resource_id": resource["id"]}, headers=admin_headers)
+    task_a = client.post(f"/projects/{setup['project_a'].id}/tasks", json={"name": "A", "wbs_code": "4"}, headers=admin_headers).json()
+    task_b = client.post(f"/projects/{setup['project_b'].id}/tasks", json={"name": "B", "wbs_code": "4"}, headers=admin_headers).json()
+
+    for task in (task_a, task_b):
+        resp = client.post(
+            "/timesheets",
+            json={"task_id": task["id"], "date": "2026-08-12", "start_time": "09:00", "end_time": "10:00"},
+            headers=consultant_headers,
+        )
+        assert resp.status_code == 201
+
+    filtered = client.get(
+        "/timesheets", params={"resource_id": resource["id"], "client_id": setup["client_a"].id}, headers=admin_headers
+    )
+    assert filtered.status_code == 200
+    task_ids = [row["task_id"] for row in filtered.json()]
+    assert task_ids == [task_a["id"]]
+
+
 def test_portfolio_row_includes_manager_name(client, setup):
     """Pedido do usuário: mostrar o nome do gerente na lista de Projetos."""
     response = client.get("/reports/portfolio", headers=setup["admin_headers"])

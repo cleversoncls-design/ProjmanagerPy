@@ -39,8 +39,8 @@ _ES: dict[str, str] = {
     "Feriado não encontrado": "Feriado no encontrado",
     "Fora do escopo do cliente": "Fuera del alcance del cliente",
     "Hora final precisa ser depois da hora inicial": "La hora final debe ser posterior a la hora inicial",
-    "Informe ao menos um filtro (project_id, task_id, resource_id, status_filter, start ou end)": (
-        "Informe al menos un filtro (project_id, task_id, resource_id, status_filter, start o end)"
+    "Informe ao menos um filtro (project_id, task_id, resource_id, client_id, status_filter, start ou end)": (
+        "Informe al menos un filtro (project_id, task_id, resource_id, client_id, status_filter, start o end)"
     ),
     "Informe project_id ou task_id": "Informe project_id o task_id",
     "Intervalo não pode ser maior ou igual ao tempo entre a hora inicial e a final": (
