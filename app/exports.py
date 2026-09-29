@@ -153,7 +153,24 @@ def _hours_hm(value: Decimal) -> str:
     return f"{hours:02d}:{minutes:02d}"
 
 
-_SO_HEADERS = ["Nº OS", "Data", "Cliente", "Projeto", "Total", "Status"]
+_SO_HEADERS = [
+    "Data",
+    "Cliente",
+    "Projeto",
+    "Consultor",
+    "Nº OS",
+    "WBS",
+    "Tarefa",
+    "Hora início",
+    "Hora fim",
+    "Horas",
+    "Status",
+    "Descrição",
+]
+
+
+def _time_hm(value) -> str:
+    return value.strftime("%H:%M") if value else ""
 
 
 def build_service_orders_workbook(
@@ -166,57 +183,63 @@ def build_service_orders_workbook(
     client_id: str | None = None,
 ) -> bytes:
     """Planilha das Ordens de Serviço do período filtrado (mesmos dados de
-    GET /reports/service-orders, ver services.service_orders), agrupada por
-    consultor — um bloco de linhas por consultor (ordenado por data dentro
-    do bloco), uma linha de subtotal ao final de cada bloco e o total geral
-    na última linha. Pedido do usuário: "exportar para planilha eletrônica"
-    com "os valores totais por consultor" — mesmo agrupamento usado na
-    impressão da lista (ver ServiceOrderListPrintSheet.jsx no frontend,
-    que replica esta mesma lógica em cima dos dados já carregados na
-    tela, sem precisar desta rota)."""
+    GET /reports/service-orders, ver services.service_orders). Pedido do
+    usuário: organizar "por dia, cliente, projeto" e detalhar "linha a
+    linha também por tarefa" — então cada linha é uma atividade
+    (apontamento) dentro de uma OS, não mais um resumo por OS. A ordem das
+    linhas é a que `service_orders()` já devolve — (data, código do
+    cliente, código do projeto, nome do consultor) — que já corresponde a
+    "dia, cliente, projeto"; dentro de cada OS as atividades vêm ordenadas
+    por hora de início (ver service_orders). Uma linha de subtotal fecha
+    cada OS e uma linha de total geral fecha a planilha — mesmo padrão de
+    antes, só que agora por OS em vez de por consultor."""
     orders = service_orders(session, start=start, end=end, project_id=project_id, resource_id=resource_id, client_id=client_id)
-
-    by_resource: dict[str, list[dict]] = {}
-    for order in orders:
-        by_resource.setdefault(order["resource_name"], []).append(order)
 
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Ordens de Serviço"
     sheet.freeze_panes = "A2"
-    sheet.append(["Consultor", *_SO_HEADERS])
+    sheet.append(_SO_HEADERS)
     for cell in sheet[1]:
         cell.font = Font(bold=True)
 
     grand_total = Decimal("0")
-    for resource_name in sorted(by_resource):
-        group = sorted(by_resource[resource_name], key=lambda o: o["date"])
-        subtotal = Decimal("0")
-        for order in group:
-            all_approved = all(a["status"] == TimesheetStatus.APPROVED for a in order["activities"])
-            any_unscheduled = any(a["unscheduled"] for a in order["activities"])
-            status_label = "Aprovado" if all_approved else "Pendente"
-            if any_unscheduled:
+    for order in orders:
+        client_label = f"{order['client_code']} - {order['client_name']}"
+        project_label = f"{order['project_code']} - {order['project_name']}"
+        for activity in order["activities"]:
+            status_label = "Aprovado" if activity["status"] == TimesheetStatus.APPROVED else "Pendente"
+            if activity["unscheduled"]:
                 status_label += " / Fora da agenda"
             sheet.append(
                 [
-                    resource_name,
-                    order["order_number"],
                     order["date"],
-                    f"{order['client_code']} - {order['client_name']}",
-                    f"{order['project_code']} - {order['project_name']}",
-                    _hours_hm(order["total_hours"]),
+                    client_label,
+                    project_label,
+                    order["resource_name"],
+                    order["order_number"],
+                    activity["wbs_code"] or "—",
+                    activity["task_name"] or "—",
+                    _time_hm(activity["start_time"]),
+                    _time_hm(activity["end_time"]),
+                    _hours_hm(activity["hours"]),
                     status_label,
+                    activity["description"] or "",
                 ]
             )
-            subtotal += order["total_hours"]
-        sheet.append(["", "", "", "", f"Subtotal — {resource_name}", _hours_hm(subtotal), ""])
+        subtotal_row = [""] * len(_SO_HEADERS)
+        subtotal_row[8] = f"Subtotal — OS {order['order_number']}"
+        subtotal_row[9] = _hours_hm(order["total_hours"])
+        sheet.append(subtotal_row)
         for cell in sheet[sheet.max_row]:
             cell.font = Font(bold=True)
-        grand_total += subtotal
+        grand_total += order["total_hours"]
 
     sheet.append([])
-    sheet.append(["", "", "", "", "Total geral", _hours_hm(grand_total), ""])
+    total_row = [""] * len(_SO_HEADERS)
+    total_row[8] = "Total geral"
+    total_row[9] = _hours_hm(grand_total)
+    sheet.append(total_row)
     for cell in sheet[sheet.max_row]:
         cell.font = Font(bold=True)
 

@@ -187,7 +187,7 @@ def test_audit_log_records_actions_and_is_restricted_to_internal_management(clie
     assert entries[0]["user_id"] == setup["admin"].id
 
 
-def test_timesheet_requires_assignment_active_project_and_rejects_duplicates(client, setup):
+def test_timesheet_requires_assignment_active_project_and_allows_same_day_duplicates(client, setup):
     project_id = setup["project_a"].id
     admin_headers = setup["admin_headers"]
 
@@ -223,8 +223,11 @@ def test_timesheet_requires_assignment_active_project_and_rejects_duplicates(cli
     created = client.post("/timesheets", json=timesheet_payload, headers=consultant_headers)
     assert created.status_code == 201
 
+    # Mais de um apontamento do mesmo recurso, na mesma tarefa, no mesmo dia
+    # é permitido de propósito (ex.: dois períodos de trabalho no mesmo dia)
+    # — não existe checagem de duplicado em _resolve_task_and_project.
     duplicate = client.post("/timesheets", json=timesheet_payload, headers=consultant_headers)
-    assert duplicate.status_code == 409
+    assert duplicate.status_code == 201
 
 
 def test_approving_timesheet_updates_task_actual_hours(client, setup):
@@ -351,6 +354,12 @@ def test_project_sold_value_is_computed_from_management_and_consulting(client, s
         "consulting_hours": "5",
         "consulting_rate": "300",
         "sold_value": "999999",
+        # Cor diferente do default (DEFAULT_PROJECT_COLOR) — o próprio
+        # `project_a` do fixture `setup` já está ACTIVE com a cor default,
+        # e a exclusividade de cor entre projetos ativos (ver
+        # _ensure_color_available em routers/projects.py) rejeitaria (409)
+        # criar outro projeto ativo com a cor repetida.
+        "color": "#800000",
     }
     created = client.post("/projects", json=payload, headers=admin_headers).json()
     assert float(created["sold_value"]) == 3500.0
@@ -359,6 +368,75 @@ def test_project_sold_value_is_computed_from_management_and_consulting(client, s
         f"/projects/{created['id']}", json={"consulting_rate": "400"}, headers=admin_headers
     ).json()
     assert float(updated["sold_value"]) == 4000.0
+
+
+def test_project_color_exclusivity_and_striped_on_finalize(client, setup):
+    """Item 1 do pedido do usuário: cor exclusiva entre projetos ativos, em
+    todos os clientes, enquanto o projeto não for finalizado (Concluído ou
+    Cancelado); ao finalizar, o flag color_striped liga sozinho (a tela usa
+    o padrão listrado no lugar da cor) e o hex fica livre pra outro projeto
+    ativo escolher — ver _ensure_color_available/_STRIPED_STATUSES em
+    routers/projects.py."""
+    admin_headers = setup["admin_headers"]
+    project_a = setup["project_a"]  # já ACTIVE (ver fixture setup), cor default
+
+    # Outro projeto ativo não pode nascer com a mesma cor de project_a.
+    conflict = client.post(
+        "/projects",
+        json={
+            "client_id": setup["client_b"].id,
+            "manager_id": setup["pm"].id,
+            "code": "PRJ-COLOR-1",
+            "name": "Projeto cor 1",
+            "color": project_a.color,
+        },
+        headers=admin_headers,
+    )
+    assert conflict.status_code == 409
+
+    created = client.post(
+        "/projects",
+        json={
+            "client_id": setup["client_b"].id,
+            "manager_id": setup["pm"].id,
+            "code": "PRJ-COLOR-2",
+            "name": "Projeto cor 2",
+            "color": "#870000",
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    other_project_id = created.json()["id"]
+
+    # Trocar a cor de outro projeto pra igual à de project_a também é
+    # rejeitado pelo mesmo motivo (update usa a mesma checagem).
+    blocked_update = client.patch(f"/projects/{other_project_id}", json={"color": project_a.color}, headers=admin_headers)
+    assert blocked_update.status_code == 409
+
+    # Finalizar project_a (Concluído) libera a cor: color_striped liga
+    # sozinho e a cor original fica guardada (nunca apagada).
+    finalize = client.patch(f"/projects/{project_a.id}", json={"status": "COMPLETED"}, headers=admin_headers)
+    assert finalize.status_code == 200
+    finalized_body = finalize.json()
+    assert finalized_body["color_striped"] is True
+    assert finalized_body["color"] == project_a.color
+
+    # Agora outro projeto ativo pode usar a cor que ficou livre.
+    now_allowed = client.patch(f"/projects/{other_project_id}", json={"color": project_a.color}, headers=admin_headers)
+    assert now_allowed.status_code == 200
+    assert now_allowed.json()["color_striped"] is False
+
+    # Reativar project_a sem trocar de cor é rejeitado: a cor original já
+    # foi tomada por other_project_id enquanto project_a estava parado.
+    reactivate_conflict = client.patch(f"/projects/{project_a.id}", json={"status": "ACTIVE"}, headers=admin_headers)
+    assert reactivate_conflict.status_code == 409
+
+    # Reativando com uma cor livre funciona e o listrado desliga sozinho.
+    reactivate_ok = client.patch(
+        f"/projects/{project_a.id}", json={"status": "ACTIVE", "color": "#005F00"}, headers=admin_headers
+    )
+    assert reactivate_ok.status_code == 200
+    assert reactivate_ok.json()["color_striped"] is False
 
 
 def test_external_role_cannot_change_project_financials(client, setup):

@@ -277,10 +277,12 @@ def service_orders_export_xlsx(
     user: User = Depends(require_roles(*INTERNAL_ROLES)),
     db: Session = Depends(get_db),
 ) -> Response:
-    """Exporta as Ordens de Serviço do período filtrado pra .xlsx, agrupadas
-    por consultor com subtotal por consultor e total geral — mesmo escopo/
-    filtros de GET /reports/service-orders (ver `_resolve_service_orders_scope`
-    acima), ver app/exports.build_service_orders_workbook."""
+    """Exporta as Ordens de Serviço do período filtrado pra .xlsx, uma linha
+    por tarefa/atividade apontada (não mais um resumo por OS), organizada
+    por dia, cliente e projeto — pedido do usuário — com subtotal por OS e
+    total geral. Mesmo escopo/filtros de GET /reports/service-orders (ver
+    `_resolve_service_orders_scope` acima), ver
+    app/exports.build_service_orders_workbook."""
     period_start, period_end, resource_id = _resolve_service_orders_scope(
         db, user, project_id=project_id, resource_id=resource_id, start=start, end=end
     )

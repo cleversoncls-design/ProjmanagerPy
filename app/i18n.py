@@ -28,6 +28,7 @@ _ES: dict[str, str] = {
     "Cliente não encontrado": "Cliente no encontrado",
     "Cliente precisa informar project_id": "El cliente debe informar project_id",
     "Cor do projeto inválida": "Color de proyecto inválido",
+    "Esta cor já está em uso por outro projeto ativo": "Este color ya está en uso por otro proyecto activo",
     "Conflito de integridade de dados (registro duplicado ou referência inválida).": (
         "Conflicto de integridad de datos (registro duplicado o referencia inválida)."
     ),
@@ -45,7 +46,6 @@ _ES: dict[str, str] = {
     "Intervalo não pode ser maior ou igual ao tempo entre a hora inicial e a final": (
         "El intervalo no puede ser mayor o igual al tiempo entre la hora inicial y la final"
     ),
-    "Já existe um apontamento deste recurso nesta tarefa para esta data": "Ya existe un registro de horas de este recurso en esta tarea para esta fecha",
     "Já existe um cliente com este código": "Ya existe un cliente con este código",
     "Já existe um feriado cadastrado nesta data para este calendário": "Ya existe un feriado registrado en esta fecha para este calendario",
     "Já existe um projeto com este código": "Ya existe un proyecto con este código",

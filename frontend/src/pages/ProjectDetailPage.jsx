@@ -220,6 +220,12 @@ function OverviewTab({ project, report, evm }) {
   )
 }
 
+// Status que liberam a cor (some da disputa de exclusividade e vira
+// listrado — ver Project.color_striped no backend). Mesmo grupo de
+// _COLOR_POOL_EXCLUDED_STATUSES em app/routers/projects.py, menos MODELO
+// (projeto nunca chega a esta tela nesse status).
+const FINALIZED_PROJECT_STATUSES = new Set(['COMPLETED', 'CANCELLED'])
+
 function ProjectEditModal({ project, onClose, onSaved }) {
   const { labels, t } = useLanguage()
   const [form, setForm] = useState({
@@ -240,6 +246,11 @@ function ProjectEditModal({ project, onClose, onSaved }) {
   const [calendars, setCalendars] = useState([])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  // Mesma ideia de ProjectsPage: Map<hex, "código — nome"> dos projetos
+  // que hoje disputam a exclusividade de cor, pra desabilitar essas opções
+  // no ColorListPicker — busca todos os projetos do escopo (não só os já
+  // carregados nesta tela) e exclui o próprio projeto sendo editado.
+  const [usedColors, setUsedColors] = useState(new Map())
 
   useEffect(() => {
     usersApi
@@ -247,7 +258,26 @@ function ProjectEditModal({ project, onClose, onSaved }) {
       .then((internalPms) => usersApi.listUsers({ role: 'ADMIN' }).then((admins) => setManagers([...admins, ...internalPms])))
       .catch(() => {})
     calendarsApi.listCalendars().then(setCalendars).catch(() => {})
+    projectsApi
+      .listProjects()
+      .then((allProjects) => {
+        const map = new Map()
+        for (const other of allProjects) {
+          if (other.id === project.id) continue
+          if (['COMPLETED', 'CANCELLED', 'MODELO'].includes(other.status)) continue
+          map.set((other.color || '').toUpperCase(), `${other.code} — ${other.name}`)
+        }
+        setUsedColors(map)
+      })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Status escolhido no próprio formulário (o usuário pode estar
+  // finalizando ou reativando o projeto agora, antes de salvar) — decide
+  // se o seletor de cor aparece travado/listrado já nesta tela, sem
+  // esperar o round-trip pro backend.
+  const willBeFinalized = FINALIZED_PROJECT_STATUSES.has(form.status)
 
   function updateField(field) {
     return (event) => setForm((prev) => ({ ...prev, [field]: event.target.value }))
@@ -330,8 +360,21 @@ function ProjectEditModal({ project, onClose, onSaved }) {
           </FormField>
         </div>
 
-        <FormField label={t('Cor do projeto')} hint={t('Usada na Agenda de consultores para identificar este projeto.')}>
-          <ColorListPicker value={form.color} onChange={(color) => setForm((prev) => ({ ...prev, color }))} />
+        <FormField
+          label={t('Cor do projeto')}
+          hint={
+            willBeFinalized
+              ? t('Projeto finalizado (Concluído/Cancelado) exibe o padrão listrado — a cor original fica guardada e volta se o projeto for reativado.')
+              : t('Usada na Agenda de consultores para identificar este projeto.')
+          }
+        >
+          <ColorListPicker
+            value={form.color}
+            onChange={(color) => setForm((prev) => ({ ...prev, color }))}
+            usedColors={usedColors}
+            disabled={willBeFinalized}
+            striped={willBeFinalized}
+          />
         </FormField>
 
         <div className="rounded-lg border border-[var(--border)] p-4">
@@ -1338,6 +1381,25 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
   const [assignForm, setAssignForm] = useState({ resource_id: '', allocated_hours: '' })
   const [depError, setDepError] = useState('')
   const [assignError, setAssignError] = useState('')
+  // "Nova tarefa": ainda não existe task.id quando o usuário monta
+  // predecessoras/recursos, então cada item entra como rascunho local (id
+  // temporário prefixado "draft-") e só vira registro de verdade na API
+  // dentro de handleSubmit, logo depois que a tarefa em si é criada.
+  // created_task_id guarda o id da tarefa assim que a criação (o primeiro
+  // passo de handleSubmit) tiver sucesso — existe pra cobrir o caso de uma
+  // falha no meio da sequência de chamadas (ex.: anexar um recurso dá
+  // erro): reenviar o formulário não tenta criar a tarefa de novo (isso
+  // duplicaria), só retoma de onde parou, persistindo os rascunhos que
+  // ainda não viraram registro real.
+  const [createdTaskId, setCreatedTaskId] = useState(null)
+
+  function isDraftId(id) {
+    return typeof id === 'string' && id.startsWith('draft-')
+  }
+
+  function makeDraftId() {
+    return `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  }
 
   function updateField(field) {
     return (event) => {
@@ -1381,21 +1443,46 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
         if (effortField === 'hours') payload.estimated_hours = form.estimated_hours
         await tasksApi.updateTask(task.id, payload)
       } else {
-        const payload = {
-          name: form.name,
-          wbs_code: form.wbs_code,
-          task_type: form.task_type,
-          is_milestone: form.is_milestone,
+        let newTaskId = createdTaskId
+        if (!newTaskId) {
+          const payload = {
+            name: form.name,
+            wbs_code: form.wbs_code,
+            task_type: form.task_type,
+            is_milestone: form.is_milestone,
+          }
+          if (form.notes) payload.notes = form.notes
+          if (form.parent_task_id) payload.parent_task_id = form.parent_task_id
+          if (form.planned_start_date) payload.planned_start_date = form.planned_start_date
+          // Fim planejado não vai no payload de criação pelo mesmo motivo do
+          // update acima — sempre calculado no backend a partir de Início +
+          // Duração (ver routers/tasks.py create_task).
+          if (effortField === 'duration' && form.duration_days) payload.duration_days = form.duration_days
+          if (effortField === 'hours' && form.estimated_hours) payload.estimated_hours = form.estimated_hours
+          const created = await tasksApi.createTask(projectId, payload)
+          newTaskId = created.id
+          setCreatedTaskId(created.id)
         }
-        if (form.notes) payload.notes = form.notes
-        if (form.parent_task_id) payload.parent_task_id = form.parent_task_id
-        if (form.planned_start_date) payload.planned_start_date = form.planned_start_date
-        // Fim planejado não vai no payload de criação pelo mesmo motivo do
-        // update acima — sempre calculado no backend a partir de Início +
-        // Duração (ver routers/tasks.py create_task).
-        if (effortField === 'duration' && form.duration_days) payload.duration_days = form.duration_days
-        if (effortField === 'hours' && form.estimated_hours) payload.estimated_hours = form.estimated_hours
-        await tasksApi.createTask(projectId, payload)
+        // Predecessoras e recursos escolhidos antes de a tarefa existir
+        // (rascunhos locais, id "draft-...") são persistidos agora, um a
+        // um — os que já viraram registro real (retomando depois de uma
+        // falha parcial) são pulados.
+        for (const dep of dependencies.filter((d) => isDraftId(d.id))) {
+          const createdDep = await tasksApi.createDependency({
+            predecessor_task_id: dep.predecessor_task_id,
+            successor_task_id: newTaskId,
+            dependency_type: dep.dependency_type,
+            lag_days: dep.lag_days,
+          })
+          setDependencies((prev) => prev.map((d) => (d.id === dep.id ? createdDep : d)))
+        }
+        for (const a of assignments.filter((x) => isDraftId(x.id))) {
+          const createdAssignment = await tasksApi.assignResource(newTaskId, {
+            resource_id: a.resource_id,
+            allocated_hours: a.allocated_hours,
+          })
+          setAssignments((prev) => prev.map((x) => (x.id === a.id ? createdAssignment : x)))
+        }
       }
       onSaved()
     } catch (err) {
@@ -1405,6 +1492,12 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
     }
   }
 
+  // Id real da tarefa, se já existir (edição — ou "Nova tarefa" depois que
+  // handleSubmit já criou a tarefa numa tentativa anterior). Enquanto for
+  // null, Predecessoras/Recursos ficam em rascunho local (ver
+  // makeDraftId/isDraftId) até a tarefa ser efetivamente criada.
+  const activeTaskId = task?.id || createdTaskId
+
   async function handleAddDependency(event) {
     event.preventDefault()
     setDepError('')
@@ -1412,12 +1505,26 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
       setDepError(t('Selecione a tarefa predecessora.'))
       return
     }
+    const lagDays = Number(depForm.lag_days) || 0
+    if (!activeTaskId) {
+      setDependencies((prev) => [
+        ...prev,
+        {
+          id: makeDraftId(),
+          predecessor_task_id: depForm.predecessor_task_id,
+          dependency_type: depForm.dependency_type,
+          lag_days: lagDays,
+        },
+      ])
+      setDepForm({ predecessor_task_id: '', dependency_type: 'FS', lag_days: '0' })
+      return
+    }
     try {
       const created = await tasksApi.createDependency({
         predecessor_task_id: depForm.predecessor_task_id,
-        successor_task_id: task.id,
+        successor_task_id: activeTaskId,
         dependency_type: depForm.dependency_type,
-        lag_days: Number(depForm.lag_days) || 0,
+        lag_days: lagDays,
       })
       setDependencies((prev) => [...prev, created])
       setDepForm({ predecessor_task_id: '', dependency_type: 'FS', lag_days: '0' })
@@ -1428,6 +1535,10 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
 
   async function handleRemoveDependency(dependencyId) {
     setDepError('')
+    if (isDraftId(dependencyId)) {
+      setDependencies((prev) => prev.filter((dep) => dep.id !== dependencyId))
+      return
+    }
     try {
       await tasksApi.deleteDependency(dependencyId)
       setDependencies((prev) => prev.filter((dep) => dep.id !== dependencyId))
@@ -1443,8 +1554,20 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
       setAssignError(t('Selecione o recurso e informe as horas alocadas.'))
       return
     }
+    if (!activeTaskId) {
+      setAssignments((prev) => [
+        ...prev,
+        {
+          id: makeDraftId(),
+          resource_id: assignForm.resource_id,
+          allocated_hours: assignForm.allocated_hours,
+        },
+      ])
+      setAssignForm({ resource_id: '', allocated_hours: '' })
+      return
+    }
     try {
-      const created = await tasksApi.assignResource(task.id, {
+      const created = await tasksApi.assignResource(activeTaskId, {
         resource_id: assignForm.resource_id,
         allocated_hours: assignForm.allocated_hours,
       })
@@ -1457,8 +1580,12 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
 
   async function handleRemoveAssignment(assignmentId) {
     setAssignError('')
+    if (isDraftId(assignmentId)) {
+      setAssignments((prev) => prev.filter((a) => a.id !== assignmentId))
+      return
+    }
     try {
-      await tasksApi.removeAssignment(task.id, assignmentId)
+      await tasksApi.removeAssignment(activeTaskId, assignmentId)
       setAssignments((prev) => prev.filter((a) => a.id !== assignmentId))
     } catch (err) {
       setAssignError(err.message)
@@ -1560,8 +1687,12 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
         </div>
       </form>
 
-      {isEdit && (
-        <div className="mt-6 space-y-5 border-t border-[var(--border)] pt-5">
+      <div className="mt-6 space-y-5 border-t border-[var(--border)] pt-5">
+          {!isEdit && (
+            <p className="text-xs text-[var(--text-muted)]">
+              {t('Predecessoras e recursos escolhidos aqui são gravados junto com a tarefa ao clicar em "Salvar".')}
+            </p>
+          )}
           <div>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{t('Predecessoras')}</h3>
             {dependencies.length === 0 ? (
@@ -1665,8 +1796,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
             </form>
             <ErrorBanner message={assignError} />
           </div>
-        </div>
-      )}
+      </div>
     </Modal>
   )
 }

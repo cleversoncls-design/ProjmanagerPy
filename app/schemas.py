@@ -205,6 +205,9 @@ class ProjectSummary(ORMModel):
     calendar_id: str | None
     status_date: date | None
     color: str
+    # True = projeto finalizado (COMPLETED/CANCELLED) exibindo o padrão
+    # listrado no lugar de `color` — ver Project.color_striped.
+    color_striped: bool
 
 
 class ProjectDetail(ProjectSummary):
@@ -658,6 +661,10 @@ class ProjectPortfolioRow(BaseModel):
     margin: Decimal | None = None
     next_milestone_name: str | None = None
     next_milestone_date: date | None = None
+    # Ver Project.color_striped — a tela de Projetos é onde o padrão
+    # listrado de projeto finalizado precisa aparecer de fato.
+    color: str
+    color_striped: bool
 
 
 class DashboardResponse(BaseModel):

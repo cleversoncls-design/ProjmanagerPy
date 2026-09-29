@@ -1007,6 +1007,8 @@ def portfolio_rows(session: Session, projects: list[Project], *, include_financi
                 "margin": margin,
                 "next_milestone_name": milestone_name,
                 "next_milestone_date": milestone_date,
+                "color": project.color,
+                "color_striped": project.color_striped,
             }
         )
     return rows
