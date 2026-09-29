@@ -118,8 +118,11 @@ export default function SchedulesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resourceOptions, canManage])
 
+  // Filtro "Projeto" da Agenda só lista projetos ativos (pedido do
+  // usuário) — mesmo critério já usado no combo de projeto do apontamento
+  // de horas (TimesheetFieldsForm).
   const projectOptions = useMemo(
-    () => (filters.client_id ? projects.filter((p) => p.client_id === filters.client_id) : projects),
+    () => projects.filter((p) => p.status === 'ACTIVE' && (!filters.client_id || p.client_id === filters.client_id)),
     [projects, filters.client_id],
   )
   const monthCells = useMemo(() => buildMonthCells(viewDate), [viewDate])
