@@ -104,14 +104,22 @@ def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_
 @router.get("/reports/portfolio", response_model=list[ProjectPortfolioRow])
 def portfolio(
     client_id: str | None = None,
+    status: ProjectStatus | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """Uma linha por projeto no escopo do usuário — o "portfolio view"
-    referenciado nas ferramentas de mercado (Monday.com, MS Project)."""
+    referenciado nas ferramentas de mercado (Monday.com, MS Project).
+    `client_id` (filtro da tela de Projetos) só se aplica pra quem enxerga
+    mais de um cliente — perfil externo já é travado num cliente só (ver
+    _scoped_projects). `status` filtra dentro do que _scoped_projects
+    já devolve, então nunca inclui MODELO mesmo se pedido (ele já foi
+    excluído antes de chegar aqui — ver _scoped_projects)."""
     projects = _scoped_projects(db, user)
     if client_id and user.role not in EXTERNAL_ROLES:
         projects = [p for p in projects if p.client_id == client_id]
+    if status:
+        projects = [p for p in projects if p.status == status]
     return portfolio_rows(db, projects, include_financials=user.role not in EXTERNAL_ROLES)
 
 
