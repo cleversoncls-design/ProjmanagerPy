@@ -4,13 +4,17 @@ import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import { ADMIN_ONLY_ROLES, DASHBOARD_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECTS_VISIBLE_ROLES } from '../utils/labels'
 import logo from '../assets/resultar-logo.png'
-import { BriefcaseIcon, BuildingIcon, CalendarIcon, ClipboardCheckIcon, ClockIcon, FileTextIcon, HomeIcon, UsersIcon } from './icons'
+import { BadgeCheckIcon, BriefcaseIcon, BuildingIcon, CalendarIcon, ClipboardCheckIcon, ClockIcon, FileTextIcon, HomeIcon, UsersIcon } from './icons'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', end: true, icon: HomeIcon, roles: DASHBOARD_ROLES },
   { to: '/projects', label: 'Projetos', icon: BriefcaseIcon, roles: PROJECTS_VISIBLE_ROLES },
   { to: '/schedules', label: 'Agenda de consultores', roles: INTERNAL_ROLES, icon: ClockIcon },
   { to: '/timesheets', label: 'Apontamento de horas', roles: INTERNAL_ROLES, icon: ClipboardCheckIcon },
+  // Só ADMIN/INTERNAL_PM aprovam (mesmo grupo de papéis de /calendars) —
+  // antes era uma seção dentro de Apontamento de horas, virou rotina
+  // própria no menu (pedido do usuário).
+  { to: '/timesheet-approvals', label: 'Aprovações de horas', roles: MANAGEMENT_ROLES, icon: BadgeCheckIcon },
   { to: '/service-orders', label: 'Ordens de Serviço', roles: INTERNAL_ROLES, icon: FileTextIcon },
   { to: '/clients', label: 'Clientes', roles: ADMIN_ONLY_ROLES, icon: BuildingIcon },
   { to: '/users', label: 'Usuários e recursos', roles: ADMIN_ONLY_ROLES, icon: UsersIcon },
