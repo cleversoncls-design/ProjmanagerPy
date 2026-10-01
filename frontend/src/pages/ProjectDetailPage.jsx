@@ -2276,7 +2276,16 @@ function ganttEnd(task) {
   return task.rollup_end_date ?? task.planned_end_date
 }
 
-const GANTT_LABEL_COL_PX = 220
+// Largura MÍNIMA da coluna fixa (WBS + descrição) — a largura real é
+// calculada dinamicamente por computeGanttLabelColPx, pelo maior texto entre
+// as tarefas visíveis (pedido do usuário: "se puder colocar dinâmico, pelo
+// maior tamanho de texto, melhor"), nunca menor que este valor.
+const GANTT_LABEL_COL_MIN_PX = 220
+// ...e nunca maior que este, pra uma descrição absurdamente longa não tomar
+// a tela toda — o texto nesse caso ainda assim só trunca no PNG exportado
+// (ganttTruncateForCanvas); na tela, a coluna é sticky e o texto quebra via
+// "truncate" normalmente.
+const GANTT_LABEL_COL_MAX_PX = 560
 const GANTT_DAY_PX = 34
 const GANTT_ROW_PX = 30
 // Segunda-feira de referência (03/01/2000) só pra achar o índice de semana
@@ -2425,6 +2434,41 @@ function ganttTruncateForCanvas(ctx, text, maxWidth) {
   return `${truncated}…`
 }
 
+// Mesmo rótulo "WBS - descrição" (+ sufixo de predecessoras, quando houver)
+// usado tanto na coluna fixa da tela quanto no texto desenhado no PNG
+// exportado — centralizado aqui pra não divergir entre os dois.
+function ganttRowLabel(task, predecessorCount, t) {
+  const preds = predecessorCount[task.id] || 0
+  let label = `${task.wbs_code} - ${task.name}`
+  if (preds > 0) {
+    label += ` · ${preds} ${preds > 1 ? t('predecessoras') : t('predecessora')}`
+  }
+  return label
+}
+
+/** Largura da coluna fixa (WBS + descrição) do Gantt, calculada pelo maior
+ * texto entre as tarefas visíveis — pedido do usuário pra parar de cortar a
+ * descrição. Mede com <canvas> (mesma técnica do export PNG) pra bater com
+ * o tamanho real do texto renderizado, respeitando recuo por profundidade e
+ * o espaço do botão de expandir/recolher; limitada a um mínimo/máximo
+ * razoável (GANTT_LABEL_COL_MIN_PX/MAX_PX). */
+function computeGanttLabelColPx(tasks, predecessorCount, parentTaskIds, t) {
+  if (typeof document === 'undefined' || tasks.length === 0) return GANTT_LABEL_COL_MIN_PX
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  const TOGGLE_PX = 18 // botão expandir/recolher: h-4 w-4 + mr-0.5
+  const RIGHT_PAD_PX = 10 // pr-2 + folga de segurança
+  const DEPTH_INDENT_PX = 14 // mesmo valor do paddingLeft: task.depth * 14 no JSX
+  let maxPx = 0
+  for (const task of tasks) {
+    ctx.font = parentTaskIds.has(task.id) ? '600 12px sans-serif' : '12px sans-serif'
+    const textPx = ctx.measureText(ganttRowLabel(task, predecessorCount, t)).width
+    const rowPx = task.depth * DEPTH_INDENT_PX + TOGGLE_PX + textPx + RIGHT_PAD_PX
+    if (rowPx > maxPx) maxPx = rowPx
+  }
+  return Math.min(GANTT_LABEL_COL_MAX_PX, Math.max(GANTT_LABEL_COL_MIN_PX, Math.ceil(maxPx)))
+}
+
 function GanttTab({ projectId, project }) {
   const { t, language } = useLanguage()
   const [data, setData] = useState(null)
@@ -2508,6 +2552,11 @@ function GanttTab({ projectId, project }) {
     predecessorCount[dependency.successor_task_id] = (predecessorCount[dependency.successor_task_id] || 0) + 1
   }
 
+  // Coluna "WBS - descrição" dinâmica (pedido do usuário) — recalculada a
+  // cada render porque depende do idioma (t) e de quais tarefas estão
+  // visíveis (expandir/recolher muda a lista, não só o texto).
+  const labelColPx = computeGanttLabelColPx(visibleTasks, predecessorCount, parentTaskIds, t)
+
   // Export em PNG: desenha a mesma régua/barras num <canvas> (não é uma
   // foto do DOM) reaproveitando o layout já calculado acima, então fica
   // consistente com o que está na tela em qualquer zoom (dia/semana).
@@ -2520,7 +2569,7 @@ function GanttTab({ projectId, project }) {
     const legendH = 30
     const padX = 16
     const padY = 12
-    const width = GANTT_LABEL_COL_PX + layout.totalWidthPx + padX * 2
+    const width = labelColPx + layout.totalWidthPx + padX * 2
     const height = headerH + visibleTasks.length * rowH + legendH + padY * 2
 
     const scale = 2 // resolução maior pra ficar nítido ao ampliar/imprimir
@@ -2559,7 +2608,7 @@ function GanttTab({ projectId, project }) {
     ctx.font = '600 11px sans-serif'
     ctx.fillStyle = textSecondary
     layout.monthSpans.forEach((m) => {
-      ctx.fillText(m.label, GANTT_LABEL_COL_PX + m.leftPx + 4, titleH + monthRowH / 2)
+      ctx.fillText(m.label, labelColPx + m.leftPx + 4, titleH + monthRowH / 2)
     })
 
     ctx.strokeStyle = border
@@ -2570,7 +2619,7 @@ function GanttTab({ projectId, project }) {
 
     ctx.font = '10px sans-serif'
     layout.units.forEach((u) => {
-      const x = GANTT_LABEL_COL_PX + u.leftPx
+      const x = labelColPx + u.leftPx
       if (u.shaded) {
         ctx.fillStyle = grid
         ctx.fillRect(x, titleH + monthRowH, u.widthPx, unitRowH)
@@ -2602,7 +2651,7 @@ function GanttTab({ projectId, project }) {
 
       ctx.strokeStyle = border
       layout.units.forEach((u) => {
-        const x = GANTT_LABEL_COL_PX + u.leftPx
+        const x = labelColPx + u.leftPx
         ctx.beginPath()
         ctx.moveTo(x, y)
         ctx.lineTo(x, y + rowH)
@@ -2614,12 +2663,12 @@ function GanttTab({ projectId, project }) {
       // Tarefa-pai em negrito no PNG exportado também, pra bater com o que
       // aparece na tela (ver isParentTask/parentTaskIds no JSX abaixo).
       ctx.font = parentTaskIds.has(task.id) ? 'bold 11px sans-serif' : '11px sans-serif'
-      const label = `${task.wbs_code} ${task.name}`
-      ctx.fillText(ganttTruncateForCanvas(ctx, label, GANTT_LABEL_COL_PX - 8 - task.depth * 10), task.depth * 10, y + rowH / 2)
+      const label = `${task.wbs_code} - ${task.name}`
+      ctx.fillText(ganttTruncateForCanvas(ctx, label, labelColPx - 8 - task.depth * 10), task.depth * 10, y + rowH / 2)
       ctx.font = '11px sans-serif'
 
       if (start && end) {
-        const left = GANTT_LABEL_COL_PX + layout.pxFromDate(start)
+        const left = labelColPx + layout.pxFromDate(start)
         ctx.fillStyle = color
         if (task.is_milestone) {
           const cy = y + rowH / 2
@@ -2721,10 +2770,10 @@ function GanttTab({ projectId, project }) {
       </div>
 
       <div className="overflow-x-auto">
-        <div style={{ width: GANTT_LABEL_COL_PX + layout.totalWidthPx }}>
+        <div style={{ width: labelColPx + layout.totalWidthPx }}>
           {/* Régua de mês/ano */}
           <div className="flex">
-            <span className="sticky left-0 z-10 shrink-0 bg-[var(--surface)]" style={{ width: GANTT_LABEL_COL_PX }} />
+            <span className="sticky left-0 z-10 shrink-0 bg-[var(--surface)]" style={{ width: labelColPx }} />
             <div className="relative h-5 text-xs font-semibold text-[var(--text-secondary)]" style={{ width: layout.totalWidthPx }}>
               {layout.monthSpans.map((m) => (
                 <span key={m.key} className="absolute top-0 truncate whitespace-nowrap pl-1" style={{ left: m.leftPx, width: m.widthPx }}>
@@ -2735,7 +2784,7 @@ function GanttTab({ projectId, project }) {
           </div>
           {/* Régua de dias (período ≤ 1 mês) ou semanas (período maior) */}
           <div className="flex border-b border-[var(--border)] pb-1">
-            <span className="sticky left-0 z-10 shrink-0 bg-[var(--surface)]" style={{ width: GANTT_LABEL_COL_PX }} />
+            <span className="sticky left-0 z-10 shrink-0 bg-[var(--surface)]" style={{ width: labelColPx }} />
             <div className="relative h-5 text-[10px] text-[var(--text-muted)]" style={{ width: layout.totalWidthPx }}>
               {layout.units.map((u) => (
                 <span
@@ -2776,7 +2825,7 @@ function GanttTab({ projectId, project }) {
                     className={`sticky left-0 z-10 flex shrink-0 items-center truncate bg-[var(--surface)] pr-2 text-xs text-[var(--text-secondary)] ${
                       isParentTask ? 'font-semibold' : ''
                     }`}
-                    style={{ width: GANTT_LABEL_COL_PX, height: GANTT_ROW_PX, paddingLeft: task.depth * 14 }}
+                    style={{ width: labelColPx, height: GANTT_ROW_PX, paddingLeft: task.depth * 14 }}
                     title={task.name}
                   >
                     {isParentTask ? (
@@ -2791,7 +2840,7 @@ function GanttTab({ projectId, project }) {
                     ) : (
                       <span className="mr-0.5 inline-block h-4 w-4 shrink-0" />
                     )}
-                    <span className="text-[var(--text-muted)]">{task.wbs_code}</span> {task.name}
+                    <span className="text-[var(--text-muted)]">{task.wbs_code}</span> - {task.name}
                     {preds > 0 && (
                       <span className="text-[var(--text-muted)]">
                         {' '}
