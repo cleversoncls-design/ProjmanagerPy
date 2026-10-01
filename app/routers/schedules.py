@@ -7,18 +7,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import require_roles
+from ..deps import INTERNAL_ROLES, MANAGEMENT_ROLES, require_roles
 from ..i18n import t as translate
-from ..models import Project, Resource, ResourceSchedule, User, UserRole
+from ..models import Project, Resource, ResourceSchedule, User
 from ..schemas import ResourceScheduleCreate, ResourceScheduleRead, ResourceScheduleUpdate
 
 router = APIRouter(prefix="/resource-schedules", tags=["resource-schedules"])
 
-# Só ADMIN/INTERNAL_PM montam a agenda (mesmo grupo que já gerencia
+# MANAGEMENT_ROLES monta a agenda (mesmo grupo que já gerencia
 # recursos/projetos) — o consultor consulta a própria agenda (leitura
-# liberada pros três perfis internos, mesmo padrão de GET /resources).
-_MANAGE_ROLES = (UserRole.ADMIN, UserRole.INTERNAL_PM)
-_READ_ROLES = (UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.CONSULTANT)
+# liberada por INTERNAL_ROLES, mesmo padrão de GET /resources).
+_MANAGE_ROLES = MANAGEMENT_ROLES
+_READ_ROLES = INTERNAL_ROLES
 
 
 def _check_overlap(db: Session, resource_id: str, day: date, start_time, end_time, *, exclude_id: str | None = None) -> bool:

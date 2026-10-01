@@ -15,7 +15,7 @@ import StatusPill from '../components/StatusPill'
 import { FormField, TextInput, Select } from '../components/FormField'
 import { CheckIcon, XIcon } from '../components/icons'
 import { formatDate, formatTime, formatHoursDuration } from '../utils/format'
-import { resourceFunctionLevelLabel } from '../utils/labels'
+import { ADMIN_LIKE_ROLES, resourceFunctionLevelLabel } from '../utils/labels'
 
 /** Página própria pra "Aprovações pendentes" — era uma seção dentro de
  * Apontamento de horas (TimesheetsPage), pedido do usuário pra separar numa
@@ -170,7 +170,7 @@ export default function TimesheetApprovalsPage() {
           <div className="space-y-1.5">
             {pending.map((entry) => {
               const { projectLabel, taskLabel, typeLabel } = entryDescription(entry)
-              const blockedForMe = entry.unscheduled && user.role !== 'ADMIN'
+              const blockedForMe = entry.unscheduled && !ADMIN_LIKE_ROLES.includes(user.role)
               return (
                 <div key={entry.id} className="rounded-lg border border-[var(--border)] px-3 py-2.5 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -191,7 +191,7 @@ export default function TimesheetApprovalsPage() {
                         type="button"
                         variant="secondary"
                         disabled={actingId === entry.id || blockedForMe}
-                        title={blockedForMe ? t('Só o Administrador pode aprovar apontamentos fora da agenda.') : undefined}
+                        title={blockedForMe ? t('Só Administrador, Gerente de Serviços ou Diretor Geral podem aprovar apontamentos fora da agenda.') : undefined}
                         onClick={() => handleStatus(entry, 'APPROVED')}
                       >
                         <CheckIcon size={15} /> {t('Aprovar')}

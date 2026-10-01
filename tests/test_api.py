@@ -192,6 +192,57 @@ def test_list_users_filters_by_role_and_is_restricted_to_management(client, setu
     assert [u["id"] for u in only_client_pm.json()] == [setup["client_pm_a"].id]
 
 
+def test_service_manager_and_general_director_mirror_admin_except_user_management(client, setup, db_session):
+    """Pedido do usuário: Gerente de Serviços e Diretor Geral têm acessos
+    equivalentes ao Administrador, EXCETO cadastrar/editar/excluir usuário
+    (que continua exclusivo de ADMIN — ver MANAGEMENT_ROLES/ADMIN_LIKE_ROLES
+    em app/deps.py). Cobre os dois perfis novos com os mesmos exemplos já
+    testados acima pro Administrador (create_user, create_client,
+    dashboard) mais a listagem de usuários, que eles precisam pra vincular
+    um Recurso mesmo não podendo cadastrar Usuário."""
+    # Cores distintas e diferentes de DEFAULT_PROJECT_COLOR (já usada pelo
+    # project_a ATIVO do fixture `setup`) — evita 409 de "cor já em uso
+    # entre projetos ativos" (ver _ensure_color_available).
+    colors = {UserRole.SERVICE_MANAGER: "#800000", UserRole.GENERAL_DIRECTOR: "#008000"}
+    for role in (UserRole.SERVICE_MANAGER, UserRole.GENERAL_DIRECTOR):
+        user = make_user(db_session, role=role, email=f"{role.value.lower()}@example.com")
+        headers = auth_headers(client, user.email)
+
+        # Única exceção: não pode cadastrar usuário.
+        denied_user = client.post(
+            "/users",
+            json={"name": "Outro", "email": f"outro-{role.value.lower()}@example.com", "password": PASSWORD, "role": "CONSULTANT"},
+            headers=headers,
+        )
+        assert denied_user.status_code == 403, role
+
+        # Mas continua enxergando a lista de usuários (precisa pra montar o
+        # formulário de "vincular recurso" — ver GET /users em routers/users.py).
+        can_list_users = client.get("/users", headers=headers)
+        assert can_list_users.status_code == 200, role
+
+        # Tudo o resto que hoje é "só Administrador" ou "Admin/PM" libera
+        # igual ao Administrador.
+        can_create_client = client.post("/clients", json={"code": f"CLI-{role.value}", "legal_name": "Cliente Novo"}, headers=headers)
+        assert can_create_client.status_code == 201, role
+
+        can_see_dashboard = client.get("/dashboard", headers=headers)
+        assert can_see_dashboard.status_code == 200, role
+
+        can_create_project = client.post(
+            "/projects",
+            json={
+                "client_id": setup["client_a"].id,
+                "manager_id": setup["pm"].id,
+                "code": f"PRJ-{role.value}",
+                "name": "Projeto novo",
+                "color": colors[role],
+            },
+            headers=headers,
+        )
+        assert can_create_project.status_code == 201, role
+
+
 def test_list_resources_filters_by_user_and_allows_consultant(client, setup):
     admin_headers = setup["admin_headers"]
     created = client.post(

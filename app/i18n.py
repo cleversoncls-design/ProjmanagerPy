@@ -20,8 +20,8 @@ from .models import Language
 _ES: dict[str, str] = {
     "Agendamento não encontrado": "Agenda no encontrada",
     "Alocação não encontrada": "Asignación no encontrada",
-    "Apontamento fora da agenda — só o Administrador pode aprová-lo": (
-        "Registro de horas fuera de la agenda — solo el Administrador puede aprobarlo"
+    "Apontamento fora da agenda — só Administrador, Gerente de Serviços ou Diretor Geral podem aprová-lo": (
+        "Registro de horas fuera de la agenda — solo Administrador, Gerente de Servicios o Director General pueden aprobarlo"
     ),
     "Apontamento não encontrado": "Registro de horas no encontrado",
     "Calendário não encontrado": "Calendario no encontrado",

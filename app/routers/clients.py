@@ -6,9 +6,9 @@ from sqlalchemy.orm import Session
 
 from ..audit import record_audit
 from ..database import get_db
-from ..deps import EXTERNAL_ROLES, get_current_user, require_roles
+from ..deps import ADMIN_LIKE_ROLES, EXTERNAL_ROLES, INTERNAL_ROLES, get_current_user, require_roles
 from ..i18n import t as translate
-from ..models import AuditAction, Client, Project, ProjectIntake, User, UserRole
+from ..models import AuditAction, Client, Project, ProjectIntake, User
 from ..schemas import ClientCreate, ClientRead, ClientUpdate
 
 router = APIRouter(prefix="/clients", tags=["clients"])
@@ -17,12 +17,14 @@ router = APIRouter(prefix="/clients", tags=["clients"])
 @router.post("", response_model=ClientRead, status_code=status.HTTP_201_CREATED)
 def create_client(
     data: ClientCreate,
-    # "Administrar clientes" ficou só com o Administrador (revisão de
-    # acessos do usuário) — Gerente de Projetos perdeu esse item do menu,
-    # então também não pode mais criar cliente por aqui, mesmo direto pela
-    # API. Continua enxergando a lista (GET abaixo, INTERNAL_ROLES) — só
-    # precisa dela pra escolher o cliente ao criar/editar projeto.
-    user: User = Depends(require_roles(UserRole.ADMIN)),
+    # "Administrar clientes" ficou só com ADMIN_LIKE_ROLES (revisão de
+    # acessos do usuário) — Gerente de Projetos não tem esse item do menu,
+    # então também não pode criar cliente por aqui, mesmo direto pela API.
+    # Gerente de Serviços/Diretor Geral entram aqui (acesso equivalente ao
+    # Administrador). Continua enxergando a lista (GET abaixo,
+    # INTERNAL_ROLES) — só precisa dela pra escolher o cliente ao criar/
+    # editar projeto.
+    user: User = Depends(require_roles(*ADMIN_LIKE_ROLES)),
     db: Session = Depends(get_db),
 ) -> Client:
     if db.scalar(select(Client).where(Client.code == data.code)):
@@ -36,7 +38,7 @@ def create_client(
 
 @router.get("", response_model=list[ClientRead])
 def list_clients(
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.CONSULTANT)),
+    _: User = Depends(require_roles(*INTERNAL_ROLES)),
     db: Session = Depends(get_db),
 ) -> list[Client]:
     return list(db.scalars(select(Client).order_by(Client.legal_name)).all())
@@ -56,10 +58,10 @@ def read_client(client_id: str, user: User = Depends(get_current_user), db: Sess
 def update_client(
     client_id: str,
     data: ClientUpdate,
-    # Mesma restrição de create_client acima: só o Administrador edita
+    # Mesma restrição de create_client acima — ADMIN_LIKE_ROLES edita
     # cadastro de clientes (pedido do usuário, "mais melhorias": "O cadastro
     # de clientes não permite modificar dados").
-    user: User = Depends(require_roles(UserRole.ADMIN)),
+    user: User = Depends(require_roles(*ADMIN_LIKE_ROLES)),
     db: Session = Depends(get_db),
 ) -> Client:
     client = db.get(Client, client_id)
@@ -79,11 +81,11 @@ def update_client(
 @router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_client(
     client_id: str,
-    # Mesma restrição de create_client/update_client: só o Administrador
+    # Mesma restrição de create_client/update_client — ADMIN_LIKE_ROLES
     # exclui cliente (pedido do usuário, "mais novas melhorias, parte 3":
     # "ter botão de excluir, validando se o mesmo não está vinculado a
     # nenhuma tabela").
-    user: User = Depends(require_roles(UserRole.ADMIN)),
+    user: User = Depends(require_roles(*ADMIN_LIKE_ROLES)),
     db: Session = Depends(get_db),
 ) -> None:
     client = db.get(Client, client_id)

@@ -18,7 +18,7 @@ import { TrashIcon } from '../components/icons'
 import { FormField, TextInput, Select } from '../components/FormField'
 import ColorListPicker from '../components/ColorListPicker'
 import { formatCurrency, formatPercent } from '../utils/format'
-import { INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECT_STATUS_LABELS, PROJECT_STATUS_TONE } from '../utils/labels'
+import { ADMIN_LIKE_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECT_STATUS_LABELS, PROJECT_STATUS_TONE } from '../utils/labels'
 import { DEFAULT_PROJECT_COLOR, PROJECT_COLOR_PALETTE } from '../utils/colorPalette'
 import { useLanguage } from '../context/LanguageContext'
 
@@ -49,12 +49,14 @@ export default function ProjectsPage() {
   // com um só. Mesmo grupo de papéis que o backend aceita em client_id
   // (GET /reports/portfolio).
   const canFilterByClient = INTERNAL_ROLES.includes(user.role)
-  // Filtro por gerente: só faz sentido pra ADMIN, que é o único perfil que
-  // ainda enxerga o portfólio inteiro — INTERNAL_PM agora só vê (em
-  // _scoped_projects no backend, pedido do usuário: "ainda posso ver...
-  // projetos de outros gerentes") os próprios projetos, então pra ele o
-  // filtro nunca teria outra opção além de si mesmo.
-  const canFilterByManager = user.role === 'ADMIN'
+  // Filtro por gerente: só faz sentido pra quem ainda enxerga o portfólio
+  // inteiro — ADMIN e os dois perfis novos (SERVICE_MANAGER/GENERAL_DIRECTOR,
+  // que têm acesso equivalente ao Administrador) caem nessa regra via
+  // ADMIN_LIKE_ROLES. INTERNAL_PM agora só vê (em _scoped_projects no
+  // backend, pedido do usuário: "ainda posso ver... projetos de outros
+  // gerentes") os próprios projetos, então pra ele o filtro nunca teria
+  // outra opção além de si mesmo.
+  const canFilterByManager = ADMIN_LIKE_ROLES.includes(user.role)
   // Classes literais (não geradas via template) pra o scanner do Tailwind
   // JIT conseguir achar cada uma no código-fonte — ver mesmo padrão já
   // usado antes pra Cliente/Projetos Modelo.

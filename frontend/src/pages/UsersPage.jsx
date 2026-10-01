@@ -16,6 +16,7 @@ import { BriefcaseIcon, KeyIcon, PencilIcon, TrashIcon } from '../components/ico
 import { FormField, TextInput, Select } from '../components/FormField'
 import { formatCurrency } from '../utils/format'
 import { USER_STATUS_TONE, resourceFunctionLevelLabel } from '../utils/labels'
+import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 
 const EXTERNAL_ROLES = ['CLIENT_PM', 'CLIENT_USER']
@@ -24,6 +25,15 @@ const EMPTY_USER_FORM = { name: '', email: '', password: '', role: 'CONSULTANT',
 const EMPTY_RESOURCE_FORM = { function: '', level: '', internal_cost_per_hour: '', billing_rate_per_hour: '', daily_capacity_hours: '8', calendar_id: '' }
 
 export default function UsersPage() {
+  const { user: currentUser } = useAuth()
+  // Pedido do usuário: Gerente de Serviços/Diretor Geral acessam esta tela
+  // (ver ADMIN_LIKE_ROLES em App.jsx/Sidebar.jsx — precisam dela pra
+  // vincular/editar Recurso), mas cadastrar/editar/excluir USUÁRIO continua
+  // exclusivo do Administrador (backend também recusa — ver
+  // routers/users.py: create_user/update_user/delete_user/
+  // reset_user_password continuam require_roles(UserRole.ADMIN)). Só a
+  // aba/ações de Recurso ficam liberadas pros dois perfis novos.
+  const canManageUsers = currentUser.role === 'ADMIN'
   const { labels, t } = useLanguage()
   const [users, setUsers] = useState([])
   const [resources, setResources] = useState([])
@@ -204,7 +214,7 @@ export default function UsersPage() {
       <PageHeader
         title={t('Usuários e recursos')}
         subtitle={t('Usuários internos e externos, e o custo/capacidade de cada um como recurso alocável.')}
-        action={<Button onClick={() => setShowUserModal(true)}>{t('Novo usuário')}</Button>}
+        action={canManageUsers ? <Button onClick={() => setShowUserModal(true)}>{t('Novo usuário')}</Button> : undefined}
       />
 
       {loading && <Spinner />}
@@ -240,16 +250,20 @@ export default function UsersPage() {
                 align: 'right',
                 render: (row) => (
                   <div className="flex justify-end gap-1.5">
-                    <IconButton icon={PencilIcon} label={t('Editar')} onClick={() => openEditModal(row)} />
-                    <IconButton
-                      icon={KeyIcon}
-                      label={t('Redefinir senha')}
-                      onClick={() => {
-                        setPasswordTarget(row)
-                        setNewPassword('')
-                        setPasswordFormError('')
-                      }}
-                    />
+                    {/* Editar/Redefinir senha/Excluir usuário continuam só do
+                        Administrador — ver canManageUsers acima. */}
+                    {canManageUsers && <IconButton icon={PencilIcon} label={t('Editar')} onClick={() => openEditModal(row)} />}
+                    {canManageUsers && (
+                      <IconButton
+                        icon={KeyIcon}
+                        label={t('Redefinir senha')}
+                        onClick={() => {
+                          setPasswordTarget(row)
+                          setNewPassword('')
+                          setPasswordFormError('')
+                        }}
+                      />
+                    )}
                     {resourceByUserId[row.id] ? (
                       <IconButton icon={BriefcaseIcon} label={t('Editar recurso')} onClick={() => openEditResourceModal(row)} />
                     ) : (
@@ -263,7 +277,7 @@ export default function UsersPage() {
                         usuário que é gerente de projeto, autor de uma solicitação
                         de mudança, ou dono de um recurso com alocação/horas já
                         lançadas — ou seja, com alguma "movimentação". */}
-                    {row.role !== 'ADMIN' && (
+                    {canManageUsers && row.role !== 'ADMIN' && (
                       <IconButton
                         icon={TrashIcon}
                         label={t('Excluir usuário')}

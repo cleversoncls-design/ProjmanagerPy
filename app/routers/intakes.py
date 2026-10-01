@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import EXTERNAL_ROLES, get_current_user, require_roles
+from ..deps import EXTERNAL_ROLES, MANAGEMENT_ROLES, get_current_user, require_roles
 from ..i18n import t as translate
 from ..models import Client, ProjectIntake, User, UserRole
 from ..schemas import ProjectIntakeCreate, ProjectIntakeRead, ProjectIntakeStatusUpdate
@@ -43,7 +43,7 @@ def list_intakes(client_id: str, user: User = Depends(get_current_user), db: Ses
 def update_intake_status(
     intake_id: str,
     data: ProjectIntakeStatusUpdate,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
     db: Session = Depends(get_db),
 ) -> ProjectIntake:
     intake = db.get(ProjectIntake, intake_id)

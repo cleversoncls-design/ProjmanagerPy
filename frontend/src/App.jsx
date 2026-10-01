@@ -15,7 +15,7 @@ import SchedulesPage from './pages/SchedulesPage'
 import TimesheetsPage from './pages/TimesheetsPage'
 import TimesheetApprovalsPage from './pages/TimesheetApprovalsPage'
 import ServiceOrdersPage from './pages/ServiceOrdersPage'
-import { ADMIN_ONLY_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECTS_VISIBLE_ROLES } from './utils/labels'
+import { ADMIN_LIKE_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECTS_VISIBLE_ROLES } from './utils/labels'
 
 export default function App() {
   return (
@@ -41,7 +41,7 @@ export default function App() {
                     <Route path="/service-orders" element={<ServiceOrdersPage />} />
                   </Route>
 
-                  <Route element={<ProtectedRoute roles={ADMIN_ONLY_ROLES} />}>
+                  <Route element={<ProtectedRoute roles={ADMIN_LIKE_ROLES} />}>
                     <Route path="/clients" element={<ClientsPage />} />
                     <Route path="/users" element={<UsersPage />} />
                   </Route>

@@ -5,8 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import require_roles
-from ..models import AuditLog, User, UserRole
+from ..deps import MANAGEMENT_ROLES, require_roles
+from ..models import AuditLog, User
 from ..schemas import AuditLogRead
 
 router = APIRouter(tags=["audit"])
@@ -17,14 +17,15 @@ def list_audit_log(
     entity_type: str | None = None,
     entity_id: str | None = None,
     limit: int = 100,
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    _: User = Depends(require_roles(*MANAGEMENT_ROLES)),
     db: Session = Depends(get_db),
 ) -> list[AuditLog]:
     """Lista as entradas de auditoria mais recentes primeiro.
 
-    Restrito a perfis internos com poder de gestão (ADMIN, INTERNAL_PM):
-    quem alterou o quê é informação operacional interna, não algo que faça
-    sentido expor a CONSULTANT ou aos perfis de cliente.
+    Restrito a perfis internos com poder de gestão (MANAGEMENT_ROLES:
+    ADMIN, INTERNAL_PM, SERVICE_MANAGER, GENERAL_DIRECTOR): quem alterou o
+    quê é informação operacional interna, não algo que faça sentido expor a
+    CONSULTANT ou aos perfis de cliente.
     """
     stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
     if entity_type:
