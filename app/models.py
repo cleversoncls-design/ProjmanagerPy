@@ -76,6 +76,18 @@ class TaskStatus(StrEnum):
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     DELAYED = "DELAYED"
+    # "Desativar tarefa" (pedido do usuário) — estado final de "cerrada",
+    # diferente de COMPLETED (que segue significando "concluída dentro do
+    # fluxo normal"). Uma tarefa CLOSED não aparece mais como pendente/
+    # atrasada em nenhum indicador (ver TASK_FINISHED_STATUSES abaixo) e
+    # para de aceitar apontamento de horas (ver timesheets._resolve_task_and_project).
+    CLOSED = "CLOSED"
+
+
+# Conjunto de status "finalizados" pra fins de indicador (bolinha de status,
+# % restante, atrasadas) — COMPLETED e CLOSED contam igual nesses cálculos,
+# mesmo sendo estados conceitualmente diferentes (concluída vs. desativada).
+TASK_FINISHED_STATUSES = frozenset({TaskStatus.COMPLETED, TaskStatus.CLOSED})
 
 
 class TaskType(StrEnum):
@@ -443,6 +455,13 @@ class Calendar(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     working_days: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=lambda: [0, 1, 2, 3, 4])
+    # Calendário usado pra mostrar feriados como indisponíveis na Agenda
+    # (tela não é de um projeto só, então em vez de resolver o calendário de
+    # cada projeto/recurso visível no mês, um único calendário "padrão" vale
+    # pra todo mundo ali — pedido do usuário). Só um calendário por vez pode
+    # ser o padrão — ver _set_as_default em routers/calendars.py, que
+    # desliga o anterior sempre que um novo é marcado.
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     holidays: Mapped[list[Holiday]] = relationship(back_populates="calendar", cascade="all, delete-orphan")
 
 

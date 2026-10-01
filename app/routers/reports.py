@@ -11,7 +11,7 @@ from ..database import get_db
 from ..deps import EXTERNAL_ROLES, INTERNAL_ROLES, get_current_user, require_project_access, require_roles
 from ..exports import build_service_orders_workbook, build_tasks_workbook
 from ..i18n import t as translate
-from ..models import Project, ProjectStatus, Resource, Task, TaskDependency, TaskStatus, User, UserRole
+from ..models import TASK_FINISHED_STATUSES, Project, ProjectStatus, Resource, Task, TaskDependency, TaskStatus, User, UserRole
 from ..schemas import (
     DashboardResponse,
     EvmMetrics,
@@ -121,7 +121,7 @@ def dashboard(
     for task in tasks:
         tasks_by_status[task.status.value] = tasks_by_status.get(task.status.value, 0) + 1
         tasks_by_type[task.task_type.value] = tasks_by_type.get(task.task_type.value, 0) + 1
-        if task.planned_end_date and task.planned_end_date < today and task.status != TaskStatus.COMPLETED:
+        if task.planned_end_date and task.planned_end_date < today and task.status not in TASK_FINISHED_STATUSES:
             tasks_overdue += 1
 
     avg_progress = (sum((Decimal(t.progress_percentage or 0) for t in tasks), Decimal("0")) / len(tasks)) if tasks else Decimal("0")

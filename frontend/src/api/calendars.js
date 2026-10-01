@@ -8,6 +8,10 @@ export function createCalendar(payload) {
   return api.post('/calendars', payload)
 }
 
+export function updateCalendar(calendarId, payload) {
+  return api.patch(`/calendars/${calendarId}`, payload)
+}
+
 export function listHolidays(calendarId) {
   return api.get(`/calendars/${calendarId}/holidays`)
 }

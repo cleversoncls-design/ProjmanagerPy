@@ -25,7 +25,22 @@ import CategoryBars from '../components/CategoryBars'
 import { FormField, TextInput, Select, TextArea } from '../components/FormField'
 import ColorListPicker from '../components/ColorListPicker'
 import { DEFAULT_PROJECT_COLOR } from '../utils/colorPalette'
-import { ColumnsIcon, CopyIcon, DownloadIcon, FlagIcon, HashIcon, MoveIcon, PencilIcon, PlusIcon, RefreshIcon, TrashIcon } from '../components/icons'
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  ColumnsIcon,
+  CopyIcon,
+  DownloadIcon,
+  FlagIcon,
+  HashIcon,
+  MoveIcon,
+  PencilIcon,
+  PlusIcon,
+  RefreshIcon,
+  TrashIcon,
+  XIcon,
+} from '../components/icons'
 import { formatCurrency, formatDate, formatIndex, formatNumber, formatPercent, parseApiDate } from '../utils/format'
 import {
   APPROVAL_STATUS_TONE,
@@ -1054,6 +1069,9 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
   const [showColumnsModal, setShowColumnsModal] = useState(false)
   const [showCopyTasksModal, setShowCopyTasksModal] = useState(false)
   const [columnPrefs, setColumnPrefs] = useState(loadTaskColumnPrefs)
+  // Expandir/recolher tarefas-pai (+ -, estilo MS Project) — só visual, não
+  // persiste entre sessões (reabrir a tela sempre mostra tudo expandido).
+  const [collapsedTaskIds, setCollapsedTaskIds] = useState(() => new Set())
 
   function loadSchedule() {
     setLoading(true)
@@ -1092,6 +1110,42 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     () => new Set((schedule?.tasks || []).map((t) => t.parent_task_id).filter(Boolean)),
     [schedule],
   )
+  // Linhas realmente mostradas na grade — orderedTasks (a árvore completa,
+  // em ordem de exibição) menos a descendência de qualquer tarefa-pai
+  // recolhida. orderedTasks continua intacto (usado por outros lugares,
+  // como os seletores de pai/predecessora, que precisam enxergar tudo
+  // independente do que está recolhido na grade).
+  const visibleTasks = useMemo(() => {
+    if (collapsedTaskIds.size === 0) return orderedTasks
+    const visible = []
+    let skipFromDepth = null
+    for (const task of orderedTasks) {
+      if (skipFromDepth !== null) {
+        if (task.depth > skipFromDepth) continue
+        skipFromDepth = null
+      }
+      visible.push(task)
+      if (collapsedTaskIds.has(task.id)) skipFromDepth = task.depth
+    }
+    return visible
+  }, [orderedTasks, collapsedTaskIds])
+
+  function toggleTaskCollapsed(taskId) {
+    setCollapsedTaskIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }
+
+  function expandAllTasks() {
+    setCollapsedTaskIds(new Set())
+  }
+
+  function collapseAllTasks() {
+    setCollapsedTaskIds(new Set(parentTaskIds))
+  }
   const userById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
   const resourceById = useMemo(() => Object.fromEntries(resources.map((r) => [r.id, r])), [resources])
   const predecessorsBySuccessor = useMemo(() => {
@@ -1126,6 +1180,18 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
   function handleApplyStatusDate(event) {
     event.preventDefault()
     withBusy(t('Atualizando data de status…'), () => projectsApi.updateProject(projectId, { status_date: statusDateInput || null }))
+  }
+
+  /** "Ativar/Desativar tarefa" (pedido do usuário) — atalho na própria
+   * linha da grade pra alternar o status CLOSED sem abrir o modal de
+   * edição inteiro. Reativar sempre volta para NOT_STARTED (não há como
+   * saber qual era o status anterior sem guardar um campo à parte) — quem
+   * precisar de outro status ajusta depois pelo modal de edição normal. */
+  function handleToggleTaskActive(task) {
+    const nextStatus = task.status === 'CLOSED' ? 'NOT_STARTED' : 'CLOSED'
+    withBusy(nextStatus === 'CLOSED' ? t('Desativando tarefa…') : t('Ativando tarefa…'), () =>
+      tasksApi.updateTask(task.id, { status: nextStatus }),
+    )
   }
 
   async function handleExport() {
@@ -1301,6 +1367,18 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
           style={{ paddingLeft: row.depth * 18 }}
           className={`flex items-center gap-1.5 ${parentTaskIds.has(row.id) ? 'font-semibold' : ''}`}
         >
+          {parentTaskIds.has(row.id) ? (
+            <button
+              type="button"
+              onClick={() => toggleTaskCollapsed(row.id)}
+              title={collapsedTaskIds.has(row.id) ? t('Expandir') : t('Recolher')}
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--page)]"
+            >
+              {collapsedTaskIds.has(row.id) ? <ChevronRightIcon className="h-3 w-3" /> : <ChevronDownIcon className="h-3 w-3" />}
+            </button>
+          ) : (
+            <span className="inline-block h-4 w-4 shrink-0" />
+          )}
           {row.is_milestone && <span className="inline-block h-2 w-2 shrink-0 rotate-45" style={{ backgroundColor: 'var(--text-muted)' }} />}
           {row.name}
         </span>
@@ -1325,6 +1403,12 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
             }}
           />
           <IconButton icon={MoveIcon} label={t('Mover tarefa')} onClick={() => setMovingTask(row)} />
+          <IconButton
+            icon={row.status === 'CLOSED' ? CheckIcon : XIcon}
+            label={row.status === 'CLOSED' ? t('Ativar tarefa') : t('Desativar tarefa')}
+            disabled={Boolean(busyMessage)}
+            onClick={() => handleToggleTaskActive(row)}
+          />
           <IconButton icon={TrashIcon} label={t('Apagar tarefa')} variant="danger" onClick={() => setDeletingTask(row)} />
         </div>
       ),
@@ -1346,6 +1430,12 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
         </form>
         <div className="flex flex-wrap gap-1.5">
           <IconButton icon={ColumnsIcon} label={t('Colunas')} onClick={() => setShowColumnsModal(true)} />
+          {parentTaskIds.size > 0 && (
+            <>
+              <IconButton icon={ChevronDownIcon} label={t('Expandir tudo')} onClick={expandAllTasks} />
+              <IconButton icon={ChevronRightIcon} label={t('Recolher tudo')} onClick={collapseAllTasks} />
+            </>
+          )}
           {/* Exportar não depende de canWrite: é leitura, então também fica
               disponível para perfis externos (CLIENT_PM/CLIENT_USER). */}
           <IconButton icon={DownloadIcon} label={t('Exportar (Excel)')} disabled={Boolean(busyMessage)} onClick={handleExport} />
@@ -1392,7 +1482,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
 
       {!loading && !error && (
         <Card dense>
-          <Table columns={columns} rows={orderedTasks} getRowKey={(row) => row.id} emptyMessage={t('Nenhuma tarefa cadastrada ainda.')} dense />
+          <Table columns={columns} rows={visibleTasks} getRowKey={(row) => row.id} emptyMessage={t('Nenhuma tarefa cadastrada ainda.')} dense />
         </Card>
       )}
 

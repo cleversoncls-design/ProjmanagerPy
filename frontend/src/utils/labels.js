@@ -67,6 +67,9 @@ export const TASK_STATUS_LABELS = {
   IN_PROGRESS: 'Em andamento',
   COMPLETED: 'Concluída',
   DELAYED: 'Atrasada',
+  // "Desativar tarefa" (pedido do usuário) — estado final distinto de
+  // COMPLETED; tradução ES em translations.js (chave "Encerrada" -> "Cerrada").
+  CLOSED: 'Encerrada',
 }
 
 export const TASK_STATUS_TONE = {
@@ -74,6 +77,7 @@ export const TASK_STATUS_TONE = {
   IN_PROGRESS: 'warning',
   COMPLETED: 'good',
   DELAYED: 'critical',
+  CLOSED: 'muted',
 }
 
 export const TASK_TYPE_LABELS = {
@@ -93,6 +97,7 @@ export const TASK_STATUS_COLORS = {
   IN_PROGRESS: 'var(--series-4)',
   COMPLETED: 'var(--series-3)',
   DELAYED: 'var(--series-8)',
+  CLOSED: 'var(--series-5)',
 }
 
 export const TASK_TYPE_COLORS = {

@@ -21,6 +21,7 @@ from ..models import (
     ResourceSchedule,
     Task,
     TaskAssignment,
+    TaskStatus,
     Timesheet,
     TimesheetStatus,
     User,
@@ -108,6 +109,10 @@ def _resolve_task_and_project(
         require_project_access(project, user, write=True)
         if project.status != ProjectStatus.ACTIVE:
             raise HTTPException(status_code=422, detail=translate("Só é possível apontar horas em projetos ativos", user.language))
+        # "Desativar tarefa" (CLOSED) bloqueia novo apontamento nela, igual a
+        # um projeto inativo — pedido do usuário (ver TaskStatus em models.py).
+        if task.status == TaskStatus.CLOSED:
+            raise HTTPException(status_code=422, detail=translate("Não é possível apontar horas em uma tarefa desativada", user.language))
 
         # O gerente do projeto (Project.manager_id) sempre pode apontar
         # horas em qualquer tarefa do próprio projeto, alocado ou não

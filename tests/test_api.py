@@ -1632,3 +1632,126 @@ def test_admin_can_reset_user_password(client, setup):
     assert old_login.status_code == 401
     new_login = client.post("/auth/login", data={"username": consultant.email, "password": "nova-senha-123"})
     assert new_login.status_code == 200
+
+
+def test_closed_task_blocks_new_timesheet(client, setup):
+    """Pedido do usuário ("MELHORIAS DO PROJETO"): opção de ativar/
+    desativar tarefas, com um estado "Finalizada/Cerrada" — uma tarefa
+    CLOSED (desativada) passa a bloquear novo apontamento de horas, igual
+    já acontecia com projeto inativo. Reativar (voltar pra NOT_STARTED)
+    libera de novo."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Tarefa", "wbs_code": "9"}, headers=admin_headers
+    ).json()
+    resource = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    ).json()
+    client.post(
+        f"/tasks/{task['id']}/assignments",
+        json={"resource_id": resource["id"], "allocated_hours": "10"},
+        headers=admin_headers,
+    )
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    closed = client.patch(f"/tasks/{task['id']}", json={"status": "CLOSED"}, headers=admin_headers)
+    assert closed.status_code == 200
+    assert closed.json()["status"] == "CLOSED"
+
+    blocked = client.post(
+        "/timesheets",
+        json={"task_id": task["id"], "date": "2026-08-20", "start_time": "09:00", "end_time": "10:00"},
+        headers=consultant_headers,
+    )
+    assert blocked.status_code == 422
+
+    reactivated = client.patch(f"/tasks/{task['id']}", json={"status": "NOT_STARTED"}, headers=admin_headers)
+    assert reactivated.status_code == 200
+    allowed = client.post(
+        "/timesheets",
+        json={"task_id": task["id"], "date": "2026-08-20", "start_time": "09:00", "end_time": "10:00"},
+        headers=consultant_headers,
+    )
+    assert allowed.status_code == 201
+
+
+def test_dashboard_overdue_excludes_closed_tasks(client, setup):
+    """CLOSED conta como "finalizada" igual COMPLETED pros indicadores
+    (TASK_FINISHED_STATUSES) — uma tarefa desativada com prazo vencido não
+    deve continuar aparecendo como atrasada no Dashboard."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Vencida", "wbs_code": "10", "planned_start_date": "2020-01-01", "planned_end_date": "2020-01-02"},
+        headers=admin_headers,
+    ).json()
+    assert task["planned_end_date"] < "2026-01-01"
+
+    before = client.get("/dashboard", headers=admin_headers).json()
+    assert before["tasks_overdue"] >= 1
+
+    client.patch(f"/tasks/{task['id']}", json={"status": "CLOSED"}, headers=admin_headers)
+    after = client.get("/dashboard", headers=admin_headers).json()
+    assert after["tasks_overdue"] == before["tasks_overdue"] - 1
+
+
+def test_calendar_read_open_to_all_authenticated_roles(client, setup):
+    """Pedido do usuário ("MELHORIAS DO PROJETO"): consultores/clientes
+    precisam ver os feriados na própria Agenda — leitura de calendários e
+    feriados deixou de ser só ADMIN/INTERNAL_PM; cadastrar/editar continua
+    restrito."""
+    admin_headers = setup["admin_headers"]
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    created = client.post("/calendars", json={"name": "Nacional PY", "working_days": [0, 1, 2, 3, 4]}, headers=admin_headers)
+    assert created.status_code == 201
+    calendar_id = created.json()["id"]
+
+    denied_create = client.post("/calendars", json={"name": "Outro"}, headers=consultant_headers)
+    assert denied_create.status_code == 403
+
+    listed = client.get("/calendars", headers=consultant_headers)
+    assert listed.status_code == 200
+    assert any(c["id"] == calendar_id for c in listed.json())
+
+    holiday = client.post(
+        f"/calendars/{calendar_id}/holidays", json={"date": "2026-12-25", "description": "Natal"}, headers=admin_headers
+    )
+    assert holiday.status_code == 201
+
+    holidays_read = client.get(f"/calendars/{calendar_id}/holidays", headers=consultant_headers)
+    assert holidays_read.status_code == 200
+    assert holidays_read.json()[0]["description"] == "Natal"
+
+    denied_add_holiday = client.post(
+        f"/calendars/{calendar_id}/holidays", json={"date": "2026-12-31", "description": "Ano novo"}, headers=consultant_headers
+    )
+    assert denied_add_holiday.status_code == 403
+
+
+def test_calendar_set_default_unsets_previous(client, setup):
+    """Pedido do usuário: um único calendário padrão vale pra Agenda
+    inteira mostrar feriados (a tela não é de um projeto só) — marcar outro
+    como padrão desliga o anterior automaticamente."""
+    admin_headers = setup["admin_headers"]
+    first = client.post("/calendars", json={"name": "Calendário 1", "is_default": True}, headers=admin_headers).json()
+    assert first["is_default"] is True
+
+    second = client.post("/calendars", json={"name": "Calendário 2"}, headers=admin_headers).json()
+    assert second["is_default"] is False
+
+    made_default = client.patch(f"/calendars/{second['id']}", json={"is_default": True}, headers=admin_headers)
+    assert made_default.status_code == 200
+    assert made_default.json()["is_default"] is True
+
+    first_after = client.get(f"/calendars/{first['id']}", headers=admin_headers).json()
+    assert first_after["is_default"] is False
