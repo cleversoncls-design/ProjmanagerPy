@@ -388,6 +388,88 @@ def test_task_assignment_still_restricts_even_with_project_link(client, setup):
     assert denied.status_code == 403
 
 
+def test_project_manager_can_timesheet_any_task_without_allocation(client, setup):
+    """Pedido do usuário: criou uma tarefa de Gestão no próprio projeto que
+    gerencia (Project.manager_id) e levou 403 até se vincular como Recurso
+    do projeto — o gerente deveria poder apontar horas em qualquer tarefa
+    do próprio projeto, alocado ou não, sem precisar desse vínculo extra."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    pm = setup["pm"]
+    pm_headers = auth_headers(client, pm.email)
+
+    pm_resource = client.post(
+        "/resources",
+        json={"user_id": pm.id, "role_title": "Gerente", "internal_cost_per_hour": "80", "billing_rate_per_hour": "150"},
+        headers=admin_headers,
+    ).json()
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Gestão do Projeto", "wbs_code": "5", "task_type": "MANAGEMENT"}, headers=admin_headers
+    ).json()
+
+    # Nenhum TaskAssignment nem ProjectResource pro pm_resource — só o fato
+    # de ser Project.manager_id precisa bastar.
+    allowed = client.post(
+        "/timesheets",
+        json={"task_id": task["id"], "date": "2026-08-25", "start_time": "09:00", "end_time": "10:00"},
+        headers=pm_headers,
+    )
+    assert allowed.status_code == 201, allowed.text
+    assert allowed.json()["resource_id"] == pm_resource["id"]
+
+
+def test_pending_approvals_scoped_to_manager_for_internal_pm(client, db_session, setup):
+    """Pedido do usuário: a fila "Aprovações pendentes" só deve trazer
+    apontamentos dos projetos onde o usuário é o gerente — pra um
+    INTERNAL_PM que não é o gerente de um projeto, o pendente desse
+    projeto não deve aparecer. ADMIN continua vendo tudo (é quem precisa
+    aprovar "fora da agenda", então não pode ficar restrito a projeto
+    nenhum)."""
+    admin_headers = setup["admin_headers"]
+    pm = setup["pm"]
+    pm_headers = auth_headers(client, pm.email)
+    other_pm = make_user(db_session, role=UserRole.INTERNAL_PM, email="outro.pm.aprovacao@example.com")
+    other_pm_headers = auth_headers(client, other_pm.email)
+    other_project = make_project(db_session, client_id=setup["client_b"].id, manager_id=other_pm.id, code="PRJ-D")
+    client.patch(f"/projects/{other_project.id}", json={"status": ProjectStatus.ACTIVE.value}, headers=admin_headers)
+
+    consultant_resource = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "role_title": "Consultor",
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    ).json()
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    client.post(f"/projects/{setup['project_a'].id}/resources", json={"resource_id": consultant_resource["id"]}, headers=admin_headers)
+    client.post(f"/projects/{other_project.id}/resources", json={"resource_id": consultant_resource["id"]}, headers=admin_headers)
+
+    task_a = client.post(f"/projects/{setup['project_a'].id}/tasks", json={"name": "A", "wbs_code": "6"}, headers=admin_headers).json()
+    task_d = client.post(f"/projects/{other_project.id}/tasks", json={"name": "D", "wbs_code": "1"}, headers=admin_headers).json()
+    for task in (task_a, task_d):
+        resp = client.post(
+            "/timesheets",
+            json={"task_id": task["id"], "date": "2026-08-25", "start_time": "09:00", "end_time": "10:00"},
+            headers=consultant_headers,
+        )
+        assert resp.status_code == 201
+
+    pm_pending = client.get("/timesheets", params={"status_filter": "PENDING"}, headers=pm_headers)
+    assert pm_pending.status_code == 200
+    assert [row["task_id"] for row in pm_pending.json()] == [task_a["id"]]
+
+    other_pm_pending = client.get("/timesheets", params={"status_filter": "PENDING"}, headers=other_pm_headers)
+    assert other_pm_pending.status_code == 200
+    assert [row["task_id"] for row in other_pm_pending.json()] == [task_d["id"]]
+
+    admin_pending = client.get("/timesheets", params={"status_filter": "PENDING"}, headers=admin_headers)
+    assert admin_pending.status_code == 200
+    assert {row["task_id"] for row in admin_pending.json()} == {task_a["id"], task_d["id"]}
+
+
 def test_timesheets_filter_by_date_range(client, setup):
     """Pedido do usuário: filtro por período na lista de apontamentos."""
     project_id = setup["project_a"].id

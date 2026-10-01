@@ -109,10 +109,20 @@ def _resolve_task_and_project(
         if project.status != ProjectStatus.ACTIVE:
             raise HTTPException(status_code=422, detail=translate("Só é possível apontar horas em projetos ativos", user.language))
 
+        # O gerente do projeto (Project.manager_id) sempre pode apontar
+        # horas em qualquer tarefa do próprio projeto, alocado ou não
+        # (pedido do usuário — encontrou o caso de criar uma tarefa de
+        # Gestão, ser o gerente do projeto, e mesmo assim levar 403 até
+        # também se vincular como Recurso do projeto: "não deveria tomar a
+        # regra do gerente do projeto?"). Só dispensa a checagem de
+        # alocação abaixo — projeto inativo e demais validações continuam
+        # valendo normalmente pra ele também.
+        is_project_manager = project.manager_id == resource.user_id
+
         assignment = db.scalar(
             select(TaskAssignment).where(TaskAssignment.task_id == task.id, TaskAssignment.resource_id == resource.id)
         )
-        if not assignment:
+        if not assignment and not is_project_manager:
             # Busca em cascata (pedido do usuário): "sempre busca primeiro
             # na tarefa e depois no projeto". Este recurso não está alocado
             # NESTA tarefa — mas se a tarefa não tem NENHUM recurso alocado
@@ -328,7 +338,16 @@ def list_timesheets(
     apontamentos") não existe direto em Timesheet — resolve pra um
     subquery com os `project_id` do cliente e aplica o mesmo OR
     Task.project_id/Timesheet.project_id usado no filtro por projeto logo
-    abaixo, pra pegar tanto apontamento em tarefa quanto avulso."""
+    abaixo, pra pegar tanto apontamento em tarefa quanto avulso.
+
+    Fila de aprovação (status_filter=PENDING) pra INTERNAL_PM só traz os
+    projetos onde ele é o gerente (Project.manager_id) — pedido do
+    usuário: antes qualquer INTERNAL_PM via TODO apontamento pendente do
+    sistema inteiro, não só dos projetos que ele conduz. ADMIN continua
+    vendo tudo, sem essa restrição — é o único perfil que pode aprovar
+    apontamento "fora da agenda" (ver update_timesheet_status abaixo),
+    então precisa enxergar a fila inteira mesmo em projeto que não
+    gerencia."""
     is_manager = user.role in _MANAGEMENT_ROLES
     if not is_manager:
         own_resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
@@ -364,6 +383,9 @@ def list_timesheets(
         stmt = stmt.where(or_(Task.project_id.in_(client_project_ids), Timesheet.project_id.in_(client_project_ids)))
     if status_filter:
         stmt = stmt.where(Timesheet.status == status_filter)
+    if status_filter == TimesheetStatus.PENDING and user.role == UserRole.INTERNAL_PM:
+        managed_project_ids = select(Project.id).where(Project.manager_id == user.id)
+        stmt = stmt.where(or_(Task.project_id.in_(managed_project_ids), Timesheet.project_id.in_(managed_project_ids)))
     if start:
         stmt = stmt.where(Timesheet.date >= start)
     if end:
