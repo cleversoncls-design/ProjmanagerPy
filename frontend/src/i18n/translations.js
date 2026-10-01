@@ -706,7 +706,7 @@ export const es = {
 
   // --- Apontamento de horas (Fase 2 do agendamento) ---
   'Apontamento de horas': 'Registro de horas',
-  'Registre e aprove horas trabalhadas nos projetos.': 'Registre y apruebe horas trabajadas en los proyectos.',
+  'Registre as horas trabalhadas nos projetos.': 'Registre las horas trabajadas en los proyectos.',
   'Seu usuário não tem um recurso vinculado — peça a um Administrador para vincular um recurso para poder apontar horas.':
     'Su usuario no tiene un recurso vinculado — pida a un Administrador que vincule un recurso para poder registrar horas.',
   'Novo apontamento': 'Nuevo registro',
@@ -738,6 +738,11 @@ export const es = {
   'Aprovar': 'Aprobar',
   'Rejeitar': 'Rechazar',
   'Só o Administrador pode aprovar apontamentos fora da agenda.': 'Solo el Administrador puede aprobar registros fuera de la agenda.',
+
+  // --- Aprovações de horas (rotina própria no menu, antes era seção
+  // dentro de Apontamento de horas) ---
+  'Aprovações de horas': 'Aprobaciones de horas',
+  'Aprove ou rejeite os apontamentos pendentes dos consultores.': 'Apruebe o rechace los registros pendientes de los consultores.',
 
   // --- Ordens de Serviço (Fase 3 do apontamento) ---
   'Ordens de Serviço': 'Órdenes de Servicio',

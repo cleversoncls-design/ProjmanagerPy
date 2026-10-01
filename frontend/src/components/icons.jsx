@@ -107,6 +107,15 @@ export const ClipboardCheckIcon = (props) => (
   </Icon>
 )
 
+// Aprovações de horas (TimesheetApprovalsPage) — selo/crachá com check,
+// distinto da prancheta do Apontamento de horas (ClipboardCheckIcon).
+export const BadgeCheckIcon = (props) => (
+  <Icon {...props}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M8.5 12.3 10.8 14.6 15.5 9.7" />
+  </Icon>
+)
+
 // Ordens de Serviço (ServiceOrdersPage) — documento com linhas.
 export const FileTextIcon = (props) => (
   <Icon {...props}>

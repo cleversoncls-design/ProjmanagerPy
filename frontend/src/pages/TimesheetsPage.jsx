@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as timesheetsApi from '../api/timesheets'
 import * as resourcesApi from '../api/resources'
-import * as usersApi from '../api/users'
 import * as projectsApi from '../api/projects'
 import * as clientsApi from '../api/clients'
 import * as tasksApi from '../api/tasks'
@@ -18,9 +17,9 @@ import TimesheetFieldsForm from '../components/TimesheetFieldsForm'
 import TimesheetDeleteModal from '../components/TimesheetDeleteModal'
 import IconButton from '../components/IconButton'
 import { FormField, TextInput, Select } from '../components/FormField'
-import { CheckIcon, XIcon, PencilIcon, TrashIcon } from '../components/icons'
+import { PencilIcon, TrashIcon } from '../components/icons'
 import { formatDate, formatTime, formatHoursDuration } from '../utils/format'
-import { MANAGEMENT_ROLES, TIMESHEET_STATUS_TONE, resourceFunctionLevelLabel } from '../utils/labels'
+import { TIMESHEET_STATUS_TONE } from '../utils/labels'
 import { emptyTimesheetForm, entryToTimesheetForm, previewTimesheetHours, timesheetFormToPayload, isTimesheetEditable } from '../utils/timesheetForm'
 
 function todayIso() {
@@ -31,12 +30,10 @@ function todayIso() {
 export default function TimesheetsPage() {
   const { user } = useAuth()
   const { labels, t } = useLanguage()
-  const canManage = MANAGEMENT_ROLES.includes(user.role)
 
   const [projects, setProjects] = useState([])
   const [allTasks, setAllTasks] = useState([])
   const [resources, setResources] = useState([])
-  const [users, setUsers] = useState([])
   const [clients, setClients] = useState([])
 
   const [form, setForm] = useState(() => emptyTimesheetForm(todayIso()))
@@ -47,16 +44,12 @@ export default function TimesheetsPage() {
 
   const [mine, setMine] = useState([])
   const [loadingMine, setLoadingMine] = useState(true)
-  const [pending, setPending] = useState([])
-  const [loadingPending, setLoadingPending] = useState(true)
   const [listError, setListError] = useState('')
-  const [actingId, setActingId] = useState(null)
 
   // Filtro por período (pedido do usuário) na lista de baixo — "Meus
-  // apontamentos" por período + cliente + projeto; pro aprovador, período +
-  // consultor + projeto em "Aprovações pendentes".
+  // apontamentos" por período + cliente + projeto. A aprovação (período +
+  // consultor + projeto) agora é uma página própria, TimesheetApprovalsPage.
   const [mineFilters, setMineFilters] = useState({ start: '', end: '', client_id: '', project_id: '' })
-  const [pendingFilters, setPendingFilters] = useState({ start: '', end: '', resource_id: '', project_id: '' })
 
   useEffect(() => {
     projectsApi
@@ -67,18 +60,9 @@ export default function TimesheetsPage() {
       })
       .catch(() => {})
     resourcesApi.listResources().then(setResources).catch(() => {})
-    usersApi.listUsers().then(setUsers).catch(() => {})
     clientsApi.listClients().then(setClients).catch(() => {})
   }, [])
 
-  const usersById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
-  const resourcesById = useMemo(
-    () =>
-      Object.fromEntries(
-        resources.map((r) => [r.id, { ...r, userName: usersById[r.user_id]?.name || resourceFunctionLevelLabel(r, labels) || r.id }]),
-      ),
-    [resources, usersById, labels],
-  )
   const projectsById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects])
   const tasksById = useMemo(() => Object.fromEntries(allTasks.map((task) => [task.id, task])), [allTasks])
   // Tarefas "pai" (têm tarefas-filhas na EAP) continuam aparecendo no
@@ -97,15 +81,6 @@ export default function TimesheetsPage() {
     () => (mineFilters.client_id ? projects.filter((p) => p.client_id === mineFilters.client_id) : projects),
     [projects, mineFilters.client_id],
   )
-  // Projeto do filtro de "Aprovações pendentes" — INTERNAL_PM só vê (e só
-  // consegue aprovar, ver GET /timesheets no backend) os projetos onde é o
-  // gerente; ADMIN continua enxergando todos. Evita o combo oferecer um
-  // projeto que, selecionado, sempre voltaria lista vazia pro PM.
-  const pendingProjectOptions = useMemo(
-    () => (user.role === 'INTERNAL_PM' ? projects.filter((p) => p.manager_id === user.id) : projects),
-    [projects, user.role, user.id],
-  )
-
   function loadMine() {
     if (!ownResource) {
       setMine([])
@@ -128,25 +103,6 @@ export default function TimesheetsPage() {
 
   useEffect(loadMine, [ownResource, mineFilters.start, mineFilters.end, mineFilters.client_id, mineFilters.project_id])
 
-  function loadPending() {
-    if (!canManage) return
-    setLoadingPending(true)
-    timesheetsApi
-      .listTimesheets({
-        status_filter: 'PENDING',
-        start: pendingFilters.start || undefined,
-        end: pendingFilters.end || undefined,
-        resource_id: pendingFilters.resource_id || undefined,
-        project_id: pendingFilters.project_id || undefined,
-      })
-      .then(setPending)
-      .catch((err) => setListError(err.message))
-      .finally(() => setLoadingPending(false))
-  }
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(loadPending, [canManage, pendingFilters.start, pendingFilters.end, pendingFilters.resource_id, pendingFilters.project_id])
-
   function updateMineFilter(field) {
     return (event) => {
       const value = event.target.value
@@ -155,10 +111,6 @@ export default function TimesheetsPage() {
       // project_id de outro cliente aplicado sem aparecer mais no <select>.
       setMineFilters((prev) => (field === 'client_id' ? { ...prev, client_id: value, project_id: '' } : { ...prev, [field]: value }))
     }
-  }
-
-  function updatePendingFilter(field) {
-    return (event) => setPendingFilters((prev) => ({ ...prev, [field]: event.target.value }))
   }
 
   function updateField(field) {
@@ -233,25 +185,11 @@ export default function TimesheetsPage() {
     }
   }
 
-  async function handleStatus(entry, newStatus) {
-    setActingId(entry.id)
-    setListError('')
-    try {
-      await timesheetsApi.updateTimesheetStatus(entry.id, newStatus)
-      loadPending()
-      loadMine()
-    } catch (err) {
-      setListError(err.message)
-    } finally {
-      setActingId(null)
-    }
-  }
-
   const preview = previewTimesheetHours(form)
 
   return (
     <div>
-      <PageHeader title={t('Apontamento de horas')} subtitle={t('Registre e aprove horas trabalhadas nos projetos.')} />
+      <PageHeader title={t('Apontamento de horas')} subtitle={t('Registre as horas trabalhadas nos projetos.')} />
 
       {!ownResource ? (
         <Card className="mb-4">
@@ -366,84 +304,6 @@ export default function TimesheetsPage() {
           />
         )}
       </Card>
-
-      {canManage && (
-        <Card title={t('Aprovações pendentes')}>
-          <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <FormField label={t('Data inicial')}>
-              <TextInput type="date" value={pendingFilters.start} onChange={updatePendingFilter('start')} />
-            </FormField>
-            <FormField label={t('Data final')}>
-              <TextInput type="date" value={pendingFilters.end} onChange={updatePendingFilter('end')} />
-            </FormField>
-            <FormField label={t('Consultor')}>
-              <Select value={pendingFilters.resource_id} onChange={updatePendingFilter('resource_id')}>
-                <option value="">{t('Todos')}</option>
-                {resources.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {resourcesById[r.id]?.userName || r.id}
-                  </option>
-                ))}
-              </Select>
-            </FormField>
-            <FormField label={t('Projeto')}>
-              <Select value={pendingFilters.project_id} onChange={updatePendingFilter('project_id')}>
-                <option value="">{t('Todos')}</option>
-                {pendingProjectOptions.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.code} — {project.name}
-                  </option>
-                ))}
-              </Select>
-            </FormField>
-          </div>
-          {loadingPending ? (
-            <Spinner />
-          ) : pending.length === 0 ? (
-            <p className="text-sm text-[var(--text-secondary)]">{t('Nenhum apontamento pendente.')}</p>
-          ) : (
-            <div className="space-y-1.5">
-              {pending.map((entry) => {
-                const { projectLabel, taskLabel, typeLabel } = entryDescription(entry)
-                const blockedForMe = entry.unscheduled && user.role !== 'ADMIN'
-                return (
-                  <div key={entry.id} className="rounded-lg border border-[var(--border)] px-3 py-2.5 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium text-[var(--text-primary)]">{formatDate(entry.date)}</span>
-                        <span className="text-[var(--text-secondary)]">
-                          {resourcesById[entry.resource_id]?.userName || '—'} · {projectLabel} · {taskLabel} · {typeLabel}
-                        </span>
-                        {entry.start_time && (
-                          <span className="text-[var(--text-muted)]">
-                            {formatTime(entry.start_time)}–{formatTime(entry.end_time)} ({formatHoursDuration(entry.hours_spent)})
-                          </span>
-                        )}
-                        {entry.unscheduled && <StatusPill label={t('Fora da agenda')} tone="serious" />}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          disabled={actingId === entry.id || blockedForMe}
-                          title={blockedForMe ? t('Só o Administrador pode aprovar apontamentos fora da agenda.') : undefined}
-                          onClick={() => handleStatus(entry, 'APPROVED')}
-                        >
-                          <CheckIcon size={15} /> {t('Aprovar')}
-                        </Button>
-                        <Button type="button" variant="danger" disabled={actingId === entry.id} onClick={() => handleStatus(entry, 'REJECTED')}>
-                          <XIcon size={15} /> {t('Rejeitar')}
-                        </Button>
-                      </div>
-                    </div>
-                    {entry.description && <p className="mt-1 text-xs text-[var(--text-muted)]">{entry.description}</p>}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </Card>
-      )}
 
       {deletingEntry && (
         <TimesheetDeleteModal
