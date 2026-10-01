@@ -204,22 +204,23 @@ function OverviewTab({ project, report, evm }) {
         <Card title={t('Financeiro')}>
           {financials ? (
             <div className="space-y-4">
-              <div className={`grid gap-3 ${project.margin_percentage !== null && project.margin_percentage !== undefined ? 'grid-cols-2 md:grid-cols-5' : 'grid-cols-2 md:grid-cols-4'}`}>
-                <StatTile label={t('Valor vendido')} value={formatCurrency(financials.sold_value)} />
-                <StatTile label={t('Custo real')} value={formatCurrency(financials.real_cost)} />
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
+                <StatTile label={t('Valor vendido')} value={formatCurrency(financials.sold_value)} compact />
+                <StatTile label={t('Custo real')} value={formatCurrency(financials.real_cost)} compact />
                 <StatTile
                   label={t('Margem')}
                   value={formatCurrency(financials.profit_margin)}
                   tone={Number(financials.profit_margin) < 0 ? 'critical' : 'default'}
+                  compact
                 />
-                {project.margin_percentage !== null && project.margin_percentage !== undefined && (
-                  // "% Margem Planejada" (pedido do usuário, "melhorias
-                  // parte 5") — mesmo valor DECLARADO na venda/BID
-                  // (Project.margin_percentage, "% Margem vendida" no
-                  // cadastro do projeto), só renomeado aqui pra ficar lado a
-                  // lado com "% Margem Real" pra comparação.
-                  <StatTile label={t('% Margem Planejada')} value={formatPercent(project.margin_percentage)} />
-                )}
+                {/* "% Margem Planejada" (pedido do usuário, "melhorias
+                    parte 5") — mesmo valor DECLARADO na venda/BID
+                    (Project.margin_percentage, "% Margem vendida" no
+                    cadastro do projeto), só renomeado aqui pra ficar lado a
+                    lado com "% Margem Real" pra comparação. Sempre visível
+                    (antes só aparecia quando preenchido) — "—" quando o
+                    projeto ainda não declarou uma margem. */}
+                <StatTile label={t('% Margem Planejada')} value={formatPercent(project.margin_percentage)} compact />
                 {/* "% Margem Real" — calculada a partir do custo efetivo
                     (financials.profit_margin / financials.sold_value), ver
                     project_financials em app/services.py. "—" sem valor
@@ -228,6 +229,7 @@ function OverviewTab({ project, report, evm }) {
                   label={t('% Margem Real')}
                   value={formatPercent(financials.real_margin_percentage)}
                   tone={financials.real_margin_percentage !== null && Number(financials.real_margin_percentage) < 0 ? 'critical' : 'default'}
+                  compact
                 />
               </div>
               {byType && (

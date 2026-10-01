@@ -11,15 +11,20 @@ const TONE_COLOR = {
  * do app de referência Resultar Servicios (KpiCard em components/app-ui.tsx).
  * A cor do tom vem sempre do conjunto reservado de cores de status do skill
  * de dataviz (--status-*) ou da cor de marca (--series-1) — nunca uma cor
- * arbitrária nova — e o rótulo sempre acompanha, nunca só a cor. */
-export default function StatTile({ label, value, hint, tone = 'default' }) {
+ * arbitrária nova — e o rótulo sempre acompanha, nunca só a cor.
+ *
+ * `compact` (pedido do usuário, "melhorias parte 5": caixas menores no
+ * card Financeiro do projeto pra caber 5 numa linha só) reduz o padding e
+ * o tamanho do valor — mesmo cartão, só mais enxuto; o padrão (`compact`
+ * ausente) continua do tamanho de sempre em todo o resto do app. */
+export default function StatTile({ label, value, hint, tone = 'default', compact = false }) {
   const borderColor = TONE_COLOR[tone] || TONE_COLOR.default
   return (
     <div
-      className="rounded-xl border bg-[var(--surface)] px-5 py-4"
+      className={`rounded-xl border bg-[var(--surface)] ${compact ? 'px-3 py-2.5' : 'px-5 py-4'}`}
       style={{ borderColor: 'var(--border)', borderTopWidth: 3, borderTopColor: borderColor }}
     >
-      <p className="text-2xl font-bold text-[var(--text-primary)]">{value}</p>
+      <p className={`font-bold text-[var(--text-primary)] ${compact ? 'text-lg' : 'text-2xl'}`}>{value}</p>
       <p className="mt-1.5 text-[11px] font-bold uppercase tracking-wide text-[var(--text-muted)]">{label}</p>
       {hint && <p className="mt-1 text-xs text-[var(--text-muted)]">{hint}</p>}
     </div>
