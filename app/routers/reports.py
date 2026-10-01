@@ -72,13 +72,23 @@ def _scoped_projects(db: Session, user: User, include_modelo: bool = False) -> l
     # precisa de visão completa do portfólio. O filtro manual "Gerente" em
     # GET /reports/portfolio (abaixo) segue existindo pra quem ainda
     # enxerga mais de um gerente (ADMIN).
+    #
+    # Exceção: projeto MODELO é liberado pra qualquer INTERNAL_PM
+    # independente de quem é o manager_id (pedido do usuário: os Modelos
+    # foram todos cadastrados com o Admin como gerente, e "Mostrar
+    # projetos Modelo" precisa continuar funcionando pra qualquer PM usar
+    # como base do "Copiar estrutura de outro projeto" — não é trabalho de
+    # ninguém em particular, é um catálogo de estruturas compartilhado).
+    # Só entra no OR quando `include_modelo` já deixou alguma linha MODELO
+    # no conjunto; com include_modelo=False (padrão) elas já nem chegam
+    # aqui, então o OR fica sem efeito nenhum.
     stmt = select(Project)
     if not include_modelo:
         stmt = stmt.where(Project.status != ProjectStatus.MODELO)
     if user.role in EXTERNAL_ROLES:
         stmt = stmt.where(Project.client_id == user.client_id)
     elif user.role == UserRole.INTERNAL_PM:
-        stmt = stmt.where(Project.manager_id == user.id)
+        stmt = stmt.where(or_(Project.manager_id == user.id, Project.status == ProjectStatus.MODELO))
     return list(db.scalars(stmt).all())
 
 
