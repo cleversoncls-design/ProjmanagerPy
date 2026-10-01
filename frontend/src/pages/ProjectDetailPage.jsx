@@ -204,7 +204,7 @@ function OverviewTab({ project, report, evm }) {
         <Card title={t('Financeiro')}>
           {financials ? (
             <div className="space-y-4">
-              <div className={`grid gap-3 ${project.margin_percentage !== null && project.margin_percentage !== undefined ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-3'}`}>
+              <div className={`grid gap-3 ${project.margin_percentage !== null && project.margin_percentage !== undefined ? 'grid-cols-2 md:grid-cols-5' : 'grid-cols-2 md:grid-cols-4'}`}>
                 <StatTile label={t('Valor vendido')} value={formatCurrency(financials.sold_value)} />
                 <StatTile label={t('Custo real')} value={formatCurrency(financials.real_cost)} />
                 <StatTile
@@ -213,8 +213,22 @@ function OverviewTab({ project, report, evm }) {
                   tone={Number(financials.profit_margin) < 0 ? 'critical' : 'default'}
                 />
                 {project.margin_percentage !== null && project.margin_percentage !== undefined && (
-                  <StatTile label={t('% Margem vendida')} value={formatPercent(project.margin_percentage)} />
+                  // "% Margem Planejada" (pedido do usuário, "melhorias
+                  // parte 5") — mesmo valor DECLARADO na venda/BID
+                  // (Project.margin_percentage, "% Margem vendida" no
+                  // cadastro do projeto), só renomeado aqui pra ficar lado a
+                  // lado com "% Margem Real" pra comparação.
+                  <StatTile label={t('% Margem Planejada')} value={formatPercent(project.margin_percentage)} />
                 )}
+                {/* "% Margem Real" — calculada a partir do custo efetivo
+                    (financials.profit_margin / financials.sold_value), ver
+                    project_financials em app/services.py. "—" sem valor
+                    vendido (nada pra comparar). */}
+                <StatTile
+                  label={t('% Margem Real')}
+                  value={formatPercent(financials.real_margin_percentage)}
+                  tone={financials.real_margin_percentage !== null && Number(financials.real_margin_percentage) < 0 ? 'critical' : 'default'}
+                />
               </div>
               {byType && (
                 <Table
@@ -548,7 +562,9 @@ function ProjectEditModal({ project, onClose, onSaved }) {
           </div>
           <div className="mt-3 grid grid-cols-2 gap-4">
             <FormField label={t('% Margem vendida')} hint={t('Valor declarado na venda — não é calculado a partir de custo.')}>
-              <TextInput type="number" min="0" max="100" step="0.1" value={form.margin_percentage} onChange={updateField('margin_percentage')} />
+              {/* step="0.1" rejeitava valores com 2 casas decimais — ver
+                  mesmo comentário em ProjectsPage.jsx. */}
+              <TextInput type="number" min="0" max="100" step="0.01" value={form.margin_percentage} onChange={updateField('margin_percentage')} />
             </FormField>
           </div>
         </div>
@@ -1644,6 +1660,9 @@ const EMPTY_TASK_FORM = {
   // "melhorias parte 4") — default 1 = "qualquer nível serve" (mesmo
   // default do backend, ver schemas.TaskCreate.min_level).
   min_level: 1,
+  // Onde a tarefa pode ser executada (pedido do usuário, "melhorias parte
+  // 5") — default BOTH ("Ambos"), mesmo default do backend.
+  modality: 'BOTH',
 }
 
 /** Sugestão de Código WBS pra "Nova tarefa" — mesma convenção de
@@ -1679,6 +1698,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           is_milestone: task.is_milestone,
           notes: task.notes || '',
           min_level: task.min_level,
+          modality: task.modality,
         }
       : { ...EMPTY_TASK_FORM, wbs_code: suggestWbsCode(allTasks, '') },
   )
@@ -1758,6 +1778,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           is_milestone: form.is_milestone,
           notes: form.notes || null,
           min_level: Number(form.min_level),
+          modality: form.modality,
         }
         if (effortField === 'duration') payload.duration_days = form.duration_days
         if (effortField === 'hours') payload.estimated_hours = form.estimated_hours
@@ -1771,6 +1792,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
             task_type: form.task_type,
             is_milestone: form.is_milestone,
             min_level: Number(form.min_level),
+            modality: form.modality,
           }
           if (form.notes) payload.notes = form.notes
           if (form.parent_task_id) payload.parent_task_id = form.parent_task_id
@@ -1998,18 +2020,29 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
             <TextInput type="number" min="0" max="100" step="1" value={form.progress_percentage} onChange={updateField('progress_percentage')} />
           </FormField>
         )}
-        <FormField
-          label={t('Nível mínimo')}
-          hint={t('Filtra o seletor de Recurso abaixo — recursos sem nível definido continuam aparecendo.')}
-        >
-          <Select value={form.min_level} onChange={updateField('min_level')}>
-            {Object.entries(labels.RESOURCE_LEVEL_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
-        </FormField>
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            label={t('Nível mínimo')}
+            hint={t('Filtra o seletor de Recurso abaixo — recursos sem nível definido continuam aparecendo.')}
+          >
+            <Select value={form.min_level} onChange={updateField('min_level')}>
+              {Object.entries(labels.RESOURCE_LEVEL_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField label={t('Modalidade')} hint={t('Onde a tarefa pode ser executada.')}>
+            <Select value={form.modality} onChange={updateField('modality')}>
+              {Object.entries(labels.TASK_MODALITY_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        </div>
         <FormField label={t('Observações')}>
           <TextArea rows={2} value={form.notes} onChange={updateField('notes')} />
         </FormField>

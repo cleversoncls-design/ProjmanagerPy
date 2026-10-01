@@ -918,7 +918,7 @@ def project_statistics(session: Session, project_id: str) -> dict:
     }
 
 
-def project_financials(session: Session, project_id: str) -> dict[str, Decimal]:
+def project_financials(session: Session, project_id: str) -> dict[str, Decimal | None]:
     project = session.get(Project, project_id)
     if not project:
         raise ValueError("Projeto não encontrado")
@@ -939,7 +939,22 @@ def project_financials(session: Session, project_id: str) -> dict[str, Decimal]:
     expense_cost = sum((Decimal(x) for x in session.scalars(select(ProjectExpense.amount).where(ProjectExpense.project_id == project_id)).all()), Decimal("0"))
     real_cost = timesheet_cost + expense_cost
     sold = Decimal(project.sold_value or 0)
-    return {"sold_value": sold, "timesheet_cost": timesheet_cost, "expense_cost": expense_cost, "real_cost": real_cost, "profit_margin": sold - real_cost}
+    profit_margin = sold - real_cost
+    # "% Margem Real" (pedido do usuário, "melhorias parte 5") — comparável
+    # com Project.margin_percentage ("% Margem Planejada" na tela, o valor
+    # DECLARADO na venda/BID): esta sim calculada a partir do custo efetivo
+    # (sold_value x real_cost), exibida lado a lado no Financeiro do
+    # projeto. None sem valor vendido (nada pra comparar — evita divisão
+    # por zero).
+    real_margin_percentage = _q((profit_margin / sold) * 100) if sold > 0 else None
+    return {
+        "sold_value": sold,
+        "timesheet_cost": timesheet_cost,
+        "expense_cost": expense_cost,
+        "real_cost": real_cost,
+        "profit_margin": profit_margin,
+        "real_margin_percentage": real_margin_percentage,
+    }
 
 
 def _progress_from_tasks(tasks: list[Task]) -> dict:

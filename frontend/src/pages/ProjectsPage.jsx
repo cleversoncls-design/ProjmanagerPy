@@ -369,7 +369,12 @@ export default function ProjectsPage() {
               </div>
               <div className="mt-3 grid grid-cols-2 gap-4">
                 <FormField label={t('% Margem vendida')} hint={t('Valor declarado na venda — não é calculado a partir de custo.')}>
-                  <TextInput type="number" min="0" max="100" step="0.1" value={form.margin_percentage} onChange={updateField('margin_percentage')} />
+                  {/* step="0.1" rejeitava valores com 2 casas decimais (ex.:
+                      58,45) — o navegador acusava "valor inválido" mesmo
+                      sendo um valor perfeitamente aceito pelo backend
+                      (Numeric(5,2)). step="0.01" aceita duas casas decimais,
+                      mesma correção já aplicada a Duração/Trabalho da tarefa. */}
+                  <TextInput type="number" min="0" max="100" step="0.01" value={form.margin_percentage} onChange={updateField('margin_percentage')} />
                 </FormField>
               </div>
               <p className="mt-3 text-sm">

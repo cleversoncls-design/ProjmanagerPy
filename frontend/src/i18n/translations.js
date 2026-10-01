@@ -98,6 +98,10 @@ export const es = {
   'Nível 2': 'Nivel 2',
   'Nível 3': 'Nivel 3',
   'Nível 4': 'Nivel 4',
+  // Modalidade da tarefa (TASK_MODALITY_LABELS)
+  Remotamente: 'A distancia',
+  Presencial: 'Presencial',
+  Ambos: 'Ambos',
   // Status de projeto (Ativo é compartilhado com status de usuário)
   Ativo: 'Activo',
   Planejamento: 'Planificación',
@@ -146,6 +150,8 @@ export const es = {
   // --- Página Projetos / Clientes / Usuários / Calendários / Detalhe do projeto (varredura de tradução) ---
   '% Margem vendida': '% Margen vendido',
   'Valor declarado na venda — não é calculado a partir de custo.': 'Valor declarado en la venta — no se calcula a partir de costo.',
+  '% Margem Planejada': '% Margen Planificado',
+  '% Margem Real': '% Margen Real',
   '% Realizado': '% Completado',
   'Nível mínimo': 'Nivel mínimo',
   'Filtra o seletor de Recurso abaixo — recursos sem nível definido continuam aparecendo.':
@@ -237,6 +243,8 @@ export const es = {
   'Financeiro': 'Financiero',
   'Função': 'Función',
   'Nível': 'Nivel',
+  'Modalidade': 'Modalidad',
+  'Onde a tarefa pode ser executada.': 'Dónde se puede ejecutar la tarea.',
   'Gerando planilha…': 'Generando planilla…',
   'Gerente responsável': 'Gerente responsable',
   'Grava a Duração, o Trabalho e as datas planejadas de hoje de todas as tarefas como a nova linha de base do projeto — usada para comparar com o realizado depois (colunas "Linha base" na grade e variância de término nas Estatísticas).': 'Registra la Duración, el Trabajo y las fechas planificadas de hoy de todas las tareas como la nueva línea base del proyecto — usada para comparar con lo real después (columnas "Línea base" en la grilla y variación de término en Estadísticas).',

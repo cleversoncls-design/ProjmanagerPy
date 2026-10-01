@@ -110,6 +110,18 @@ class TaskType(StrEnum):
     CONSULTING = "CONSULTING"
 
 
+class TaskModality(StrEnum):
+    """Onde a tarefa pode ser executada (pedido do usuário, "melhorias
+    parte 5") — campo puramente informativo, sem validação nenhuma
+    associada (não restringe quais recursos podem ser alocados nem bloqueia
+    apontamento de horas). Default BOTH ("Ambos") = mais permissivo, mesmo
+    critério do default de `Task.min_level`."""
+
+    REMOTE = "REMOTE"
+    ON_SITE = "ON_SITE"
+    BOTH = "BOTH"
+
+
 class TaskApprovalStatus(StrEnum):
     """Aprovação da tarefa pelo lado do cliente (gerente de projeto do
     cliente ou usuário-chave), independente do TaskStatus de execução —
@@ -341,6 +353,12 @@ class Task(Base):
     # Nível preenchidos) — e nada é bloqueado no backend. Obrigatório
     # (pedido explícito do usuário); default 1 = "qualquer nível serve".
     min_level: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    # Onde a tarefa pode ser executada (pedido do usuário, "melhorias parte
+    # 5") — ver TaskModality. Só informativo (nada valida/filtra a partir
+    # dele); default BOTH = "Ambos".
+    modality: Mapped[TaskModality] = mapped_column(
+        SqlEnum(TaskModality, name="task_modality"), nullable=False, default=TaskModality.BOTH
+    )
     __table_args__ = (
         UniqueConstraint("project_id", "wbs_code", name="uq_task_project_wbs"),
         CheckConstraint("min_level BETWEEN 1 AND 4", name="ck_task_min_level_range"),

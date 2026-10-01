@@ -95,6 +95,18 @@ def test_financials_hide_no_data_and_calculate_margin():
     result = project_financials(db, project.id)
     assert result["real_cost"] == Decimal("600.00")
     assert result["profit_margin"] == Decimal("400.00")
+    # "% Margem Real" (pedido do usuário, "melhorias parte 5") — 400/1000 = 40%.
+    assert result["real_margin_percentage"] == Decimal("40.00")
+
+
+def test_financials_real_margin_percentage_is_none_without_sold_value():
+    """Sem valor vendido não há o que comparar — None em vez de dividir por
+    zero (pedido do usuário, "melhorias parte 5")."""
+    db = session()
+    project = _make_project(db, code="PRJ-SEM-VENDA")
+    result = project_financials(db, project.id)
+    assert result["sold_value"] == Decimal("0")
+    assert result["real_margin_percentage"] is None
 
 
 def test_financials_include_adhoc_timesheet_allocated_to_project():

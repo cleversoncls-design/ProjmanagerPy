@@ -18,6 +18,7 @@ from .models import (
     RiskLevel,
     RiskStatus,
     TaskApprovalStatus,
+    TaskModality,
     TaskStatus,
     TaskType,
     TimesheetStatus,
@@ -240,7 +241,10 @@ class ProjectDetail(ProjectSummary):
     consulting_hours: Decimal | None = None
     consulting_rate: Decimal | None = None
     margin_percentage: Decimal | None = None
-    financials: dict[str, Decimal] | None = None
+    # dict[str, Decimal | None] (não só dict[str, Decimal]) desde "melhorias
+    # parte 5": "real_margin_percentage" (dentro de project_financials) pode
+    # vir None quando o projeto não tem valor vendido.
+    financials: dict[str, Decimal | None] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +273,9 @@ class TaskCreate(BaseModel):
     # "melhorias parte 4") — ver comentário em models.Task.min_level.
     # Default 1 = "qualquer nível serve" (não exige preenchimento manual).
     min_level: int = Field(default=1, ge=1, le=4)
+    # Onde a tarefa pode ser executada (pedido do usuário, "melhorias parte
+    # 5") — ver models.TaskModality. Puramente informativo.
+    modality: TaskModality = TaskModality.BOTH
 
 
 class TaskUpdate(BaseModel):
@@ -286,6 +293,7 @@ class TaskUpdate(BaseModel):
     is_milestone: bool | None = None
     notes: str | None = None
     min_level: int | None = Field(default=None, ge=1, le=4)
+    modality: TaskModality | None = None
 
 
 class TaskClientApprovalUpdate(BaseModel):
@@ -315,6 +323,7 @@ class TaskRead(ORMModel):
     client_approval_status: TaskApprovalStatus
     notes: str | None = None
     min_level: int
+    modality: TaskModality
 
 
 class TaskMoveRequest(BaseModel):
@@ -757,7 +766,8 @@ class ProjectReportResponse(BaseModel):
     tasks_total: int
     tasks_remaining: int
     tasks_by_status: dict[str, int]
-    financials: dict[str, Decimal] | None = None
+    # Ver comentário em ProjectDetail.financials — mesmo motivo.
+    financials: dict[str, Decimal | None] | None = None
     financials_by_task_type: dict[str, dict[str, Decimal]] | None = None
     burndown: list[BurndownPoint]
 
