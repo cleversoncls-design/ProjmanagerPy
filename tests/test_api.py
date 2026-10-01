@@ -565,6 +565,33 @@ def test_portfolio_filter_by_manager(client, db_session, setup):
     assert other_project.id not in ids
 
 
+def test_portfolio_scoped_to_manager_for_internal_pm(client, db_session, setup):
+    """Pedido do usuário: "ainda posso ver com meu acesso de gerente de
+    projetos, projetos de outros gerentes" — por padrão (sem filtro
+    nenhum) um INTERNAL_PM só deve ver, na tela de Projetos, os projetos
+    onde ele mesmo é o gerente. ADMIN continua vendo o portfólio inteiro."""
+    pm_headers = auth_headers(client, setup["pm"].email)
+    admin_headers = setup["admin_headers"]
+    other_pm = make_user(db_session, role=UserRole.INTERNAL_PM, email="outro.pm.portfolio@example.com")
+    other_project = make_project(db_session, client_id=setup["client_a"].id, manager_id=other_pm.id, code="PRJ-E")
+
+    pm_view = client.get("/reports/portfolio", headers=pm_headers)
+    assert pm_view.status_code == 200
+    pm_ids = {row["id"] for row in pm_view.json()}
+    assert pm_ids == {setup["project_a"].id, setup["project_b"].id}
+    assert other_project.id not in pm_ids
+
+    other_pm_headers = auth_headers(client, other_pm.email)
+    other_pm_view = client.get("/reports/portfolio", headers=other_pm_headers)
+    assert other_pm_view.status_code == 200
+    assert {row["id"] for row in other_pm_view.json()} == {other_project.id}
+
+    admin_view = client.get("/reports/portfolio", headers=admin_headers)
+    assert admin_view.status_code == 200
+    admin_ids = {row["id"] for row in admin_view.json()}
+    assert {setup["project_a"].id, setup["project_b"].id, other_project.id} <= admin_ids
+
+
 def test_approving_timesheet_updates_task_actual_hours(client, setup):
     """Regressão: Task.actual_hours nunca era recalculado a partir dos
     timesheets aprovados (ficava sempre em 0)."""
