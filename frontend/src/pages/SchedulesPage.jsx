@@ -17,7 +17,7 @@ import ErrorBanner from '../components/ErrorBanner'
 import { FormField, TextInput, Select, TextArea } from '../components/FormField'
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from '../components/icons'
 import { formatTime } from '../utils/format'
-import { MANAGEMENT_ROLES } from '../utils/labels'
+import { MANAGEMENT_ROLES, resourceFunctionLevelLabel } from '../utils/labels'
 import { DEFAULT_PROJECT_COLOR, contrastTextColor } from '../utils/colorPalette'
 
 const EMPTY_FILTERS = { resource_id: '', client_id: '', project_id: '', start: '', end: '' }
@@ -123,9 +123,9 @@ export default function SchedulesPage() {
     () =>
       resources.map((resource) => ({
         ...resource,
-        userName: usersById[resource.user_id]?.name || resource.role_title,
+        userName: usersById[resource.user_id]?.name || resourceFunctionLevelLabel(resource, labels) || resource.id,
       })),
-    [resources, usersById],
+    [resources, usersById, labels],
   )
   const resourcesById = useMemo(() => Object.fromEntries(resourceOptions.map((r) => [r.id, r])), [resourceOptions])
   const projectsById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects])

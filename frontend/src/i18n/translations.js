@@ -86,6 +86,18 @@ export const es = {
   Consultor: 'Consultor',
   'PM do cliente': 'PM del cliente',
   'Usuário-chave': 'Usuario clave',
+  // Função do Recurso (RESOURCE_FUNCTION_LABELS) — "Gerente de Projetos"
+  // (com P maiúsculo) é intencionalmente uma chave separada de "Gerente de
+  // projetos" acima (perfil de usuário INTERNAL_PM), embora o texto em
+  // Espanhol seja o mesmo.
+  Desenvolvedor: 'Desarrollador',
+  Especialista: 'Especialista',
+  'Gerente de Projetos': 'Gerente de Proyectos',
+  // Nível de senioridade do Recurso (RESOURCE_LEVEL_LABELS)
+  'Nível 1': 'Nivel 1',
+  'Nível 2': 'Nivel 2',
+  'Nível 3': 'Nivel 3',
+  'Nível 4': 'Nivel 4',
   // Status de projeto (Ativo é compartilhado com status de usuário)
   Ativo: 'Activo',
   Planejamento: 'Planificación',
@@ -135,6 +147,9 @@ export const es = {
   '% Margem vendida': '% Margen vendido',
   'Valor declarado na venda — não é calculado a partir de custo.': 'Valor declarado en la venta — no se calcula a partir de costo.',
   '% Realizado': '% Completado',
+  'Nível mínimo': 'Nivel mínimo',
+  'Filtra o seletor de Recurso abaixo — recursos sem nível definido continuam aparecendo.':
+    'Filtra el selector de Recurso abajo — los recursos sin nivel definido siguen apareciendo.',
   '% concluído': '% completado',
   '% concluído (Duração)': '% completado (Duración)',
   '% concluído (Trabalho)': '% completado (Trabajo)',
@@ -221,6 +236,7 @@ export const es = {
   'Fim planejado': 'Fin planificado',
   'Financeiro': 'Financiero',
   'Função': 'Función',
+  'Nível': 'Nivel',
   'Gerando planilha…': 'Generando planilla…',
   'Gerente responsável': 'Gerente responsable',
   'Grava a Duração, o Trabalho e as datas planejadas de hoje de todas as tarefas como a nova linha de base do projeto — usada para comparar com o realizado depois (colunas "Linha base" na grade e variância de término nas Estatísticas).': 'Registra la Duración, el Trabajo y las fechas planificadas de hoy de todas las tareas como la nueva línea base del proyecto — usada para comparar con lo real después (columnas "Línea base" en la grilla y variación de término en Estadísticas).',
@@ -274,6 +290,7 @@ export const es = {
   'Novo projeto': 'Nuevo proyecto',
   'Novo usuário': 'Nuevo usuario',
   'Não cadastrado': 'No registrado',
+  'Não definido': 'No definido',
   'Obrigatório para perfis do cliente.': 'Obligatorio para perfiles del cliente.',
   'Observações': 'Observaciones',
   'Opcional.': 'Opcional.',

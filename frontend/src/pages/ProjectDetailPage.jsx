@@ -50,6 +50,7 @@ import {
   TASK_STATUS_COLORS,
   TASK_STATUS_TONE,
   TASK_TYPE_COLORS,
+  resourceFunctionLevelLabel,
 } from '../utils/labels'
 
 const TABS = [
@@ -249,7 +250,7 @@ function OverviewTab({ project, report, evm }) {
  * que já tem alocação específica continua restrita só a quem está nela,
  * mesmo que outro recurso esteja vinculado ao projeto aqui. */
 function ProjectResourcesTab({ projectId, canWrite }) {
-  const { t } = useLanguage()
+  const { t, labels } = useLanguage()
   const [links, setLinks] = useState([])
   const [resources, setResources] = useState([])
   const [users, setUsers] = useState([])
@@ -282,7 +283,7 @@ function ProjectResourcesTab({ projectId, canWrite }) {
   function resourceLabel(id) {
     const resource = resourcesById[id]
     if (!resource) return id
-    return usersById[resource.user_id]?.name || resource.role_title
+    return usersById[resource.user_id]?.name || resourceFunctionLevelLabel(resource, labels) || id
   }
   const linkedIds = useMemo(() => new Set(links.map((link) => link.resource_id)), [links])
   const availableResources = useMemo(() => resources.filter((r) => !linkedIds.has(r.id)), [resources, linkedIds])
@@ -1229,7 +1230,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     const resource = resourceById[resourceId]
     if (!resource) return '—'
     const owner = userById[resource.user_id]
-    return owner ? owner.name : resource.role_title
+    return owner ? owner.name : resourceFunctionLevelLabel(resource, labels) || '—'
   }
 
   async function withBusy(message, action) {
@@ -1639,6 +1640,10 @@ const EMPTY_TASK_FORM = {
   status: 'NOT_STARTED',
   is_milestone: false,
   notes: '',
+  // "Nível mínimo" exigido pra executar a tarefa (pedido do usuário,
+  // "melhorias parte 4") — default 1 = "qualquer nível serve" (mesmo
+  // default do backend, ver schemas.TaskCreate.min_level).
+  min_level: 1,
 }
 
 /** Sugestão de Código WBS pra "Nova tarefa" — mesma convenção de
@@ -1673,6 +1678,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           status: task.status,
           is_milestone: task.is_milestone,
           notes: task.notes || '',
+          min_level: task.min_level,
         }
       : { ...EMPTY_TASK_FORM, wbs_code: suggestWbsCode(allTasks, '') },
   )
@@ -1751,6 +1757,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           status: form.status,
           is_milestone: form.is_milestone,
           notes: form.notes || null,
+          min_level: Number(form.min_level),
         }
         if (effortField === 'duration') payload.duration_days = form.duration_days
         if (effortField === 'hours') payload.estimated_hours = form.estimated_hours
@@ -1763,6 +1770,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
             wbs_code: form.wbs_code,
             task_type: form.task_type,
             is_milestone: form.is_milestone,
+            min_level: Number(form.min_level),
           }
           if (form.notes) payload.notes = form.notes
           if (form.parent_task_id) payload.parent_task_id = form.parent_task_id
@@ -1907,7 +1915,13 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
 
   const predecessorOptions = allTasks.filter((t) => t.id !== task?.id)
   const assignedResourceIds = new Set(assignments.map((a) => a.resource_id))
-  const resourceOptions = resources.filter((r) => !assignedResourceIds.has(r.id))
+  // "Nível mínimo" da tarefa (pedido do usuário, "melhorias parte 4") só
+  // FILTRA este seletor — um recurso sem nível definido continua aparecendo
+  // (ainda não dá pra saber se ele cumpre o mínimo ou não), e nada é
+  // bloqueado no backend. Number(form.min_level) porque o <Select> guarda o
+  // valor como string.
+  const minLevel = Number(form.min_level) || 1
+  const resourceOptions = resources.filter((r) => !assignedResourceIds.has(r.id) && (!r.level || r.level >= minLevel))
 
   return (
     <Modal title={isEdit ? `${t('Editar tarefa')} — ${task.wbs_code} ${task.name}` : t('Nova tarefa')} onClose={onClose} wide>
@@ -1984,6 +1998,18 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
             <TextInput type="number" min="0" max="100" step="1" value={form.progress_percentage} onChange={updateField('progress_percentage')} />
           </FormField>
         )}
+        <FormField
+          label={t('Nível mínimo')}
+          hint={t('Filtra o seletor de Recurso abaixo — recursos sem nível definido continuam aparecendo.')}
+        >
+          <Select value={form.min_level} onChange={updateField('min_level')}>
+            {Object.entries(labels.RESOURCE_LEVEL_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </FormField>
         <FormField label={t('Observações')}>
           <TextArea rows={2} value={form.notes} onChange={updateField('notes')} />
         </FormField>
@@ -2090,11 +2116,15 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
               <FormField label={t('Recurso')}>
                 <Select value={assignForm.resource_id} onChange={(event) => setAssignForm((prev) => ({ ...prev, resource_id: event.target.value }))}>
                   <option value="">{t('Selecione…')}</option>
-                  {resourceOptions.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {resourceLabel(r.id)}
-                    </option>
-                  ))}
+                  {resourceOptions.map((r) => {
+                    const functionLevel = resourceFunctionLevelLabel(r, labels)
+                    return (
+                      <option key={r.id} value={r.id}>
+                        {resourceLabel(r.id)}
+                        {functionLevel ? ` (${functionLevel})` : ''}
+                      </option>
+                    )
+                  })}
                 </Select>
               </FormField>
               <FormField label={t('Horas alocadas')}>

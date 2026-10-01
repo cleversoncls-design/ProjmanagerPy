@@ -23,7 +23,7 @@ import ServiceOrderListPrintSheet from '../components/ServiceOrderListPrintSheet
 import { FormField, TextInput, Select } from '../components/FormField'
 import { CheckIcon, XIcon, PencilIcon, TrashIcon, EyeIcon, PrinterIcon, DownloadIcon } from '../components/icons'
 import { formatDate, formatTime, formatHoursDuration, minutesToHM } from '../utils/format'
-import { MANAGEMENT_ROLES, TIMESHEET_STATUS_TONE } from '../utils/labels'
+import { MANAGEMENT_ROLES, TIMESHEET_STATUS_TONE, resourceFunctionLevelLabel } from '../utils/labels'
 import { isTimesheetEditable } from '../utils/timesheetForm'
 
 function todayIso() {
@@ -88,8 +88,8 @@ export default function ServiceOrdersPage() {
 
   const usersById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
   const resourceOptions = useMemo(
-    () => resources.map((r) => ({ ...r, userName: usersById[r.user_id]?.name || r.role_title })),
-    [resources, usersById],
+    () => resources.map((r) => ({ ...r, userName: usersById[r.user_id]?.name || resourceFunctionLevelLabel(r, labels) || r.id })),
+    [resources, usersById, labels],
   )
   const projectOptions = useMemo(
     () => (filters.client_id ? projects.filter((p) => p.client_id === filters.client_id) : projects),

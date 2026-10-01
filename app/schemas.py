@@ -14,6 +14,7 @@ from .models import (
     IntakeStatus,
     Language,
     ProjectStatus,
+    ResourceFunction,
     RiskLevel,
     RiskStatus,
     TaskApprovalStatus,
@@ -264,6 +265,10 @@ class TaskCreate(BaseModel):
     planned_end_date: date | None = None
     is_milestone: bool = False
     notes: str | None = None
+    # "Nível mínimo" exigido pra executar a tarefa (pedido do usuário,
+    # "melhorias parte 4") — ver comentário em models.Task.min_level.
+    # Default 1 = "qualquer nível serve" (não exige preenchimento manual).
+    min_level: int = Field(default=1, ge=1, le=4)
 
 
 class TaskUpdate(BaseModel):
@@ -280,6 +285,7 @@ class TaskUpdate(BaseModel):
     is_critical_path: bool | None = None
     is_milestone: bool | None = None
     notes: str | None = None
+    min_level: int | None = Field(default=None, ge=1, le=4)
 
 
 class TaskClientApprovalUpdate(BaseModel):
@@ -308,6 +314,7 @@ class TaskRead(ORMModel):
     status: TaskStatus
     client_approval_status: TaskApprovalStatus
     notes: str | None = None
+    min_level: int
 
 
 class TaskMoveRequest(BaseModel):
@@ -411,7 +418,12 @@ class ProjectResourceRead(ORMModel):
 
 class ResourceCreate(BaseModel):
     user_id: str
-    role_title: str = Field(min_length=1, max_length=120)
+    # Função + Nível (pedido do usuário, "melhorias parte 4") — substituem o
+    # antigo `role_title` de texto livre. Ambos opcionais: ficam "Não
+    # definido" até alguém preencher (decisão confirmada — sem migração
+    # automática do texto livre que existia antes).
+    function: ResourceFunction | None = None
+    level: int | None = Field(default=None, ge=1, le=4)
     internal_cost_per_hour: Decimal = Field(gt=0)
     billing_rate_per_hour: Decimal = Field(gt=0)
     daily_capacity_hours: Decimal = Field(default=Decimal("8"), gt=0, le=24)
@@ -425,7 +437,8 @@ class ResourceUpdate(BaseModel):
     recriar (perdendo o vínculo de user_id único, já que POST /resources
     recusa um segundo recurso pro mesmo usuário)."""
 
-    role_title: str | None = Field(default=None, min_length=1, max_length=120)
+    function: ResourceFunction | None = None
+    level: int | None = Field(default=None, ge=1, le=4)
     internal_cost_per_hour: Decimal | None = Field(default=None, gt=0)
     billing_rate_per_hour: Decimal | None = Field(default=None, gt=0)
     daily_capacity_hours: Decimal | None = Field(default=None, gt=0, le=24)
@@ -435,7 +448,8 @@ class ResourceUpdate(BaseModel):
 class ResourceRead(ORMModel):
     id: str
     user_id: str
-    role_title: str
+    function: ResourceFunction | None
+    level: int | None
     internal_cost_per_hour: Decimal
     billing_rate_per_hour: Decimal
     daily_capacity_hours: Decimal
@@ -751,7 +765,8 @@ class ProjectReportResponse(BaseModel):
 class ResourceUtilizationRow(BaseModel):
     resource_id: str
     user_id: str
-    role_title: str
+    function: ResourceFunction | None
+    level: int | None
     period_start: date
     period_end: date
     capacity_hours: Decimal

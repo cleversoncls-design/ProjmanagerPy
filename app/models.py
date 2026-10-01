@@ -5,7 +5,22 @@ import uuid
 from datetime import date, datetime, time
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, Enum as SqlEnum, ForeignKey, Integer, JSON, Numeric, String, Text, Time, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Enum as SqlEnum,
+    ForeignKey,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    Time,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from .color_palette import DEFAULT_PROJECT_COLOR
@@ -129,6 +144,21 @@ class ChangeStatus(StrEnum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
+
+
+class ResourceFunction(StrEnum):
+    """Categoria de função do recurso (pedido do usuário, "melhorias parte
+    4") — combinada com `Resource.level` (1 a 4) pra indicar a senioridade.
+    Decisão confirmada: dois campos independentes (Função + Nível) em vez
+    de uma lista única com as 8 combinações literais sugeridas (ex.:
+    "Consultor Pleno - Nível 2"); mais flexível pra relatórios/filtros,
+    mesmo que tecnicamente permita combinações que não existem na prática
+    (ex.: "Gerente de Projetos" com nível 3) — risco aceito pelo usuário."""
+
+    CONSULTANT = "CONSULTANT"
+    DEVELOPER = "DEVELOPER"
+    SPECIALIST = "SPECIALIST"
+    PROJECT_MANAGER = "PROJECT_MANAGER"
 
 
 class Client(Base):
@@ -302,7 +332,19 @@ class Task(Base):
     # Campo de observações livre (item 16 do pedido de revisão da tela de
     # tarefas) — texto sem estrutura, nunca usado em cálculo nenhum.
     notes: Mapped[str | None] = mapped_column(Text)
-    __table_args__ = (UniqueConstraint("project_id", "wbs_code", name="uq_task_project_wbs"),)
+    # "Nível mínimo" exigido pra executar a tarefa (pedido do usuário,
+    # "melhorias parte 4") — usado só como FILTRO no seletor de "Recurso" da
+    # alocação (Recursos Alocados, ver frontend): o combo esconde recursos
+    # com `Resource.level` definido e abaixo do mínimo, mas um recurso SEM
+    # nível definido continua aparecendo (decisão deliberada, pra não
+    # esvaziar o seletor enquanto os recursos ainda não tiverem Função/
+    # Nível preenchidos) — e nada é bloqueado no backend. Obrigatório
+    # (pedido explícito do usuário); default 1 = "qualquer nível serve".
+    min_level: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    __table_args__ = (
+        UniqueConstraint("project_id", "wbs_code", name="uq_task_project_wbs"),
+        CheckConstraint("min_level BETWEEN 1 AND 4", name="ck_task_min_level_range"),
+    )
     project: Mapped[Project] = relationship(back_populates="tasks")
     parent: Mapped[Task | None] = relationship(remote_side=[id], back_populates="children")
     children: Mapped[list[Task]] = relationship(back_populates="parent")
@@ -314,7 +356,15 @@ class Resource(Base):
     __tablename__ = "resources"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
-    role_title: Mapped[str] = mapped_column(String(120), nullable=False)
+    # Função (categoria) e Nível (1 a 4, senioridade) — pedido do usuário,
+    # "melhorias parte 4": substituem o antigo campo de texto livre
+    # `role_title`. Ambos opcionais — nenhuma migração automática do texto
+    # livre existente (decisão confirmada); cada recurso recebe a Função/
+    # Nível corretos quando alguém editar o cadastro dele. `level` é um
+    # inteiro simples (não um enum) de propósito: permite comparação >=
+    # direta no filtro de "Nível mínimo" da tarefa (ver `Task.min_level`).
+    function: Mapped[ResourceFunction | None] = mapped_column(SqlEnum(ResourceFunction, name="resource_function"))
+    level: Mapped[int | None] = mapped_column(Integer)
     internal_cost_per_hour: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     billing_rate_per_hour: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     daily_capacity_hours: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=8)
@@ -322,6 +372,7 @@ class Resource(Base):
     # deste recurso — opcional; sem ele, o recálculo de cronograma usa o
     # calendário do projeto/calendar_id informado explicitamente na chamada.
     calendar_id: Mapped[str | None] = mapped_column(ForeignKey("calendars.id", ondelete="SET NULL"))
+    __table_args__ = (CheckConstraint("level IS NULL OR level BETWEEN 1 AND 4", name="ck_resource_level_range"),)
     user: Mapped[User] = relationship(back_populates="resource")
     calendar: Mapped[Calendar | None] = relationship()
 

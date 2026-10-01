@@ -15,13 +15,13 @@ import StatusPill from '../components/StatusPill'
 import { BriefcaseIcon, KeyIcon, PencilIcon, TrashIcon } from '../components/icons'
 import { FormField, TextInput, Select } from '../components/FormField'
 import { formatCurrency } from '../utils/format'
-import { USER_STATUS_TONE } from '../utils/labels'
+import { USER_STATUS_TONE, resourceFunctionLevelLabel } from '../utils/labels'
 import { useLanguage } from '../context/LanguageContext'
 
 const EXTERNAL_ROLES = ['CLIENT_PM', 'CLIENT_USER']
 
 const EMPTY_USER_FORM = { name: '', email: '', password: '', role: 'CONSULTANT', client_id: '' }
-const EMPTY_RESOURCE_FORM = { role_title: '', internal_cost_per_hour: '', billing_rate_per_hour: '', daily_capacity_hours: '8', calendar_id: '' }
+const EMPTY_RESOURCE_FORM = { function: '', level: '', internal_cost_per_hour: '', billing_rate_per_hour: '', daily_capacity_hours: '8', calendar_id: '' }
 
 export default function UsersPage() {
   const { labels, t } = useLanguage()
@@ -117,7 +117,8 @@ export default function UsersPage() {
     setResourceTarget(row)
     setEditingResourceId(resource.id)
     setResourceForm({
-      role_title: resource.role_title,
+      function: resource.function || '',
+      level: resource.level ? String(resource.level) : '',
       internal_cost_per_hour: String(resource.internal_cost_per_hour),
       billing_rate_per_hour: String(resource.billing_rate_per_hour),
       daily_capacity_hours: String(resource.daily_capacity_hours),
@@ -132,7 +133,8 @@ export default function UsersPage() {
     setSavingResource(true)
     try {
       const payload = {
-        role_title: resourceForm.role_title,
+        function: resourceForm.function || null,
+        level: resourceForm.level || null,
         internal_cost_per_hour: resourceForm.internal_cost_per_hour,
         billing_rate_per_hour: resourceForm.billing_rate_per_hour,
         daily_capacity_hours: resourceForm.daily_capacity_hours || '8',
@@ -227,7 +229,9 @@ export default function UsersPage() {
                 render: (row) => {
                   const resource = resourceByUserId[row.id]
                   if (!resource) return <span className="text-[var(--text-muted)]">{t('Não cadastrado')}</span>
-                  return `${resource.role_title} · ${formatCurrency(resource.internal_cost_per_hour)}/h`
+                  const functionLevel = resourceFunctionLevelLabel(resource, labels)
+                  const prefix = functionLevel ? `${functionLevel} · ` : ''
+                  return `${prefix}${formatCurrency(resource.internal_cost_per_hour)}/h`
                 },
               },
               {
@@ -335,9 +339,28 @@ export default function UsersPage() {
           }}
         >
           <form onSubmit={handleSaveResource} className="space-y-4">
-            <FormField label={t('Função')} required hint={t('Ex.: "Consultor sênior", "Gerente de projetos".')}>
-              <TextInput required value={resourceForm.role_title} onChange={updateResourceField('role_title')} />
-            </FormField>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label={t('Função')} hint={t('Opcional.')}>
+                <Select value={resourceForm.function} onChange={updateResourceField('function')}>
+                  <option value="">{t('Não definido')}</option>
+                  {Object.entries(labels.RESOURCE_FUNCTION_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label={t('Nível')} hint={t('Opcional.')}>
+                <Select value={resourceForm.level} onChange={updateResourceField('level')}>
+                  <option value="">{t('Não definido')}</option>
+                  {Object.entries(labels.RESOURCE_LEVEL_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <FormField label={t('Custo interno (US$/h)')} required>
                 <TextInput type="number" min="0" step="0.01" required value={resourceForm.internal_cost_per_hour} onChange={updateResourceField('internal_cost_per_hour')} />
