@@ -6,9 +6,9 @@ from sqlalchemy.orm import Session
 
 from ..audit import record_audit
 from ..database import get_db
-from ..deps import get_current_user, require_project_access, require_roles
+from ..deps import MANAGEMENT_ROLES, get_current_user, require_project_access, require_roles
 from ..i18n import t as translate
-from ..models import AuditAction, ChangeRequest, Project, User, UserRole
+from ..models import AuditAction, ChangeRequest, Project, User
 from ..schemas import ChangeRequestCreate, ChangeRequestRead, ChangeRequestStatusUpdate
 
 router = APIRouter(tags=["change-requests"])
@@ -50,7 +50,7 @@ def list_change_requests(project_id: str, user: User = Depends(get_current_user)
 def update_change_request_status(
     change_id: str,
     data: ChangeRequestStatusUpdate,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
     db: Session = Depends(get_db),
 ) -> ChangeRequest:
     change = db.get(ChangeRequest, change_id)

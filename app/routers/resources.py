@@ -7,9 +7,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import require_roles
+from ..deps import INTERNAL_ROLES, MANAGEMENT_ROLES, require_roles
 from ..i18n import t as translate
-from ..models import Calendar, Resource, User, UserRole
+from ..models import Calendar, Resource, User
 from ..schemas import ResourceCreate, ResourceRead, ResourceUpdate, ResourceUtilizationRow
 from ..services import resource_utilization
 
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/resources", tags=["resources"])
 @router.post("", response_model=ResourceRead, status_code=status.HTTP_201_CREATED)
 def create_resource(
     data: ResourceCreate,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
     db: Session = Depends(get_db),
 ) -> Resource:
     target_user = db.get(User, data.user_id)
@@ -39,7 +39,7 @@ def create_resource(
 @router.get("", response_model=list[ResourceRead])
 def list_resources(
     user_id: str | None = None,
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.CONSULTANT)),
+    _: User = Depends(require_roles(*INTERNAL_ROLES)),
     db: Session = Depends(get_db),
 ) -> list[Resource]:
     """Só existia leitura por `resource_id`; sem listagem não dá para montar
@@ -57,7 +57,7 @@ def utilization(
     start: date | None = Query(default=None),
     end: date | None = Query(default=None),
     resource_id: str | None = None,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.CONSULTANT)),
+    user: User = Depends(require_roles(*INTERNAL_ROLES)),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """Workload/capacidade × demanda por recurso — sem `start`/`end`, usa o
@@ -87,7 +87,7 @@ def utilization(
 @router.get("/{resource_id}", response_model=ResourceRead)
 def read_resource(
     resource_id: str,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.CONSULTANT)),
+    user: User = Depends(require_roles(*INTERNAL_ROLES)),
     db: Session = Depends(get_db),
 ) -> Resource:
     resource = db.get(Resource, resource_id)
@@ -100,7 +100,7 @@ def read_resource(
 def update_resource(
     resource_id: str,
     data: ResourceUpdate,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
     db: Session = Depends(get_db),
 ) -> Resource:
     """Corrige o cadastro de um recurso já vinculado (função/custo interno/

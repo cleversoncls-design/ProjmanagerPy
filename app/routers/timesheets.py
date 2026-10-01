@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..audit import record_audit
 from ..database import get_db
-from ..deps import get_current_user, require_project_access, require_roles
+from ..deps import ADMIN_LIKE_ROLES, MANAGEMENT_ROLES, get_current_user, require_project_access, require_roles
 from ..i18n import t as translate
 from ..models import (
     AuditAction,
@@ -31,7 +31,7 @@ from ..schemas import TimesheetCreate, TimesheetRead, TimesheetStatusUpdate
 
 router = APIRouter(tags=["timesheets"])
 
-_MANAGEMENT_ROLES = (UserRole.ADMIN, UserRole.INTERNAL_PM)
+_MANAGEMENT_ROLES = MANAGEMENT_ROLES
 
 
 def _compute_hours(data: TimesheetCreate, lang) -> Decimal:
@@ -369,11 +369,12 @@ def list_timesheets(
     Fila de aprovação (status_filter=PENDING) pra INTERNAL_PM só traz os
     projetos onde ele é o gerente (Project.manager_id) — pedido do
     usuário: antes qualquer INTERNAL_PM via TODO apontamento pendente do
-    sistema inteiro, não só dos projetos que ele conduz. ADMIN continua
-    vendo tudo, sem essa restrição — é o único perfil que pode aprovar
+    sistema inteiro, não só dos projetos que ele conduz. ADMIN_LIKE_ROLES
+    (Administrador, Gerente de Serviços, Diretor Geral) continuam vendo
+    tudo, sem essa restrição — são os únicos perfis que podem aprovar
     apontamento "fora da agenda" (ver update_timesheet_status abaixo),
-    então precisa enxergar a fila inteira mesmo em projeto que não
-    gerencia."""
+    então precisam enxergar a fila inteira mesmo em projeto que não
+    gerenciam."""
     is_manager = user.role in _MANAGEMENT_ROLES
     if not is_manager:
         own_resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
@@ -423,20 +424,21 @@ def list_timesheets(
 def update_timesheet_status(
     timesheet_id: str,
     data: TimesheetStatusUpdate,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(*_MANAGEMENT_ROLES)),
     db: Session = Depends(get_db),
 ) -> Timesheet:
     entry = db.get(Timesheet, timesheet_id)
     if not entry:
         raise HTTPException(status_code=404, detail=translate("Apontamento não encontrado", user.language))
     # "Aprovação extra" (Fase 2): um apontamento avulso — sem agendamento
-    # correspondente na Agenda — só pode ser APROVADO pelo Administrador;
-    # INTERNAL_PM continua podendo rejeitar normalmente (rejeitar nunca
-    # precisou de aprovação extra nenhuma).
-    if entry.unscheduled and data.status == TimesheetStatus.APPROVED and user.role != UserRole.ADMIN:
+    # correspondente na Agenda — só pode ser APROVADO por ADMIN_LIKE_ROLES
+    # (Administrador, Gerente de Serviços, Diretor Geral); INTERNAL_PM
+    # continua podendo rejeitar normalmente (rejeitar nunca precisou de
+    # aprovação extra nenhuma).
+    if entry.unscheduled and data.status == TimesheetStatus.APPROVED and user.role not in ADMIN_LIKE_ROLES:
         raise HTTPException(
             status_code=403,
-            detail=translate("Apontamento fora da agenda — só o Administrador pode aprová-lo", user.language),
+            detail=translate("Apontamento fora da agenda — só Administrador, Gerente de Serviços ou Diretor Geral podem aprová-lo", user.language),
         )
     entry.status = data.status
     _recalculate_actual_hours(db, entry.task_id)

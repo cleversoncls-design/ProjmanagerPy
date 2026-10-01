@@ -40,6 +40,13 @@ class UserRole(StrEnum):
     CONSULTANT = "CONSULTANT"
     CLIENT_PM = "CLIENT_PM"
     CLIENT_USER = "CLIENT_USER"
+    # Pedido do usuário: acessos equivalentes ao Administrador, exceto
+    # cadastrar/editar/excluir usuário (continua exclusivo de ADMIN, ver
+    # routers/users.py) — ver ADMIN_LIKE_ROLES/MANAGEMENT_ROLES/
+    # INTERNAL_ROLES em app/deps.py, onde os dois entram em todo lugar que
+    # hoje já é ADMIN ou ADMIN+INTERNAL_PM.
+    SERVICE_MANAGER = "SERVICE_MANAGER"
+    GENERAL_DIRECTOR = "GENERAL_DIRECTOR"
 
 
 class UserStatus(StrEnum):
@@ -475,8 +482,8 @@ class Timesheet(Base):
     break_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     hours_spent: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)
     # "Avulso" no sentido novo (Fase 2): apontamento num projeto/data em que
-    # o recurso NÃO tinha nenhum ResourceSchedule — pede aprovação extra
-    # (só ADMIN aprova, ver update_timesheet_status). Independente do
+    # o recurso NÃO tinha nenhum ResourceSchedule — pede aprovação extra (só
+    # ADMIN_LIKE_ROLES aprova, ver update_timesheet_status). Independente do
     # "avulso" antigo (task_id nulo, comentário acima) — os dois conceitos
     # coexistem: dá pra ter uma tarefa da EAP apontada fora da agenda, ou um
     # apontamento sem tarefa mas dentro de um horário agendado no projeto.

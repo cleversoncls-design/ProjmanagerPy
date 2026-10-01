@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..audit import record_audit
 from ..color_palette import PROJECT_COLOR_HEXES
 from ..database import get_db
-from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access, require_roles
+from ..deps import EXTERNAL_ROLES, MANAGEMENT_ROLES, get_current_user, require_project_access, require_roles
 from ..i18n import t as translate
 from ..models import (
     AuditAction,
@@ -78,12 +78,17 @@ def _recompute_sold_value(project: Project) -> None:
 @router.post("", response_model=ProjectDetail, status_code=status.HTTP_201_CREATED)
 def create_project(
     data: ProjectCreate,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
     db: Session = Depends(get_db),
 ) -> Project:
     if not db.get(Client, data.client_id):
         raise HTTPException(status_code=404, detail=translate("Cliente não encontrado", user.language))
     manager = db.get(User, data.manager_id)
+    # De propósito NÃO ampliado pros novos perfis (Gerente de Serviços/
+    # Diretor Geral) — "quem pode ser gerente de projeto" é uma regra de
+    # negócio à parte de "quem tem acesso equivalente ao Administrador"; se
+    # o usuário quiser que esses perfis também possam ser escolhidos como
+    # gerente de projeto, é um pedido separado.
     if not manager or manager.role not in {UserRole.ADMIN, UserRole.INTERNAL_PM}:
         raise HTTPException(status_code=422, detail=translate("manager_id precisa ser um usuário interno (ADMIN ou INTERNAL_PM)", user.language))
     if db.scalar(select(Project).where(Project.code == data.code)):
@@ -201,7 +206,7 @@ def update_project(
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_project(
     project_id: str,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
     db: Session = Depends(get_db),
 ) -> None:
     """Cobre o caso de um projeto cadastrado por engano: só permite apagar

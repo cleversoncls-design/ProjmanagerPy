@@ -23,7 +23,7 @@ import ServiceOrderListPrintSheet from '../components/ServiceOrderListPrintSheet
 import { FormField, TextInput, Select } from '../components/FormField'
 import { CheckIcon, XIcon, PencilIcon, TrashIcon, EyeIcon, PrinterIcon, DownloadIcon } from '../components/icons'
 import { formatDate, formatTime, formatHoursDuration, minutesToHM } from '../utils/format'
-import { MANAGEMENT_ROLES, TIMESHEET_STATUS_TONE, resourceFunctionLevelLabel } from '../utils/labels'
+import { ADMIN_LIKE_ROLES, MANAGEMENT_ROLES, TIMESHEET_STATUS_TONE, resourceFunctionLevelLabel } from '../utils/labels'
 import { isTimesheetEditable } from '../utils/timesheetForm'
 
 function todayIso() {
@@ -342,7 +342,7 @@ export default function ServiceOrdersPage() {
                 const expanded = expandedKeys.has(key)
                 const own = Boolean(ownResource && order.resource_id === ownResource.id)
                 const pendingActivities = order.activities.filter((a) => a.status === 'PENDING')
-                const approvableActivities = pendingActivities.filter((a) => !(a.unscheduled && user.role !== 'ADMIN'))
+                const approvableActivities = pendingActivities.filter((a) => !(a.unscheduled && !ADMIN_LIKE_ROLES.includes(user.role)))
                 const canApproveRow = canManage && pendingActivities.length > 0
                 const ownEditable = own ? order.activities.filter((a) => isTimesheetEditable(a)) : []
                 const singleEditable = ownEditable.length === 1 ? ownEditable[0] : null
@@ -390,7 +390,11 @@ export default function ServiceOrdersPage() {
                                 icon={CheckIcon}
                                 label={t('Aprovar')}
                                 disabled={actingId === key || approvableActivities.length === 0}
-                                title={approvableActivities.length === 0 ? t('Só o Administrador pode aprovar apontamentos fora da agenda.') : t('Aprovar')}
+                                title={
+                                  approvableActivities.length === 0
+                                    ? t('Só Administrador, Gerente de Serviços ou Diretor Geral podem aprovar apontamentos fora da agenda.')
+                                    : t('Aprovar')
+                                }
                                 onClick={() => handleBulkStatus(order, approvableActivities, 'APPROVED')}
                               />
                               <IconButton
@@ -441,7 +445,7 @@ export default function ServiceOrdersPage() {
                               {order.activities.map((activity) => {
                                 const canApprove = canManage && activity.status === 'PENDING'
                                 const canEdit = own && isTimesheetEditable(activity)
-                                const blockedForMe = activity.unscheduled && user.role !== 'ADMIN'
+                                const blockedForMe = activity.unscheduled && !ADMIN_LIKE_ROLES.includes(user.role)
                                 return (
                                   <tr key={activity.id} className="border-b border-[var(--border)] last:border-0">
                                     <td className="px-2 py-1.5 text-[var(--text-primary)]">
@@ -471,7 +475,11 @@ export default function ServiceOrdersPage() {
                                                 icon={CheckIcon}
                                                 label={t('Aprovar')}
                                                 disabled={actingId === activity.id || blockedForMe}
-                                                title={blockedForMe ? t('Só o Administrador pode aprovar apontamentos fora da agenda.') : t('Aprovar')}
+                                                title={
+                                                  blockedForMe
+                                                    ? t('Só Administrador, Gerente de Serviços ou Diretor Geral podem aprovar apontamentos fora da agenda.')
+                                                    : t('Aprovar')
+                                                }
                                                 onClick={() => handleStatus(activity, 'APPROVED')}
                                               />
                                               <IconButton

@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import EXTERNAL_ROLES, INTERNAL_ROLES, get_current_user, require_project_access, require_roles
+from ..deps import ADMIN_LIKE_ROLES, EXTERNAL_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, get_current_user, require_project_access, require_roles
 from ..exports import build_service_orders_workbook, build_tasks_workbook
 from ..i18n import t as translate
 from ..models import TASK_FINISHED_STATUSES, Project, ProjectStatus, Resource, Task, TaskDependency, TaskStatus, User, UserRole
@@ -94,12 +94,12 @@ def _scoped_projects(db: Session, user: User, include_modelo: bool = False) -> l
 
 @router.get("/dashboard", response_model=DashboardResponse)
 def dashboard(
-    # Dashboard ficou só com Admin e os perfis externos do cliente (revisão
-    # de acessos do usuário) — Gerente de Projetos e Consultor perderam
-    # esse item de menu; mesmos perfis de DASHBOARD_ROLES no frontend
-    # (utils/labels.js), restrito aqui também pra não depender só da UI
-    # esconder a rota.
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.CLIENT_PM, UserRole.CLIENT_USER)),
+    # Dashboard ficou só com ADMIN_LIKE_ROLES e os perfis externos do
+    # cliente (revisão de acessos do usuário) — Gerente de Projetos e
+    # Consultor perderam esse item de menu; mesmos perfis de DASHBOARD_ROLES
+    # no frontend (utils/labels.js), restrito aqui também pra não depender
+    # só da UI esconder a rota.
+    user: User = Depends(require_roles(*ADMIN_LIKE_ROLES, UserRole.CLIENT_PM, UserRole.CLIENT_USER)),
     db: Session = Depends(get_db),
 ) -> dict:
     """Visão geral do portfólio: contagens por status, tarefas por tipo,
@@ -233,11 +233,11 @@ def velocity(
 @router.get("/reports/roi", response_model=list[RoiRow])
 def roi(
     project_id: str | None = None,
-    user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """ROI (margem ÷ custo real — ver docstring de project_roi) por
-    projeto. Dado financeiro: restrito a ADMIN/INTERNAL_PM, como o resto
+    projeto. Dado financeiro: restrito a MANAGEMENT_ROLES, como o resto
     dos campos financeiros da API."""
     if project_id:
         _get_project_or_404(db, project_id, user.language)

@@ -86,6 +86,10 @@ export const es = {
   Consultor: 'Consultor',
   'PM do cliente': 'PM del cliente',
   'Usuário-chave': 'Usuario clave',
+  // Perfis novos (pedido do usuário): acessos equivalentes ao Administrador,
+  // exceto cadastrar/editar/excluir usuário.
+  'Gerente de Serviços': 'Gerente de Servicios',
+  'Diretor Geral': 'Director General',
   // Função do Recurso (RESOURCE_FUNCTION_LABELS) — "Gerente de Projetos"
   // (com P maiúsculo) é intencionalmente uma chave separada de "Gerente de
   // projetos" acima (perfil de usuário INTERNAL_PM), embora o texto em
@@ -737,7 +741,8 @@ export const es = {
   'Nenhum apontamento pendente.': 'Ningún registro pendiente.',
   'Aprovar': 'Aprobar',
   'Rejeitar': 'Rechazar',
-  'Só o Administrador pode aprovar apontamentos fora da agenda.': 'Solo el Administrador puede aprobar registros fuera de la agenda.',
+  'Só Administrador, Gerente de Serviços ou Diretor Geral podem aprovar apontamentos fora da agenda.':
+    'Solo Administrador, Gerente de Servicios o Director General pueden aprobar registros fuera de la agenda.',
 
   // --- Aprovações de horas (rotina própria no menu, antes era seção
   // dentro de Apontamento de horas) ---

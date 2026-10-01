@@ -5,14 +5,14 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import get_current_user, require_roles
+from ..deps import MANAGEMENT_ROLES, get_current_user, require_roles
 from ..i18n import t as translate
-from ..models import Calendar, Holiday, User, UserRole
+from ..models import Calendar, Holiday, User
 from ..schemas import CalendarCreate, CalendarRead, CalendarUpdate, HolidayCreate, HolidayRead, HolidayUpdate
 
 router = APIRouter(tags=["calendars"])
 
-_MANAGE_ROLES = (UserRole.ADMIN, UserRole.INTERNAL_PM)
+_MANAGE_ROLES = MANAGEMENT_ROLES
 
 
 def _set_as_default(db: Session, calendar: Calendar) -> None:

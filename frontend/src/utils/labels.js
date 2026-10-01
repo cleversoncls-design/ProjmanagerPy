@@ -6,6 +6,11 @@ export const ROLE_LABELS = {
   CONSULTANT: 'Consultor',
   CLIENT_PM: 'PM do cliente',
   CLIENT_USER: 'Usuário-chave',
+  // Pedido do usuário: acessos equivalentes ao Administrador, exceto
+  // cadastrar/editar/excluir usuário (ver ADMIN_LIKE_ROLES/MANAGEMENT_ROLES/
+  // INTERNAL_ROLES abaixo e app/deps.py no backend).
+  SERVICE_MANAGER: 'Gerente de Serviços',
+  GENERAL_DIRECTOR: 'Diretor Geral',
 }
 
 // Função (categoria) e Nível (senioridade) do Recurso (pedido do usuário,
@@ -38,25 +43,32 @@ export const TASK_MODALITY_LABELS = {
   BOTH: 'Ambos',
 }
 
-export const MANAGEMENT_ROLES = ['ADMIN', 'INTERNAL_PM']
-export const INTERNAL_ROLES = ['ADMIN', 'INTERNAL_PM', 'CONSULTANT']
+// Gerente de Serviços/Diretor Geral (pedido do usuário) têm acessos
+// equivalentes ao Administrador, exceto cadastrar/editar/excluir usuário —
+// por isso entram em todo grupo abaixo que já incluía ADMIN, espelhando
+// MANAGEMENT_ROLES/INTERNAL_ROLES/ADMIN_LIKE_ROLES do backend
+// (app/deps.py). A única exceção (tela de Usuários em si, não a de
+// Recursos) é tratada dentro de UsersPage.jsx, não aqui.
+export const MANAGEMENT_ROLES = ['ADMIN', 'INTERNAL_PM', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR']
+export const INTERNAL_ROLES = ['ADMIN', 'INTERNAL_PM', 'CONSULTANT', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR']
 
 // --- Menu por perfil (pedido do usuário: Administrativo / Gerentes de
 // Projetos / Consultores) — MANAGEMENT_ROLES/INTERNAL_ROLES acima continuam
 // valendo pra quem PODE ESCREVER em cada tela (criar projeto/tarefa,
 // aprovar apontamento etc.), que não mudou; os grupos abaixo são só pra
 // decidir quais itens aparecem no menu de cada perfil. ---
-// Só o Administrador administra Clientes e Usuários — Gerente de Projetos
-// perdeu esses dois itens do menu (confirmado com o usuário).
-export const ADMIN_ONLY_ROLES = ['ADMIN']
-// Dashboard: Administrador e os perfis externos do cliente (perfil externo
-// não entrou nesta reorganização, mantido como já era) — Gerente de
-// Projetos e Consultor não têm mais esse item no menu.
-export const DASHBOARD_ROLES = ['ADMIN', 'CLIENT_PM', 'CLIENT_USER']
+// Administrador, Gerente de Serviços e Diretor Geral administram Clientes
+// e Usuários — Gerente de Projetos perdeu esses dois itens do menu
+// (confirmado com o usuário).
+export const ADMIN_LIKE_ROLES = ['ADMIN', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR']
+// Dashboard: ADMIN_LIKE_ROLES e os perfis externos do cliente (perfil
+// externo não entrou nesta reorganização, mantido como já era) — Gerente
+// de Projetos e Consultor não têm esse item no menu.
+export const DASHBOARD_ROLES = ['ADMIN', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR', 'CLIENT_PM', 'CLIENT_USER']
 // Projetos (lista + detalhe do projeto): todo mundo, menos Consultor —
 // que perdeu esse item no menu (continua vendo Agenda de Consultores,
 // Apontamento de horas e Ordens de Serviço).
-export const PROJECTS_VISIBLE_ROLES = ['ADMIN', 'INTERNAL_PM', 'CLIENT_PM', 'CLIENT_USER']
+export const PROJECTS_VISIBLE_ROLES = ['ADMIN', 'INTERNAL_PM', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR', 'CLIENT_PM', 'CLIENT_USER']
 
 // Primeira tela de cada perfil ao logar (ou ao cair em "/" depois de ser
 // barrado por ProtectedRoute em alguma rota) — precisa ser uma rota que o
@@ -67,6 +79,8 @@ export const ROLE_HOME_PATH = {
   CONSULTANT: '/schedules',
   CLIENT_PM: '/',
   CLIENT_USER: '/',
+  SERVICE_MANAGER: '/',
+  GENERAL_DIRECTOR: '/',
 }
 
 export const PROJECT_STATUS_LABELS = {

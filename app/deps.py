@@ -11,8 +11,18 @@ from .i18n import request_language, t
 from .models import Project, User, UserRole, UserStatus
 from .security import decode_access_token
 
-INTERNAL_ROLES = {UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.CONSULTANT}
+# Gerente de Serviços/Diretor Geral (pedido do usuário) têm acessos
+# equivalentes ao Administrador, exceto cadastrar/editar/excluir usuário
+# (ver routers/users.py: create_user/update_user/delete_user/
+# reset_user_password continuam exclusivos de UserRole.ADMIN, de propósito,
+# NUNCA destes dois conjuntos abaixo) — por isso entram em INTERNAL_ROLES
+# (perfil interno, sem isolamento por cliente) e em MANAGEMENT_ROLES/
+# ADMIN_LIKE_ROLES (todo `require_roles`/checagem que hoje já é
+# ADMIN+INTERNAL_PM ou só ADMIN, menos as quatro exceções citadas acima).
+INTERNAL_ROLES = {UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.CONSULTANT, UserRole.SERVICE_MANAGER, UserRole.GENERAL_DIRECTOR}
 EXTERNAL_ROLES = {UserRole.CLIENT_PM, UserRole.CLIENT_USER}
+MANAGEMENT_ROLES = {UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.SERVICE_MANAGER, UserRole.GENERAL_DIRECTOR}
+ADMIN_LIKE_ROLES = {UserRole.ADMIN, UserRole.SERVICE_MANAGER, UserRole.GENERAL_DIRECTOR}
 
 
 def get_current_user(

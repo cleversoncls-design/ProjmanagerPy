@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..audit import record_audit
 from ..database import get_db
-from ..deps import get_current_user, require_roles
+from ..deps import MANAGEMENT_ROLES, get_current_user, require_roles
 from ..i18n import t as translate
 from ..models import AuditAction, ChangeRequest, Client, Project, Resource, TaskAssignment, Timesheet, User, UserRole
 from ..schemas import UserCreate, UserPasswordReset, UserRead, UserSelfUpdate, UserUpdate
@@ -18,6 +18,11 @@ router = APIRouter(tags=["users"])
 @router.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def create_user(
     data: UserCreate,
+    # Cadastrar usuário continua exclusivo de ADMIN, de propósito — pedido
+    # do usuário: Gerente de Serviços/Diretor Geral têm acesso equivalente
+    # ao Administrador em tudo, EXCETO aqui (e em update_user/delete_user/
+    # reset_user_password abaixo). Nunca trocar por MANAGEMENT_ROLES/
+    # ADMIN_LIKE_ROLES nestes quatro endpoints.
     admin_user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ) -> User:
@@ -63,14 +68,17 @@ def update_my_language(
 def list_users(
     role: UserRole | None = None,
     client_id: str | None = None,
-    _: User = Depends(require_roles(UserRole.ADMIN, UserRole.INTERNAL_PM)),
+    _: User = Depends(require_roles(*MANAGEMENT_ROLES)),
     db: Session = Depends(get_db),
 ) -> list[User]:
     """Faltava um jeito de listar usuários — só existia `GET /users/me`. Sem
     isso, uma tela (de gestão de usuários, ou só o seletor de `manager_id`
     ao criar um projeto / `user_id` ao criar um recurso) não tem como
-    popular a lista de opções. Restrito a quem já pode criar usuário/recurso
-    (ADMIN/INTERNAL_PM)."""
+    popular a lista de opções. Restrito a quem já pode criar recurso
+    (MANAGEMENT_ROLES — inclui Gerente de Serviços/Diretor Geral: eles
+    precisam enxergar a lista de usuários pra vincular um Recurso, mesmo não
+    podendo criar/editar/excluir Usuário — ver create_user/update_user/
+    delete_user abaixo, que continuam travados em UserRole.ADMIN)."""
     stmt = select(User)
     if role:
         stmt = stmt.where(User.role == role)
@@ -83,6 +91,7 @@ def list_users(
 def update_user(
     user_id: str,
     data: UserUpdate,
+    # Continua ADMIN-only — ver comentário em create_user acima.
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ) -> User:
@@ -111,6 +120,7 @@ def update_user(
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: str,
+    # Continua ADMIN-only — ver comentário em create_user acima.
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ) -> None:
@@ -169,6 +179,7 @@ def delete_user(
 def reset_user_password(
     user_id: str,
     data: UserPasswordReset,
+    # Continua ADMIN-only — ver comentário em create_user acima.
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
     db: Session = Depends(get_db),
 ) -> None:
