@@ -89,6 +89,7 @@ _ES: dict[str, str] = {
     "Somente o PM do cliente pode solicitar um novo projeto": "Solo el PM del cliente puede solicitar un nuevo proyecto",
     "Só o cliente valida suas próprias tarefas": "Solo el cliente valida sus propias tareas",
     "Só é possível apontar horas em projetos ativos": "Solo se pueden registrar horas en proyectos activos",
+    "Não é possível apontar horas em uma tarefa desativada": "No se pueden registrar horas en una tarea desactivada",
     "Tarefa já está aguardando validação do cliente": "La tarea ya está esperando la validación del cliente",
     "Tarefa não encontrada": "Tarea no encontrada",
     "Tarefa não está aguardando validação do cliente": "La tarea no está esperando la validación del cliente",

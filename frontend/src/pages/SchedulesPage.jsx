@@ -4,6 +4,7 @@ import * as resourcesApi from '../api/resources'
 import * as usersApi from '../api/users'
 import * as clientsApi from '../api/clients'
 import * as projectsApi from '../api/projects'
+import * as calendarsApi from '../api/calendars'
 import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import PageHeader from '../components/PageHeader'
@@ -74,6 +75,13 @@ export default function SchedulesPage() {
   const [schedules, setSchedules] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  // Feriados do calendário padrão (pedido do usuário: mostrar na Agenda
+  // como indisponíveis) — a Agenda não é de um projeto só (pode ter
+  // agendamentos de vários projetos/recursos, cada um com seu próprio
+  // Calendário), então em vez de resolver um calendário por agendamento,
+  // um único calendário marcado como padrão (Calendar.is_default, ver
+  // CalendarsPage.jsx) vale pra tela inteira. map iso -> descrição.
+  const [holidaysByDate, setHolidaysByDate] = useState({})
 
   const [formTarget, setFormTarget] = useState(null) // { schedule } pra editar, ou { date } pra criar novo
 
@@ -94,6 +102,20 @@ export default function SchedulesPage() {
     usersApi.listUsers().then(setUsers).catch(() => {})
     clientsApi.listClients().then(setClients).catch(() => {})
     projectsApi.listProjects().then(setProjects).catch(() => {})
+  }, [])
+
+  // Carrega os feriados do calendário padrão uma única vez (lista de
+  // feriados de um calendário é pequena, sem paginação/filtro por período
+  // no backend — ver GET /calendars/{id}/holidays). Falha silenciosa: sem
+  // calendário padrão cadastrado, a Agenda simplesmente não marca nenhum
+  // dia como feriado, em vez de quebrar a tela toda.
+  useEffect(() => {
+    calendarsApi
+      .listCalendars()
+      .then((calendars) => calendars.find((c) => c.is_default))
+      .then((defaultCalendar) => (defaultCalendar ? calendarsApi.listHolidays(defaultCalendar.id) : []))
+      .then((holidays) => setHolidaysByDate(Object.fromEntries(holidays.map((h) => [h.date, h.description]))))
+      .catch(() => {})
   }, [])
 
   const usersById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
@@ -282,12 +304,19 @@ export default function SchedulesPage() {
               const inMonth = cellDate.getMonth() === viewDate.getMonth()
               const daySchedules = schedulesByDate[iso] || []
               const isToday = iso === toIsoDate(new Date())
-              const isDragOver = canManage && dragOverDate === iso && draggedSchedule && draggedSchedule.date !== iso
+              const holidayDescription = holidaysByDate[iso]
+              const isHoliday = Boolean(holidayDescription)
+              // Feriado conta como indisponível pra agendar (pedido do
+              // usuário) — some o "+" de criação rápida e não aceita
+              // soltar um bloco arrastado nele, sem impedir visualizar os
+              // agendamentos que já existiam ali (ex.: feriado cadastrado
+              // depois do agendamento já criado).
+              const isDragOver = canManage && !isHoliday && dragOverDate === iso && draggedSchedule && draggedSchedule.date !== iso
               return (
                 <div
                   key={iso}
                   onDragOver={
-                    canManage
+                    canManage && !isHoliday
                       ? (event) => {
                           event.preventDefault()
                           setDragOverDate(iso)
@@ -296,7 +325,7 @@ export default function SchedulesPage() {
                   }
                   onDragLeave={canManage ? () => setDragOverDate((prev) => (prev === iso ? '' : prev)) : undefined}
                   onDrop={
-                    canManage
+                    canManage && !isHoliday
                       ? (event) => {
                           event.preventDefault()
                           setDragOverDate('')
@@ -307,9 +336,12 @@ export default function SchedulesPage() {
                         }
                       : undefined
                   }
+                  title={holidayDescription || undefined}
                   className={`min-h-[92px] rounded-lg border p-1.5 transition-colors ${
                     inMonth ? 'border-[var(--border)]' : 'border-transparent opacity-40'
-                  } ${isDragOver ? 'border-[var(--series-1)] bg-[var(--page)] ring-1 ring-[var(--series-1)]' : ''}`}
+                  } ${isHoliday ? 'border-[var(--status-critical)]/30 bg-[var(--status-critical)]/5' : ''} ${
+                    isDragOver ? 'border-[var(--series-1)] bg-[var(--page)] ring-1 ring-[var(--series-1)]' : ''
+                  }`}
                 >
                   <div className="mb-1 flex items-center justify-between">
                     <span
@@ -317,7 +349,7 @@ export default function SchedulesPage() {
                     >
                       {cellDate.getDate()}
                     </span>
-                    {canManage && (
+                    {canManage && !isHoliday && (
                       <button
                         type="button"
                         title={t('Novo agendamento')}
@@ -328,6 +360,9 @@ export default function SchedulesPage() {
                       </button>
                     )}
                   </div>
+                  {isHoliday && (
+                    <p className="truncate text-[10px] font-medium text-[var(--status-critical)]">{holidayDescription}</p>
+                  )}
                   <div className="space-y-0.5">
                     {daySchedules.slice(0, 3).map((schedule) => {
                       const color = projectsById[schedule.project_id]?.color || DEFAULT_PROJECT_COLOR

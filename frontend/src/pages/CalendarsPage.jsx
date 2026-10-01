@@ -25,6 +25,7 @@ export default function CalendarsPage() {
   const [submitting, setSubmitting] = useState(false)
 
   const [selectedCalendar, setSelectedCalendar] = useState(null)
+  const [settingDefaultId, setSettingDefaultId] = useState(null)
 
   function loadCalendars() {
     setLoading(true)
@@ -36,6 +37,15 @@ export default function CalendarsPage() {
   }
 
   useEffect(loadCalendars, [])
+
+  function handleSetDefault(calendar) {
+    setSettingDefaultId(calendar.id)
+    calendarsApi
+      .updateCalendar(calendar.id, { is_default: true })
+      .then(loadCalendars)
+      .catch((err) => setError(err.message))
+      .finally(() => setSettingDefaultId(null))
+  }
 
   function toggleWeekday(day) {
     setWorkingDays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort()))
@@ -72,6 +82,9 @@ export default function CalendarsPage() {
       {!loading && !error && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card title={t('Calendários cadastrados')}>
+            <p className="mb-3 text-xs text-[var(--text-muted)]">
+              {t('O calendário padrão define os feriados mostrados como indisponíveis na Agenda — só um por vez.')}
+            </p>
             <Table
               columns={[
                 { key: 'name', header: t('Nome') },
@@ -79,6 +92,23 @@ export default function CalendarsPage() {
                   key: 'working_days',
                   header: t('Dias úteis'),
                   render: (row) => row.working_days.map((day) => labels.WEEKDAY_LABELS[day]).join(', '),
+                },
+                {
+                  key: 'is_default',
+                  header: t('Padrão (Agenda)'),
+                  render: (row) =>
+                    row.is_default ? (
+                      <span className="text-xs font-medium text-[var(--status-good)]">{t('Padrão')}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={settingDefaultId === row.id}
+                        onClick={() => handleSetDefault(row)}
+                        className="text-xs font-medium text-[var(--series-1)] hover:underline disabled:opacity-50"
+                      >
+                        {settingDefaultId === row.id ? t('Salvando…') : t('Tornar padrão')}
+                      </button>
+                    ),
                 },
                 {
                   key: 'actions',

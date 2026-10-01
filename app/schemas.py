@@ -544,12 +544,20 @@ class ProjectExpenseRead(ORMModel):
 class CalendarCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     working_days: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
+    is_default: bool = False
+
+
+class CalendarUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    working_days: list[int] | None = None
+    is_default: bool | None = None
 
 
 class CalendarRead(ORMModel):
     id: str
     name: str
     working_days: list[int]
+    is_default: bool
 
 
 class HolidayCreate(BaseModel):

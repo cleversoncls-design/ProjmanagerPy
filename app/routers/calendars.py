@@ -1,42 +1,85 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import require_roles
+from ..deps import get_current_user, require_roles
 from ..i18n import t as translate
 from ..models import Calendar, Holiday, User, UserRole
-from ..schemas import CalendarCreate, CalendarRead, HolidayCreate, HolidayRead, HolidayUpdate
+from ..schemas import CalendarCreate, CalendarRead, CalendarUpdate, HolidayCreate, HolidayRead, HolidayUpdate
 
 router = APIRouter(tags=["calendars"])
 
 _MANAGE_ROLES = (UserRole.ADMIN, UserRole.INTERNAL_PM)
 
 
+def _set_as_default(db: Session, calendar: Calendar) -> None:
+    """Só um calendário pode ser o padrão (usado pra mostrar feriados na
+    Agenda, que não é de um projeto só — ver Calendar.is_default em
+    models.py). Desliga qualquer outro que já estivesse marcado antes de
+    ligar este, numa única instrução (sem round-trip extra por calendário)."""
+    db.execute(update(Calendar).where(Calendar.id != calendar.id).values(is_default=False))
+    calendar.is_default = True
+
+
 @router.post("/calendars", response_model=CalendarRead, status_code=status.HTTP_201_CREATED)
 def create_calendar(data: CalendarCreate, _: User = Depends(require_roles(*_MANAGE_ROLES)), db: Session = Depends(get_db)) -> Calendar:
-    calendar = Calendar(**data.model_dump())
+    payload = data.model_dump()
+    make_default = payload.pop("is_default")
+    calendar = Calendar(**payload)
     db.add(calendar)
+    if make_default:
+        db.flush()
+        _set_as_default(db, calendar)
     db.commit()
     db.refresh(calendar)
     return calendar
 
 
 @router.get("/calendars", response_model=list[CalendarRead])
-def list_calendars(_: User = Depends(require_roles(*_MANAGE_ROLES)), db: Session = Depends(get_db)) -> list[Calendar]:
+def list_calendars(_: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[Calendar]:
     """Só existia leitura por `calendar_id` — sem listagem, um formulário
     não tem como oferecer os calendários já cadastrados como opção
-    (precisaria que o usuário soubesse o id de cor)."""
+    (precisaria que o usuário soubesse o id de cor). Aberta pra qualquer
+    perfil autenticado (não só ADMIN/INTERNAL_PM) desde que a Agenda
+    passou a mostrar os feriados do calendário padrão pra todo mundo —
+    criar/editar calendário continua restrito a _MANAGE_ROLES."""
     return list(db.scalars(select(Calendar).order_by(Calendar.name)).all())
 
 
 @router.get("/calendars/{calendar_id}", response_model=CalendarRead)
-def read_calendar(calendar_id: str, user: User = Depends(require_roles(*_MANAGE_ROLES)), db: Session = Depends(get_db)) -> Calendar:
+def read_calendar(calendar_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Calendar:
     calendar = db.get(Calendar, calendar_id)
     if not calendar:
         raise HTTPException(status_code=404, detail=translate("Calendário não encontrado", user.language))
+    return calendar
+
+
+@router.patch("/calendars/{calendar_id}", response_model=CalendarRead)
+def update_calendar(
+    calendar_id: str,
+    data: CalendarUpdate,
+    user: User = Depends(require_roles(*_MANAGE_ROLES)),
+    db: Session = Depends(get_db),
+) -> Calendar:
+    calendar = db.get(Calendar, calendar_id)
+    if not calendar:
+        raise HTTPException(status_code=404, detail=translate("Calendário não encontrado", user.language))
+    changes = data.model_dump(exclude_unset=True)
+    make_default = changes.pop("is_default", None)
+    for field, value in changes.items():
+        setattr(calendar, field, value)
+    if make_default is True:
+        _set_as_default(db, calendar)
+    elif make_default is False:
+        # Só desliga o próprio — não promove nenhum outro a padrão no lugar
+        # dele (ficar sem calendário padrão é um estado válido: a Agenda
+        # simplesmente não mostra feriado nenhum até alguém marcar outro).
+        calendar.is_default = False
+    db.commit()
+    db.refresh(calendar)
     return calendar
 
 
@@ -60,7 +103,10 @@ def add_holiday(
 
 
 @router.get("/calendars/{calendar_id}/holidays", response_model=list[HolidayRead])
-def list_holidays(calendar_id: str, user: User = Depends(require_roles(*_MANAGE_ROLES)), db: Session = Depends(get_db)) -> list[Holiday]:
+def list_holidays(calendar_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[Holiday]:
+    """Leitura aberta a qualquer perfil autenticado (ver list_calendars) —
+    consultores/clientes precisam ver os feriados na própria Agenda;
+    cadastrar/editar/excluir feriado continua em _MANAGE_ROLES abaixo."""
     if not db.get(Calendar, calendar_id):
         raise HTTPException(status_code=404, detail=translate("Calendário não encontrado", user.language))
     return list(db.scalars(select(Holiday).where(Holiday.calendar_id == calendar_id)).all())

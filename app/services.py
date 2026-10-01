@@ -27,6 +27,7 @@ from .models import (
     TaskAssignment,
     TaskDependency,
     TaskStatus,
+    TASK_FINISHED_STATUSES,
     TaskType,
     Timesheet,
     TimesheetStatus,
@@ -551,7 +552,7 @@ def _leaf_status_dot(task: Task, status_date: date) -> str:
         return "white"
     if task.status == TaskStatus.DELAYED:
         return "red"
-    if task.status != TaskStatus.COMPLETED and task.planned_end_date and task.planned_end_date < status_date:
+    if task.status not in TASK_FINISHED_STATUSES and task.planned_end_date and task.planned_end_date < status_date:
         return "red"
     return "green"
 
@@ -948,7 +949,7 @@ def _progress_from_tasks(tasks: list[Task]) -> dict:
     lista de tarefas já carregada para permitir reaproveitamento (ver
     `portfolio_rows`, que evita reconsultar o banco por projeto)."""
     tasks_total = len(tasks)
-    tasks_remaining = sum(1 for t in tasks if t.status != TaskStatus.COMPLETED)
+    tasks_remaining = sum(1 for t in tasks if t.status not in TASK_FINISHED_STATUSES)
     tasks_by_status: dict[str, int] = defaultdict(int)
     for t in tasks:
         tasks_by_status[t.status.value] += 1
