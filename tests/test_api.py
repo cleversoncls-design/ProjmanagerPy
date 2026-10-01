@@ -592,6 +592,37 @@ def test_portfolio_scoped_to_manager_for_internal_pm(client, db_session, setup):
     assert {setup["project_a"].id, setup["project_b"].id, other_project.id} <= admin_ids
 
 
+def test_portfolio_modelo_visible_to_any_internal_pm_regardless_of_manager(client, db_session, setup):
+    """Pedido do usuário: os projetos MODELO foram todos cadastrados com o
+    Admin como gerente, mas "Mostrar projetos Modelo" precisa continuar
+    funcionando pra qualquer INTERNAL_PM — é um catálogo de estruturas
+    compartilhado (base do "Copiar estrutura de outro projeto"), não
+    trabalho de um gerente em particular. A restrição por manager_id vale
+    só pros projetos normais."""
+    admin_headers = setup["admin_headers"]
+    pm_headers = auth_headers(client, setup["pm"].email)
+    modelo = make_project(db_session, client_id=setup["client_a"].id, manager_id=setup["admin"].id, code="PRJ-MODELO")
+    patched = client.patch(f"/projects/{modelo.id}", json={"status": "MODELO"}, headers=admin_headers)
+    assert patched.status_code == 200
+
+    # Sem o toggle "Mostrar projetos Modelo", continua de fora (igual
+    # já era pra qualquer perfil).
+    without_toggle = client.get("/reports/portfolio", headers=pm_headers)
+    assert modelo.id not in {row["id"] for row in without_toggle.json()}
+
+    with_toggle = client.get("/reports/portfolio", params={"include_modelo": True}, headers=pm_headers)
+    assert with_toggle.status_code == 200
+    ids = {row["id"] for row in with_toggle.json()}
+    assert modelo.id in ids
+    # Os projetos normais de outro gerente continuam de fora mesmo com o
+    # toggle ligado — a exceção é só pro MODELO.
+    assert setup["project_b"].id in ids  # é do próprio pm, deveria aparecer
+    other_pm = make_user(db_session, role=UserRole.INTERNAL_PM, email="outro.pm.modelo@example.com")
+    other_project = make_project(db_session, client_id=setup["client_a"].id, manager_id=other_pm.id, code="PRJ-F")
+    with_toggle_again = client.get("/reports/portfolio", params={"include_modelo": True}, headers=pm_headers)
+    assert other_project.id not in {row["id"] for row in with_toggle_again.json()}
+
+
 def test_approving_timesheet_updates_task_actual_hours(client, setup):
     """Regressão: Task.actual_hours nunca era recalculado a partir dos
     timesheets aprovados (ficava sempre em 0)."""
