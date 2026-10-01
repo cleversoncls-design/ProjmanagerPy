@@ -87,6 +87,14 @@ export default function TimesheetsPage() {
     () => (mineFilters.client_id ? projects.filter((p) => p.client_id === mineFilters.client_id) : projects),
     [projects, mineFilters.client_id],
   )
+  // Projeto do filtro de "Aprovações pendentes" — INTERNAL_PM só vê (e só
+  // consegue aprovar, ver GET /timesheets no backend) os projetos onde é o
+  // gerente; ADMIN continua enxergando todos. Evita o combo oferecer um
+  // projeto que, selecionado, sempre voltaria lista vazia pro PM.
+  const pendingProjectOptions = useMemo(
+    () => (user.role === 'INTERNAL_PM' ? projects.filter((p) => p.manager_id === user.id) : projects),
+    [projects, user.role, user.id],
+  )
 
   function loadMine() {
     if (!ownResource) {
@@ -361,7 +369,7 @@ export default function TimesheetsPage() {
             <FormField label={t('Projeto')}>
               <Select value={pendingFilters.project_id} onChange={updatePendingFilter('project_id')}>
                 <option value="">{t('Todos')}</option>
-                {projects.map((project) => (
+                {pendingProjectOptions.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.code} — {project.name}
                   </option>
