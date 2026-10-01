@@ -78,7 +78,14 @@ export default function TimesheetsPage() {
   )
   const projectsById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects])
   const tasksById = useMemo(() => Object.fromEntries(allTasks.map((task) => [task.id, task])), [allTasks])
-  const taskOptions = useMemo(() => allTasks.filter((task) => task.project_id === form.project_id), [allTasks, form.project_id])
+  // Tarefas "pai" (têm tarefas-filhas na EAP) não entram no seletor —
+  // pedido do usuário: apontamento só nas tarefas-filha, a API também
+  // recusa (ver _resolve_task_and_project em routers/timesheets.py).
+  const parentTaskIds = useMemo(() => new Set(allTasks.map((task) => task.parent_task_id).filter(Boolean)), [allTasks])
+  const taskOptions = useMemo(
+    () => allTasks.filter((task) => task.project_id === form.project_id && !parentTaskIds.has(task.id)),
+    [allTasks, form.project_id, parentTaskIds],
+  )
   const ownResource = useMemo(() => resources.find((r) => r.user_id === user.id) || null, [resources, user.id])
   // Projeto do filtro de "Meus apontamentos" — quando um cliente é
   // escolhido, restringe a lista aos projetos daquele cliente (mesmo
@@ -153,8 +160,13 @@ export default function TimesheetsPage() {
 
   function updateField(field) {
     return (event) => {
-      const value = event.target.value
-      setForm((prev) => (field === 'project_id' ? { ...prev, project_id: value, task_id: '' } : { ...prev, [field]: value }))
+      const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value
+      setForm((prev) => {
+        if (field === 'project_id') return { ...prev, project_id: value, task_id: '', is_transit: false }
+        if (field === 'task_id') return { ...prev, task_id: value, is_transit: value ? false : prev.is_transit }
+        if (field === 'is_transit') return { ...prev, is_transit: value, task_id: value ? '' : prev.task_id }
+        return { ...prev, [field]: value }
+      })
     }
   }
 
@@ -170,12 +182,16 @@ export default function TimesheetsPage() {
     }
     if (entry.project_id) {
       const project = projectsById[entry.project_id]
+      if (entry.is_transit) {
+        return { projectLabel: project ? `${project.code} — ${project.name}` : '—', taskLabel: t('Traslado'), typeLabel: labels.TASK_TYPE_LABELS.TRASLADO }
+      }
       return { projectLabel: project ? `${project.code} — ${project.name}` : '—', taskLabel: t('Avulso'), typeLabel: labels.TASK_TYPE_LABELS.ADHOC }
     }
     return { projectLabel: t('Interno'), taskLabel: '—', typeLabel: t('Interno') }
   }
 
   function formTypeLabel() {
+    if (form.is_transit) return labels.TASK_TYPE_LABELS.TRASLADO
     if (form.task_id) {
       const task = tasksById[form.task_id]
       return task ? labels.TASK_TYPE_LABELS[task.task_type] : '—'

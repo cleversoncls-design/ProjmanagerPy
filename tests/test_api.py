@@ -1871,3 +1871,178 @@ def test_task_auto_complete_does_not_resurrect_closed_task(client, setup):
     updated = client.patch(f"/tasks/{task['id']}", json={"progress_percentage": "100"}, headers=admin_headers)
     assert updated.status_code == 200
     assert updated.json()["status"] == "CLOSED"
+
+
+# ---------------------------------------------------------------------------
+# "mais novas melhorias, parte 3"
+# ---------------------------------------------------------------------------
+
+
+def test_only_admin_can_delete_client_and_link_checks_are_enforced(client, db_session, setup):
+    """Pedido do usuário: botão de excluir cliente, validando que não está
+    vinculado a nenhuma tabela — Projeto (RESTRICT), Usuário (SET NULL, mas
+    o pedido foi bloquear mesmo assim) e Solicitação de projeto (CASCADE)
+    bloqueiam a exclusão; um cliente limpo pode ser excluído."""
+    admin_headers = setup["admin_headers"]
+    pm_headers = auth_headers(client, setup["pm"].email)
+
+    client_a_id = setup["client_a"].id
+    denied = client.delete(f"/clients/{client_a_id}", headers=pm_headers)
+    assert denied.status_code == 403
+
+    # client_a já tem project_a (ver fixture setup) — bloqueado por Projeto.
+    blocked_by_project = client.delete(f"/clients/{client_a_id}", headers=admin_headers)
+    assert blocked_by_project.status_code == 409
+
+    # Um cliente novo, sem projeto, mas com um usuário vinculado — bloqueado
+    # por Usuário.
+    client_c = make_client_row(db_session, code="CLI-C")
+    make_user(db_session, role=UserRole.CLIENT_USER, client_id=client_c.id, email="user.c@example.com")
+    blocked_by_user = client.delete(f"/clients/{client_c.id}", headers=admin_headers)
+    assert blocked_by_user.status_code == 409
+
+    # Um cliente novo, sem projeto nem usuário, mas com uma solicitação de
+    # projeto (intake) registrada — bloqueado por ProjectIntake.
+    client_d = make_client_row(db_session, code="CLI-D")
+    intake = client.post(f"/clients/{client_d.id}/intakes", json={"title": "Novo projeto"}, headers=admin_headers)
+    assert intake.status_code == 201
+    blocked_by_intake = client.delete(f"/clients/{client_d.id}", headers=admin_headers)
+    assert blocked_by_intake.status_code == 409
+
+    # Um cliente limpo (sem nenhum vínculo) pode ser excluído.
+    client_e = make_client_row(db_session, code="CLI-E")
+    allowed = client.delete(f"/clients/{client_e.id}", headers=admin_headers)
+    assert allowed.status_code == 204
+    assert client.get(f"/clients/{client_e.id}", headers=admin_headers).status_code == 404
+
+
+def test_timesheet_transit_requires_project_and_rejects_task(client, setup):
+    """Pedido do usuário: "Traslado" sempre vinculado a um projeto, nunca a
+    uma tarefa específica (decisão confirmada)."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(f"/projects/{project_id}/tasks", json={"name": "Tarefa", "wbs_code": "20"}, headers=admin_headers).json()
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "role_title": "Consultor", "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    )
+
+    no_project = client.post(
+        "/timesheets",
+        json={"date": "2026-08-20", "start_time": "09:00", "end_time": "10:00", "is_transit": True},
+        headers=consultant_headers,
+    )
+    assert no_project.status_code == 422
+
+    with_task = client.post(
+        "/timesheets",
+        json={"task_id": task["id"], "date": "2026-08-20", "start_time": "09:00", "end_time": "10:00", "is_transit": True},
+        headers=consultant_headers,
+    )
+    assert with_task.status_code == 422
+
+    ok = client.post(
+        "/timesheets",
+        json={"project_id": project_id, "date": "2026-08-20", "start_time": "09:00", "end_time": "10:00", "is_transit": True},
+        headers=consultant_headers,
+    )
+    assert ok.status_code == 201
+    assert ok.json()["is_transit"] is True
+    assert ok.json()["task_id"] is None
+    assert ok.json()["project_id"] == project_id
+
+
+def test_timesheet_transit_has_its_own_bucket_in_financials_by_task_type(client, setup):
+    """Pedido do usuário: Traslado aparece como categoria própria nos
+    relatórios financeiros (não misturado com Avulso/ADHOC)."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "role_title": "Consultor", "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    )
+    created = client.post(
+        "/timesheets",
+        json={"project_id": project_id, "date": "2026-08-20", "start_time": "09:00", "end_time": "11:00", "is_transit": True},
+        headers=consultant_headers,
+    )
+    assert created.status_code == 201
+
+    report = client.get(f"/reports/project/{project_id}", headers=admin_headers).json()
+    by_type = report["financials_by_task_type"]
+    assert "TRASLADO" in by_type
+    assert float(by_type["TRASLADO"]["hours"]) == 2.0
+
+
+def test_cannot_timesheet_parent_task_only_child(client, setup):
+    """Pedido do usuário: não permitir apontamento em tarefa "pai" (que tem
+    tarefas-filhas) — só nas tarefas-filha."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    parent = client.post(f"/projects/{project_id}/tasks", json={"name": "Pai", "wbs_code": "21"}, headers=admin_headers).json()
+    child = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Filha", "wbs_code": "21.1", "parent_task_id": parent["id"]},
+        headers=admin_headers,
+    ).json()
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "role_title": "Consultor", "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    client.post(f"/tasks/{parent['id']}/assignments", json={"resource_id": resource["id"], "allocated_hours": "5"}, headers=admin_headers)
+    client.post(f"/tasks/{child['id']}/assignments", json={"resource_id": resource["id"], "allocated_hours": "5"}, headers=admin_headers)
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    on_parent = client.post(
+        "/timesheets",
+        json={"task_id": parent["id"], "date": "2026-08-20", "start_time": "09:00", "end_time": "10:00"},
+        headers=consultant_headers,
+    )
+    assert on_parent.status_code == 422
+
+    on_child = client.post(
+        "/timesheets",
+        json={"task_id": child["id"], "date": "2026-08-20", "start_time": "09:00", "end_time": "10:00"},
+        headers=consultant_headers,
+    )
+    assert on_child.status_code == 201
+
+
+def test_project_margin_percentage_is_declared_and_hidden_from_external_roles(client, setup):
+    """Pedido do usuário: "% de Margem vendida" no cadastro do projeto — um
+    valor digitado direto (não calculado), escondido de perfil externo
+    igual aos outros campos financeiros."""
+    admin_headers = setup["admin_headers"]
+    created = client.post(
+        "/projects",
+        json={
+            "client_id": setup["client_a"].id,
+            "manager_id": setup["pm"].id,
+            "code": "PRJ-MARGEM",
+            "name": "Projeto com margem",
+            "management_hours": "10",
+            "management_rate": "100",
+            "margin_percentage": "35.5",
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    assert float(created.json()["margin_percentage"]) == 35.5
+    project_id = created.json()["id"]
+
+    client_pm_headers = auth_headers(client, setup["client_pm_a"].email)
+    external_read = client.get(f"/projects/{project_id}", headers=client_pm_headers)
+    # client_pm_a é do client_a, mas este projeto é do client_a também —
+    # ainda assim os campos financeiros (incluindo margin_percentage) devem
+    # vir ocultos pra perfil externo.
+    assert external_read.status_code == 200
+    assert external_read.json()["margin_percentage"] is None
+
+    cleared = client.patch(f"/projects/{project_id}", json={"margin_percentage": None}, headers=admin_headers)
+    assert cleared.status_code == 200
+    assert cleared.json()["margin_percentage"] is None

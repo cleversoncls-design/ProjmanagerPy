@@ -15,3 +15,7 @@ export function getClient(clientId) {
 export function updateClient(clientId, payload) {
   return api.patch(`/clients/${clientId}`, payload)
 }
+
+export function deleteClient(clientId) {
+  return api.del(`/clients/${clientId}`)
+}

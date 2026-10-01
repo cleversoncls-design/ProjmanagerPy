@@ -17,7 +17,7 @@ export function isTimesheetEditable() {
  * fica de fora aqui (cada tela decide o padrão: hoje, ou a data do
  * apontamento sendo editado). */
 export function emptyTimesheetForm(date) {
-  return { date, project_id: '', task_id: '', start_time: '', end_time: '', break_minutes: '00:00', description: '' }
+  return { date, project_id: '', task_id: '', is_transit: false, start_time: '', end_time: '', break_minutes: '00:00', description: '' }
 }
 
 /** Converte um apontamento já salvo (TimesheetRead/ServiceOrderActivity)
@@ -33,6 +33,7 @@ export function entryToTimesheetForm(entry, tasksById) {
     date: entry.date,
     project_id: entry.task_id ? task?.project_id || '' : entry.project_id || '',
     task_id: entry.task_id || '',
+    is_transit: entry.is_transit || false,
     start_time: entry.start_time ? entry.start_time.slice(0, 5) : '',
     end_time: entry.end_time ? entry.end_time.slice(0, 5) : '',
     break_minutes: minutesToHM(entry.break_minutes),
@@ -47,9 +48,13 @@ export function timesheetFormToPayload(form) {
     start_time: form.start_time,
     end_time: form.end_time,
     break_minutes: hmToMinutes(form.break_minutes),
+    is_transit: Boolean(form.is_transit),
     description: form.description || null,
   }
-  if (form.task_id) payload.task_id = form.task_id
+  // Traslado nunca leva task_id (sempre um projeto, nunca uma tarefa
+  // específica — ver _resolve_task_and_project em routers/timesheets.py).
+  if (form.is_transit) payload.project_id = form.project_id
+  else if (form.task_id) payload.task_id = form.task_id
   else if (form.project_id) payload.project_id = form.project_id
   return payload
 }

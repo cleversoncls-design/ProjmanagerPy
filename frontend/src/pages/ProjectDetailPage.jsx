@@ -203,7 +203,7 @@ function OverviewTab({ project, report, evm }) {
         <Card title={t('Financeiro')}>
           {financials ? (
             <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-3">
+              <div className={`grid gap-3 ${project.margin_percentage !== null && project.margin_percentage !== undefined ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-3'}`}>
                 <StatTile label={t('Valor vendido')} value={formatCurrency(financials.sold_value)} />
                 <StatTile label={t('Custo real')} value={formatCurrency(financials.real_cost)} />
                 <StatTile
@@ -211,6 +211,9 @@ function OverviewTab({ project, report, evm }) {
                   value={formatCurrency(financials.profit_margin)}
                   tone={Number(financials.profit_margin) < 0 ? 'critical' : 'default'}
                 />
+                {project.margin_percentage !== null && project.margin_percentage !== undefined && (
+                  <StatTile label={t('% Margem vendida')} value={formatPercent(project.margin_percentage)} />
+                )}
               </div>
               {byType && (
                 <Table
@@ -388,6 +391,7 @@ function ProjectEditModal({ project, onClose, onSaved }) {
     management_rate: project.management_rate ?? '0',
     consulting_hours: project.consulting_hours ?? '0',
     consulting_rate: project.consulting_rate ?? '0',
+    margin_percentage: project.margin_percentage ?? '',
   })
   const [managers, setManagers] = useState([])
   const [calendars, setCalendars] = useState([])
@@ -448,6 +452,7 @@ function ProjectEditModal({ project, onClose, onSaved }) {
         management_rate: form.management_rate,
         consulting_hours: form.consulting_hours,
         consulting_rate: form.consulting_rate,
+        margin_percentage: form.margin_percentage === '' ? null : form.margin_percentage,
       })
       onSaved()
     } catch (err) {
@@ -538,6 +543,11 @@ function ProjectEditModal({ project, onClose, onSaved }) {
             </FormField>
             <FormField label={t('Valor/h consultoria')}>
               <TextInput type="number" min="0" step="0.01" value={form.consulting_rate} onChange={updateField('consulting_rate')} />
+            </FormField>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-4">
+            <FormField label={t('% Margem vendida')} hint={t('Valor declarado na venda — não é calculado a partir de custo.')}>
+              <TextInput type="number" min="0" max="100" step="0.1" value={form.margin_percentage} onChange={updateField('margin_percentage')} />
             </FormField>
           </div>
         </div>

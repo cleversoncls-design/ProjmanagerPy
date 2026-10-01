@@ -46,7 +46,7 @@ export default function TimesheetFieldsForm({ form, updateField, projects, taskO
       </div>
       <div className="grid grid-cols-2 gap-4">
         <FormField label={t('Tarefa')} hint={!form.project_id ? t('Selecione um projeto para escolher a tarefa.') : undefined}>
-          <Select value={form.task_id} onChange={updateField('task_id')} disabled={!form.project_id}>
+          <Select value={form.task_id} onChange={updateField('task_id')} disabled={!form.project_id || form.is_transit}>
             <option value="">{t('Sem tarefa (apontamento no projeto)')}</option>
             {taskOptions.map((task) => (
               <option key={task.id} value={task.id}>
@@ -61,6 +61,13 @@ export default function TimesheetFieldsForm({ form, updateField, projects, taskO
           </div>
         </FormField>
       </div>
+      <label
+        className={`flex items-center gap-2 text-sm ${form.project_id ? 'text-[var(--text-secondary)]' : 'text-[var(--text-muted)]'}`}
+        title={!form.project_id ? t('Selecione um projeto para marcar Traslado.') : undefined}
+      >
+        <input type="checkbox" checked={Boolean(form.is_transit)} disabled={!form.project_id} onChange={updateField('is_transit')} />
+        {t('Traslado (deslocamento) — sem tarefa específica')}
+      </label>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <FormField label={t('Hora início')} required>
           <TextInput type="time" required value={form.start_time} onChange={updateField('start_time')} />

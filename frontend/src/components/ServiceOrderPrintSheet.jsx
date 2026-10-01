@@ -39,11 +39,12 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
       const task = tasksById[activity.task_id]
       return task ? labels.TASK_TYPE_LABELS[task.task_type] : '—'
     }
-    return labels.TASK_TYPE_LABELS.ADHOC
+    return activity.is_transit ? labels.TASK_TYPE_LABELS.TRASLADO : labels.TASK_TYPE_LABELS.ADHOC
   }
 
   function tareaLabel(activity) {
-    return activity.wbs_code ? `${activity.wbs_code} - ${activity.task_name}` : labels.TASK_TYPE_LABELS.ADHOC
+    if (activity.wbs_code) return `${activity.wbs_code} - ${activity.task_name}`
+    return activity.is_transit ? labels.TASK_TYPE_LABELS.TRASLADO : labels.TASK_TYPE_LABELS.ADHOC
   }
 
   // Tipo Apunte "geral" da OS, pro cabeçalho — junta os tipos distintos dos
