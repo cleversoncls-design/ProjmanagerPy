@@ -63,11 +63,22 @@ def _scoped_projects(db: Session, user: User, include_modelo: bool = False) -> l
     # statistics/schedule/gantt) continuam acessíveis normalmente sempre,
     # independente disto — é assim que o usuário abre e mantém a estrutura
     # do próprio Modelo mesmo sem passar por aqui.
+    #
+    # INTERNAL_PM só enxerga os projetos onde é o gerente (Project.
+    # manager_id) — pedido do usuário: "ainda posso ver com meu acesso de
+    # gerente de projetos, projetos de outros gerentes" na tela de
+    # Projetos. Mesma ideia já aplicada em GET /timesheets (Aprovações
+    # pendentes). ADMIN continua vendo tudo, sem essa restrição — é quem
+    # precisa de visão completa do portfólio. O filtro manual "Gerente" em
+    # GET /reports/portfolio (abaixo) segue existindo pra quem ainda
+    # enxerga mais de um gerente (ADMIN).
     stmt = select(Project)
     if not include_modelo:
         stmt = stmt.where(Project.status != ProjectStatus.MODELO)
     if user.role in EXTERNAL_ROLES:
         stmt = stmt.where(Project.client_id == user.client_id)
+    elif user.role == UserRole.INTERNAL_PM:
+        stmt = stmt.where(Project.manager_id == user.id)
     return list(db.scalars(stmt).all())
 
 

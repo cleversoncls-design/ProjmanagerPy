@@ -48,12 +48,12 @@ export default function ProjectsPage() {
   // com um só. Mesmo grupo de papéis que o backend aceita em client_id
   // (GET /reports/portfolio).
   const canFilterByClient = INTERNAL_ROLES.includes(user.role)
-  // Filtro por gerente (pedido do usuário) reaproveita a mesma lista de
-  // ADMIN/INTERNAL_PM já carregada pra popular "Gerente responsável" no
-  // form de Novo projeto — GET /users só é liberado pra esses dois papéis
-  // (ver require_roles em routers/users.py), então só faz sentido mostrar
-  // o filtro pra quem também tem canCreate (o mesmo conjunto de papéis).
-  const canFilterByManager = canCreate
+  // Filtro por gerente: só faz sentido pra ADMIN, que é o único perfil que
+  // ainda enxerga o portfólio inteiro — INTERNAL_PM agora só vê (em
+  // _scoped_projects no backend, pedido do usuário: "ainda posso ver...
+  // projetos de outros gerentes") os próprios projetos, então pra ele o
+  // filtro nunca teria outra opção além de si mesmo.
+  const canFilterByManager = user.role === 'ADMIN'
   // Classes literais (não geradas via template) pra o scanner do Tailwind
   // JIT conseguir achar cada uma no código-fonte — ver mesmo padrão já
   // usado antes pra Cliente/Projetos Modelo.
