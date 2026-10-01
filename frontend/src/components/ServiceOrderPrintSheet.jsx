@@ -21,8 +21,15 @@ import { formatDate, formatTime, formatHoursDuration, minutesToHM } from '../uti
  * `service_orders` em services.py). Proyecto é o mesmo pra todos os
  * apontamentos da OS (por definição do agrupamento), então aparece uma
  * única vez no cabeçalho, ao lado de Cliente — junto com "Total general"
- * quando há mais de um apontamento. Só o bloco Fecha/Entrada/Salida/Tarea/
- * Detalles se repete, uma vez por apontamento, na mesma folha (Hoja
+ * quando há mais de um apontamento. Fecha também é a mesma pra todos os
+ * apontamentos (mesmo critério de agrupamento) e por isso não se repete —
+ * "Fecha Ref." no canto superior direito já cobre. Tipo Apunte (pedido do
+ * usuário, "mais melhorias") subiu pro cabeçalho também: como o
+ * agrupamento da OS não é por tipo, uma OS pode ter apontamentos de tipos
+ * diferentes (Gestão/Consultoria/Avulso) — nesse caso os tipos distintos
+ * aparecem juntos (ex.: "Gestión + Consultoría"), decisão confirmada com o
+ * usuário. Só o bloco Entrada/Salida/Intervalo/Total/Tarea/Detalles
+ * continua se repetindo, uma vez por apontamento, na mesma folha (Hoja
  * continua "1 / 1" — nunca quebramos em mais de uma página por OS). */
 export default function ServiceOrderPrintSheet({ order, tasksById }) {
   const { labels } = useLanguage()
@@ -38,6 +45,11 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
   function tareaLabel(activity) {
     return activity.wbs_code ? `${activity.wbs_code} - ${activity.task_name}` : labels.TASK_TYPE_LABELS.ADHOC
   }
+
+  // Tipo Apunte "geral" da OS, pro cabeçalho — junta os tipos distintos dos
+  // apontamentos (ex.: "Gestión + Consultoría") quando a OS mistura mais de
+  // um tipo; na maioria dos casos é só um tipo repetido.
+  const tipoApunteGeral = [...new Set(order.activities.map(tipoApunte))].join(' + ')
 
   return (
     <div
@@ -99,6 +111,9 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
             Proyecto: <span className="os-field font-bold">{order.project_code} - {order.project_name}</span>
           </p>
         </div>
+        <p className="mt-1">
+          Tipo Apunte: <span className="os-field font-bold">{tipoApunteGeral}</span>
+        </p>
         {order.activities.length > 1 && (
           <p className="mt-1 font-bold">
             Total general: <span className="os-field">{formatHoursDuration(order.total_hours)}</span>
@@ -110,12 +125,6 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
       {order.activities.map((activity, index) => (
         <div key={activity.id} className={`text-[11px] ${index === order.activities.length - 1 ? '' : 'border-b border-black'} py-2`}>
           <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-            <p>
-              Fecha: <span className="os-field font-bold">{formatDate(order.date)}</span>
-            </p>
-            <p>
-              Tipo Apunte: <span className="os-field font-bold">{tipoApunte(activity)}</span>
-            </p>
             <p>
               Entrada: <span className="os-field font-bold">{formatTime(activity.start_time)}</span>
               {'  '}Salida: <span className="os-field font-bold">{formatTime(activity.end_time)}</span>

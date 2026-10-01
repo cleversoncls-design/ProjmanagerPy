@@ -107,16 +107,33 @@ class ClientCreate(BaseModel):
     primary_contact_phone: str | None = None
 
 
+class ClientUpdate(BaseModel):
+    code: str | None = Field(default=None, min_length=1, max_length=40)
+    legal_name: str | None = Field(default=None, min_length=1, max_length=255)
+    trade_name: str | None = None
+    tax_id: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = Field(default=None, max_length=2)
+    zip_code: str | None = None
+    primary_contact_name: str | None = None
+    primary_contact_email: EmailStr | None = None
+    primary_contact_phone: str | None = None
+
+
 class ClientRead(ORMModel):
     id: str
     code: str
     legal_name: str
     trade_name: str | None
     tax_id: str | None
+    address: str | None
     city: str | None
     state: str | None
+    zip_code: str | None
     primary_contact_name: str | None
     primary_contact_email: str | None
+    primary_contact_phone: str | None
     created_at: datetime
 
 
