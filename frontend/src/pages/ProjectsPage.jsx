@@ -32,6 +32,7 @@ const EMPTY_FORM = {
   management_rate: '0',
   consulting_hours: '0',
   consulting_rate: '0',
+  margin_percentage: '',
   start_date: '',
   end_date: '',
 }
@@ -176,6 +177,7 @@ export default function ProjectsPage() {
       const payload = { ...form }
       if (!payload.start_date) delete payload.start_date
       if (!payload.end_date) delete payload.end_date
+      if (payload.margin_percentage === '') delete payload.margin_percentage
       await projectsApi.createProject(payload)
       setShowModal(false)
       setForm(EMPTY_FORM)
@@ -363,6 +365,11 @@ export default function ProjectsPage() {
                 </FormField>
                 <FormField label={t('Valor/h consultoria')}>
                   <TextInput type="number" min="0" step="0.01" value={form.consulting_rate} onChange={updateField('consulting_rate')} />
+                </FormField>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-4">
+                <FormField label={t('% Margem vendida')} hint={t('Valor declarado na venda — não é calculado a partir de custo.')}>
+                  <TextInput type="number" min="0" max="100" step="0.1" value={form.margin_percentage} onChange={updateField('margin_percentage')} />
                 </FormField>
               </div>
               <p className="mt-3 text-sm">

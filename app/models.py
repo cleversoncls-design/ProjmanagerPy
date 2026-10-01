@@ -210,6 +210,13 @@ class Project(Base):
     management_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     consulting_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     consulting_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    # "% de Margem vendida na BID" (pedido do usuário) — um valor DECLARADO
+    # na venda/proposta, digitado direto no formulário; nunca calculado a
+    # partir de custo (não existe custo conhecido ainda nesse estágio do
+    # projeto) nem reconciliado depois com a margem real (profit_margin em
+    # services.project_financials, essa sim calculada a partir do custo
+    # efetivo). Opcional — fica em branco até alguém preencher.
+    margin_percentage: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
     # Calendário aplicado ao projeto (dias úteis/feriados usados para
@@ -407,6 +414,14 @@ class Timesheet(Base):
     # Sempre False para hora administrativa interna (sem task_id nem
     # project_id) — não há agenda de projeto pra checar nesse caso.
     unscheduled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # "Traslado" (deslocamento, pedido do usuário) — apontamento sempre
+    # vinculado a um projeto (project_id setado) mas sem task_id, igual ao
+    # "avulso" de cima; a diferença é só de rótulo/categoria de relatório
+    # (ver TASK_TYPE_LABELS.TRASLADO no frontend e o bucket "TRASLADO" em
+    # financials_by_task_type, services.py) — não entra em Task.actual_hours
+    # de nenhuma tarefa (não tem task_id) mas soma normalmente no total de
+    # horas do projeto, exatamente como um apontamento avulso já fazia.
+    is_transit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[TimesheetStatus] = mapped_column(nullable=False, default=TimesheetStatus.PENDING)
     task: Mapped[Task | None] = relationship(back_populates="timesheets")

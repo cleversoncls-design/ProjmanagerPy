@@ -132,6 +132,8 @@ export const es = {
   'No prazo': 'A tiempo',
   'Mistura de status': 'Mezcla de estados',
   // --- Página Projetos / Clientes / Usuários / Calendários / Detalhe do projeto (varredura de tradução) ---
+  '% Margem vendida': '% Margen vendido',
+  'Valor declarado na venda — não é calculado a partir de custo.': 'Valor declarado en la venta — no se calcula a partir de costo.',
   '% Realizado': '% Completado',
   '% concluído': '% completado',
   '% concluído (Duração)': '% completado (Duración)',
@@ -206,6 +208,7 @@ export const es = {
   'Ex.: Baseline inicial, Revisão de escopo #2.': 'Ej.: Línea base inicial, Revisión de alcance #2.',
   'Encerrada': 'Cerrada',
   'Excluindo…': 'Eliminando…',
+  'Excluir cliente': 'Eliminar cliente',
   'Excluir feriado': 'Eliminar feriado',
   'Expandir': 'Expandir',
   'Expandir tudo': 'Expandir todo',
@@ -365,6 +368,7 @@ export const es = {
   'Tem certeza que quer excluir o usuário': '¿Está seguro de que quiere eliminar el usuario',
   'Excluir projeto': 'Eliminar proyecto',
   'Tem certeza que quer excluir o projeto': '¿Está seguro de que quiere eliminar el proyecto',
+  'Tem certeza que quer excluir o cliente': '¿Está seguro de que quiere eliminar el cliente',
   'Só é possível excluir um projeto que ainda não tenha nenhuma tarefa cadastrada.': 'Solo es posible eliminar un proyecto que aún no tenga ninguna tarea registrada.',
 
   // --- Tela de Login (redesenho a partir da referência Resultar Servicios) ---
@@ -686,6 +690,8 @@ export const es = {
   'Tarefa': 'Tarea',
   'Selecione um projeto para escolher a tarefa.': 'Seleccione un proyecto para elegir la tarea.',
   'Sem tarefa (apontamento no projeto)': 'Sin tarea (registro en el proyecto)',
+  'Traslado (deslocamento) — sem tarefa específica': 'Traslado — sin tarea específica',
+  'Selecione um projeto para marcar Traslado.': 'Seleccione un proyecto para marcar Traslado.',
   'Tipo de apontamento': 'Tipo de registro',
   'Segue automaticamente o tipo da tarefa (Gestão/Consultoria).': 'Sigue automáticamente el tipo de la tarea (Gestión/Consultoría).',
   'Intervalo': 'Intervalo',

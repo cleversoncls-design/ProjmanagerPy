@@ -8,7 +8,7 @@ import IconButton from '../components/IconButton'
 import Modal from '../components/Modal'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
-import { PencilIcon } from '../components/icons'
+import { PencilIcon, TrashIcon } from '../components/icons'
 import { FormField, TextInput } from '../components/FormField'
 import { useLanguage } from '../context/LanguageContext'
 
@@ -41,6 +41,10 @@ export default function ClientsPage() {
   const [editForm, setEditForm] = useState(null)
   const [editFormError, setEditFormError] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
+
+  // Excluir cliente (pedido do usuário, "mais novas melhorias, parte 3") —
+  // mesmo padrão de UserDeleteModal/DeleteTaskModal já usados no app.
+  const [deletingClient, setDeletingClient] = useState(null)
 
   function loadClients() {
     setLoading(true)
@@ -137,8 +141,9 @@ export default function ClientsPage() {
                 header: '',
                 align: 'right',
                 render: (row) => (
-                  <div className="flex justify-end">
+                  <div className="flex justify-end gap-1.5">
                     <IconButton icon={PencilIcon} label={t('Editar')} onClick={() => openEditModal(row)} />
+                    <IconButton icon={TrashIcon} label={t('Excluir')} variant="danger" onClick={() => setDeletingClient(row)} />
                   </div>
                 ),
               },
@@ -255,6 +260,62 @@ export default function ClientsPage() {
           </form>
         </Modal>
       )}
+
+      {deletingClient && (
+        <ClientDeleteModal
+          target={deletingClient}
+          onClose={() => setDeletingClient(null)}
+          onDeleted={() => {
+            setDeletingClient(null)
+            loadClients()
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/** Modal de confirmação pra excluir um cliente — a API recusa (409) se ele
+ * tiver projeto(s), usuário(s) (PM do cliente/Usuário-chave) ou
+ * solicitação(ões) de projeto vinculados (ver DELETE /clients/{id} em
+ * app/routers/clients.py) — a mensagem de erro do backend já explica qual
+ * dos casos é, então basta repassá-la (mesmo padrão de UserDeleteModal em
+ * UsersPage.jsx/DeleteTaskModal em ProjectDetailPage.jsx). */
+function ClientDeleteModal({ target, onClose, onDeleted }) {
+  const { t } = useLanguage()
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleDelete() {
+    setDeleting(true)
+    setError('')
+    try {
+      await clientsApi.deleteClient(target.id)
+      onDeleted()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Modal title={t('Excluir cliente')} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--text-secondary)]">
+          {t('Tem certeza que quer excluir o cliente')} <span className="font-medium text-[var(--text-primary)]">{target.code} — {target.legal_name}</span>?{' '}
+          {t('Essa ação não pode ser desfeita.')}
+        </p>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="button" variant="danger" disabled={deleting} onClick={handleDelete}>
+            {deleting ? t('Excluindo…') : t('Excluir')}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   )
 }

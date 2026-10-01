@@ -4,10 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..audit import record_audit
 from ..database import get_db
 from ..deps import EXTERNAL_ROLES, get_current_user, require_roles
 from ..i18n import t as translate
-from ..models import Client, User, UserRole
+from ..models import AuditAction, Client, Project, ProjectIntake, User, UserRole
 from ..schemas import ClientCreate, ClientRead, ClientUpdate
 
 router = APIRouter(prefix="/clients", tags=["clients"])
@@ -73,3 +74,36 @@ def update_client(
     db.commit()
     db.refresh(client)
     return client
+
+
+@router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_client(
+    client_id: str,
+    # Mesma restrição de create_client/update_client: só o Administrador
+    # exclui cliente (pedido do usuário, "mais novas melhorias, parte 3":
+    # "ter botão de excluir, validando se o mesmo não está vinculado a
+    # nenhuma tabela").
+    user: User = Depends(require_roles(UserRole.ADMIN)),
+    db: Session = Depends(get_db),
+) -> None:
+    client = db.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail=translate("Cliente não encontrado", user.language))
+    # Project.client_id é RESTRICT (ver app/models.py) — o banco já
+    # recusaria sozinho, mas a checagem aqui dá uma mensagem 409 traduzida
+    # em vez de estourar um IntegrityError genérico pro usuário.
+    if db.scalar(select(Project.id).where(Project.client_id == client_id)):
+        raise HTTPException(status_code=409, detail=translate("Cliente tem projeto(s) vinculado(s) — não pode ser excluído", user.language))
+    # User.client_id é SET NULL (não bloquearia no banco), mas o pedido do
+    # usuário foi validar QUALQUER vínculo antes de excluir — um usuário
+    # (PM do cliente/Usuário-chave) ligado a este cliente também bloqueia.
+    if db.scalar(select(User.id).where(User.client_id == client_id)):
+        raise HTTPException(status_code=409, detail=translate("Cliente tem usuário(s) vinculado(s) — não pode ser excluído", user.language))
+    # ProjectIntake.client_id é CASCADE e NOT NULL — sem esta checagem, uma
+    # solicitação de projeto já registrada pro cliente seria apagada em
+    # silêncio junto com ele.
+    if db.scalar(select(ProjectIntake.id).where(ProjectIntake.client_id == client_id)):
+        raise HTTPException(status_code=409, detail=translate("Cliente tem solicitação(ões) de projeto vinculada(s) — não pode ser excluído", user.language))
+    record_audit(db, entity_type="client", entity_id=client.id, action=AuditAction.DELETE, user_id=user.id, details={"code": client.code, "legal_name": client.legal_name})
+    db.delete(client)
+    db.commit()

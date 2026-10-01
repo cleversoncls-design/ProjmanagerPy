@@ -172,7 +172,7 @@ export default function ServiceOrdersPage() {
   function activityLabel(order, activity) {
     return {
       projectLabel: `${order.project_code} — ${order.project_name}`,
-      taskLabel: activity.wbs_code ? `${activity.wbs_code} ${activity.task_name}` : t('Avulso'),
+      taskLabel: activity.wbs_code ? `${activity.wbs_code} ${activity.task_name}` : activity.is_transit ? t('Traslado') : t('Avulso'),
     }
   }
 
@@ -445,7 +445,7 @@ export default function ServiceOrdersPage() {
                                 return (
                                   <tr key={activity.id} className="border-b border-[var(--border)] last:border-0">
                                     <td className="px-2 py-1.5 text-[var(--text-primary)]">
-                                      {activity.wbs_code ? `${activity.wbs_code} — ${activity.task_name}` : t('Avulso')}
+                                      {activity.wbs_code ? `${activity.wbs_code} — ${activity.task_name}` : activity.is_transit ? t('Traslado') : t('Avulso')}
                                     </td>
                                     <td className="px-2 py-1.5 whitespace-nowrap text-[var(--text-secondary)]">
                                       {formatTime(activity.start_time)}–{formatTime(activity.end_time)}

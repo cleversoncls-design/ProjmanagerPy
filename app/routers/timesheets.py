@@ -101,10 +101,29 @@ def _resolve_task_and_project(
     task: Task | None = None
     project: Project | None = None
 
+    # "Traslado" (deslocamento, pedido do usuário) — sempre vinculado a um
+    # projeto, nunca a uma tarefa específica (decisão confirmada com o
+    # usuário). Checado antes de tudo, pra nunca cair no ramo de task_id
+    # abaixo com os dois marcados ao mesmo tempo.
+    if data.is_transit:
+        if data.task_id:
+            raise HTTPException(status_code=422, detail=translate("Traslado não pode ter uma tarefa específica vinculada", user.language))
+        if not data.project_id:
+            raise HTTPException(status_code=422, detail=translate("Traslado precisa de um projeto selecionado", user.language))
+
     if data.task_id:
         task = db.get(Task, data.task_id)
         if not task:
             raise HTTPException(status_code=404, detail=translate("Tarefa não encontrada", user.language))
+        # Tarefa "pai"/resumo de EAP (tem tarefas-filhas) — pedido do
+        # usuário: apontamento só nas tarefas-filha, nunca na tarefa-pai que
+        # só resume o grupo (mesma checagem de Task.parent_task_id usada em
+        # delete_task, routers/tasks.py).
+        if db.scalar(select(Task.id).where(Task.parent_task_id == task.id)):
+            raise HTTPException(
+                status_code=422,
+                detail=translate("Não é possível apontar horas em uma tarefa que tem tarefas-filhas — aponte na tarefa-filha", user.language),
+            )
         project = db.get(Project, task.project_id)
         require_project_access(project, user, write=True)
         if project.status != ProjectStatus.ACTIVE:
@@ -240,6 +259,7 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
         break_minutes=data.break_minutes,
         hours_spent=hours_spent,
         unscheduled=unscheduled,
+        is_transit=data.is_transit,
         description=data.description,
     )
     db.add(entry)
@@ -278,6 +298,7 @@ def update_timesheet(
     entry.break_minutes = data.break_minutes
     entry.hours_spent = hours_spent
     entry.unscheduled = unscheduled
+    entry.is_transit = data.is_transit
     entry.description = data.description
     # Editar (inclusive um apontamento Aprovado ou Rejeitado, pra corrigir e
     # reenviar) sempre volta pro estado Pendente — precisa passar pela

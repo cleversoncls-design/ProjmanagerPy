@@ -27,6 +27,11 @@ _ES: dict[str, str] = {
     "Calendário não encontrado": "Calendario no encontrado",
     "Cliente não encontrado": "Cliente no encontrado",
     "Cliente precisa informar project_id": "El cliente debe informar project_id",
+    "Cliente tem projeto(s) vinculado(s) — não pode ser excluído": "El cliente tiene proyecto(s) vinculado(s) — no se puede eliminar",
+    "Cliente tem usuário(s) vinculado(s) — não pode ser excluído": "El cliente tiene usuario(s) vinculado(s) — no se puede eliminar",
+    "Cliente tem solicitação(ões) de projeto vinculada(s) — não pode ser excluído": (
+        "El cliente tiene solicitud(es) de proyecto vinculada(s) — no se puede eliminar"
+    ),
     "Cor do projeto inválida": "Color de proyecto inválido",
     "Esta cor já está em uso por outro projeto ativo": "Este color ya está en uso por otro proyecto activo",
     "Conflito de integridade de dados (registro duplicado ou referência inválida).": (
@@ -90,6 +95,11 @@ _ES: dict[str, str] = {
     "Só o cliente valida suas próprias tarefas": "Solo el cliente valida sus propias tareas",
     "Só é possível apontar horas em projetos ativos": "Solo se pueden registrar horas en proyectos activos",
     "Não é possível apontar horas em uma tarefa desativada": "No se pueden registrar horas en una tarea desactivada",
+    "Não é possível apontar horas em uma tarefa que tem tarefas-filhas — aponte na tarefa-filha": (
+        "No es posible registrar horas en una tarea que tiene tareas hijas — regístrelas en la tarea hija"
+    ),
+    "Traslado não pode ter uma tarefa específica vinculada": "El traslado no puede tener una tarea específica vinculada",
+    "Traslado precisa de um projeto selecionado": "El traslado necesita un proyecto seleccionado",
     "Tarefa já está aguardando validação do cliente": "La tarea ya está esperando la validación del cliente",
     "Tarefa não encontrada": "Tarea no encontrada",
     "Tarefa não está aguardando validação do cliente": "La tarea no está esperando la validación del cliente",

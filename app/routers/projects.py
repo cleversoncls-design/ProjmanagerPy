@@ -32,6 +32,11 @@ from ..services import project_financials
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 _FINANCIAL_FIELDS = ("management_hours", "management_rate", "consulting_hours", "consulting_rate")
+# Campos financeiros escondidos de perfil externo (CLIENT_PM/CLIENT_USER) —
+# os 4 de cima (que também disparam _recompute_sold_value quando mudam) mais
+# "% de Margem vendida" (margin_percentage), que não entra no recálculo do
+# valor vendido mas é informação financeira da mesma forma.
+_EXTERNAL_HIDDEN_FIELDS = _FINANCIAL_FIELDS + ("margin_percentage",)
 
 # Projeto nesses status não disputa exclusividade de cor: MODELO nunca é um
 # projeto "de verdade" (ver comentário em ProjectStatus, models.py) e
@@ -128,7 +133,7 @@ def read_project(project_id: str, user: User = Depends(get_current_user), db: Se
     if user.role in EXTERNAL_ROLES:
         payload["sold_value"] = None
         payload["financials"] = None
-        for field in _FINANCIAL_FIELDS:
+        for field in _EXTERNAL_HIDDEN_FIELDS:
             payload[field] = None
     else:
         payload["financials"] = project_financials(db, project.id)
@@ -180,7 +185,7 @@ def update_project(
             # mostrar a cor real — já revalidada acima quando aplicável.
             changes["color_striped"] = False
     if user.role in EXTERNAL_ROLES:
-        for field in _FINANCIAL_FIELDS:
+        for field in _EXTERNAL_HIDDEN_FIELDS:
             changes.pop(field, None)
     for field, value in changes.items():
         setattr(project, field, value)

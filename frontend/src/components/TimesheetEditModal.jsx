@@ -23,16 +23,25 @@ export default function TimesheetEditModal({ entry, projects, allTasks, tasksByI
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const taskOptions = allTasks.filter((task) => task.project_id === form.project_id)
+  // Tarefas "pai" (têm tarefas-filhas na EAP) não entram no seletor — mesmo
+  // critério de TimesheetsPage.jsx (a API também recusa).
+  const parentTaskIds = new Set(allTasks.map((task) => task.parent_task_id).filter(Boolean))
+  const taskOptions = allTasks.filter((task) => task.project_id === form.project_id && !parentTaskIds.has(task.id))
 
   function updateField(field) {
     return (event) => {
-      const value = event.target.value
-      setForm((prev) => (field === 'project_id' ? { ...prev, project_id: value, task_id: '' } : { ...prev, [field]: value }))
+      const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value
+      setForm((prev) => {
+        if (field === 'project_id') return { ...prev, project_id: value, task_id: '', is_transit: false }
+        if (field === 'task_id') return { ...prev, task_id: value, is_transit: value ? false : prev.is_transit }
+        if (field === 'is_transit') return { ...prev, is_transit: value, task_id: value ? '' : prev.task_id }
+        return { ...prev, [field]: value }
+      })
     }
   }
 
   function formTypeLabel() {
+    if (form.is_transit) return labels.TASK_TYPE_LABELS.TRASLADO
     if (form.task_id) {
       const task = tasksById[form.task_id]
       return task ? labels.TASK_TYPE_LABELS[task.task_type] : '—'

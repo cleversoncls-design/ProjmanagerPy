@@ -182,6 +182,10 @@ class ProjectCreate(BaseModel):
     management_rate: Decimal = Field(default=Decimal("0"), ge=0)
     consulting_hours: Decimal = Field(default=Decimal("0"), ge=0)
     consulting_rate: Decimal = Field(default=Decimal("0"), ge=0)
+    # "% de Margem vendida na BID" (pedido do usuário) — valor declarado na
+    # venda/proposta, digitado direto; não é calculado a partir de custo
+    # (ver comentário em Project.margin_percentage, app/models.py).
+    margin_percentage: Decimal | None = Field(default=None, ge=0, le=100)
     start_date: date | None = None
     end_date: date | None = None
     calendar_id: str | None = None
@@ -200,6 +204,7 @@ class ProjectUpdate(BaseModel):
     management_rate: Decimal | None = Field(default=None, ge=0)
     consulting_hours: Decimal | None = Field(default=None, ge=0)
     consulting_rate: Decimal | None = Field(default=None, ge=0)
+    margin_percentage: Decimal | None = Field(default=None, ge=0, le=100)
     start_date: date | None = None
     end_date: date | None = None
     calendar_id: str | None = None
@@ -233,6 +238,7 @@ class ProjectDetail(ProjectSummary):
     management_rate: Decimal | None = None
     consulting_hours: Decimal | None = None
     consulting_rate: Decimal | None = None
+    margin_percentage: Decimal | None = None
     financials: dict[str, Decimal] | None = None
 
 
@@ -509,6 +515,10 @@ class TimesheetCreate(BaseModel):
     start_time: time
     end_time: time
     break_minutes: int = Field(default=0, ge=0)
+    # "Traslado" (deslocamento, pedido do usuário) — exige project_id
+    # (sempre vinculado a um projeto) e não aceita task_id junto (ver
+    # validação em _resolve_task_and_project, routers/timesheets.py).
+    is_transit: bool = False
     description: str | None = None
 
 
@@ -528,6 +538,7 @@ class TimesheetRead(ORMModel):
     break_minutes: int
     hours_spent: Decimal
     unscheduled: bool
+    is_transit: bool
     description: str | None
     status: TimesheetStatus
 
@@ -789,6 +800,7 @@ class ServiceOrderActivity(BaseModel):
     description: str | None
     status: TimesheetStatus
     unscheduled: bool
+    is_transit: bool
 
 
 class ServiceOrderRow(BaseModel):

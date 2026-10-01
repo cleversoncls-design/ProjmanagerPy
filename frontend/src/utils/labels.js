@@ -87,6 +87,10 @@ export const TASK_TYPE_LABELS = {
   // tem task_type — usado só na quebra financeira do projeto, nunca em
   // Task.task_type em si.
   ADHOC: 'Avulso',
+  // "Traslado" (deslocamento, pedido do usuário) — mesma ideia do ADHOC
+  // acima (chave sintética, não é um TaskType de verdade), mas com bucket
+  // próprio em financials_by_task_type pra separar do resto do avulso.
+  TRASLADO: 'Traslado',
 }
 
 // Cor categórica fixa por entidade (nunca por posição/ranking — um filtro

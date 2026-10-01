@@ -1027,9 +1027,12 @@ def financials_by_task_type(session: Session, project_id: str) -> dict[str, dict
     CONSULTORIA (Task.task_type). Um apontamento avulso vinculado só ao
     projeto (Timesheet.task_id nulo) não tem task_type — entra no bucket
     "ADHOC" em vez de ser descartado ou atribuído arbitrariamente a uma das
-    duas bolsas contratadas."""
+    duas bolsas contratadas. "Traslado" (Timesheet.is_transit, pedido do
+    usuário) é um caso parecido mas com bucket próprio ("TRASLADO"), pra dar
+    pra ver quanto foi gasto em deslocamento separado do resto das horas
+    avulsas (decisão confirmada com o usuário)."""
     rows = session.execute(
-        select(Timesheet.hours_spent, Resource.internal_cost_per_hour, Task.task_type)
+        select(Timesheet.hours_spent, Resource.internal_cost_per_hour, Task.task_type, Timesheet.is_transit)
         .join(Resource, Resource.id == Timesheet.resource_id)
         .outerjoin(Task, Task.id == Timesheet.task_id)
         .where(
@@ -1040,10 +1043,11 @@ def financials_by_task_type(session: Session, project_id: str) -> dict[str, dict
     buckets: dict[str, dict[str, Decimal]] = {
         TaskType.MANAGEMENT.value: {"hours": Decimal("0"), "cost": Decimal("0")},
         TaskType.CONSULTING.value: {"hours": Decimal("0"), "cost": Decimal("0")},
+        "TRASLADO": {"hours": Decimal("0"), "cost": Decimal("0")},
         "ADHOC": {"hours": Decimal("0"), "cost": Decimal("0")},
     }
-    for hours, rate, task_type in rows:
-        key = task_type.value if task_type is not None else "ADHOC"
+    for hours, rate, task_type, is_transit in rows:
+        key = task_type.value if task_type is not None else ("TRASLADO" if is_transit else "ADHOC")
         buckets[key]["hours"] += Decimal(hours)
         buckets[key]["cost"] += Decimal(hours) * Decimal(rate)
     for bucket in buckets.values():
@@ -1302,6 +1306,7 @@ def service_orders(
             Timesheet.description,
             Timesheet.status,
             Timesheet.unscheduled,
+            Timesheet.is_transit,
         )
         .outerjoin(Task, Task.id == Timesheet.task_id)
         .where(
@@ -1334,6 +1339,7 @@ def service_orders(
                 "description": row.description,
                 "status": row.status,
                 "unscheduled": row.unscheduled,
+                "is_transit": row.is_transit,
             }
         )
     if not groups:
