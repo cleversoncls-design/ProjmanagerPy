@@ -29,6 +29,15 @@ export const RESOURCE_LEVEL_LABELS = {
   4: 'Nível 4',
 }
 
+// Onde a tarefa pode ser executada (pedido do usuário, "melhorias parte
+// 5") — campo puramente informativo (ver app/models.py TaskModality), sem
+// nenhuma validação/filtro associado.
+export const TASK_MODALITY_LABELS = {
+  REMOTE: 'Remotamente',
+  ON_SITE: 'Presencial',
+  BOTH: 'Ambos',
+}
+
 export const MANAGEMENT_ROLES = ['ADMIN', 'INTERNAL_PM']
 export const INTERNAL_ROLES = ['ADMIN', 'INTERNAL_PM', 'CONSULTANT']
 
@@ -250,6 +259,7 @@ export function getLabels(lang) {
     ROLE_LABELS: translateMap(ROLE_LABELS, lang),
     RESOURCE_FUNCTION_LABELS: translateMap(RESOURCE_FUNCTION_LABELS, lang),
     RESOURCE_LEVEL_LABELS: translateMap(RESOURCE_LEVEL_LABELS, lang),
+    TASK_MODALITY_LABELS: translateMap(TASK_MODALITY_LABELS, lang),
     PROJECT_STATUS_LABELS: translateMap(PROJECT_STATUS_LABELS, lang),
     TASK_STATUS_LABELS: translateMap(TASK_STATUS_LABELS, lang),
     TASK_STATUS_LABELS_SHORT: translateMap(TASK_STATUS_LABELS_SHORT, lang),

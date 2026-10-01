@@ -2110,3 +2110,59 @@ def test_task_min_level_defaults_to_1_and_is_validated(client, setup):
     updated = client.patch(f"/tasks/{explicit_level.json()['id']}", json={"min_level": 2}, headers=admin_headers)
     assert updated.status_code == 200
     assert updated.json()["min_level"] == 2
+
+
+# ---------------------------------------------------------------------------
+# "melhorias, parte 5"
+# ---------------------------------------------------------------------------
+
+
+def test_task_modality_defaults_to_both_and_can_be_set(client, setup):
+    """Pedido do usuário: campo indicando se a tarefa pode ser feita
+    Remotamente/Presencial/Ambos — puramente informativo, default BOTH
+    ("qualquer modalidade serve", mesmo espírito do default de min_level)."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+
+    default_modality = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Sem modalidade informada", "wbs_code": "40"}, headers=admin_headers
+    )
+    assert default_modality.status_code == 201
+    assert default_modality.json()["modality"] == "BOTH"
+
+    remote_task = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Remota", "wbs_code": "41", "modality": "REMOTE"},
+        headers=admin_headers,
+    )
+    assert remote_task.status_code == 201
+    assert remote_task.json()["modality"] == "REMOTE"
+
+    updated = client.patch(f"/tasks/{remote_task.json()['id']}", json={"modality": "ON_SITE"}, headers=admin_headers)
+    assert updated.status_code == 200
+    assert updated.json()["modality"] == "ON_SITE"
+
+    invalid = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Modalidade inválida", "wbs_code": "42", "modality": "HYBRID"},
+        headers=admin_headers,
+    )
+    assert invalid.status_code == 422
+
+
+def test_project_financeiro_shows_planned_and_real_margin(client, setup):
+    """Pedido do usuário: % Margem Planejada (declarada na venda) e % Margem
+    Real (calculada a partir do custo efetivo) lado a lado no Financeiro do
+    projeto."""
+    admin_headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+
+    with_margin = client.patch(f"/projects/{project_id}", json={"margin_percentage": "25.50"}, headers=admin_headers)
+    assert with_margin.status_code == 200
+    assert float(with_margin.json()["margin_percentage"]) == 25.5
+
+    detail = client.get(f"/projects/{project_id}", headers=admin_headers)
+    assert detail.status_code == 200
+    body = detail.json()
+    assert float(body["margin_percentage"]) == 25.5
+    assert "real_margin_percentage" in body["financials"]
