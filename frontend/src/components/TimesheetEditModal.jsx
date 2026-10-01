@@ -23,10 +23,12 @@ export default function TimesheetEditModal({ entry, projects, allTasks, tasksByI
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Tarefas "pai" (têm tarefas-filhas na EAP) não entram no seletor — mesmo
-  // critério de TimesheetsPage.jsx (a API também recusa).
+  // Tarefas "pai" (têm tarefas-filhas na EAP) continuam no seletor, só
+  // desabilitadas — mesmo critério de TimesheetsPage.jsx (a API também
+  // recusa; elas ficam visíveis pra ajudar a identificar a etapa/tarefa-pai
+  // correspondente).
   const parentTaskIds = new Set(allTasks.map((task) => task.parent_task_id).filter(Boolean))
-  const taskOptions = allTasks.filter((task) => task.project_id === form.project_id && !parentTaskIds.has(task.id))
+  const taskOptions = allTasks.filter((task) => task.project_id === form.project_id)
 
   function updateField(field) {
     return (event) => {
@@ -73,6 +75,7 @@ export default function TimesheetEditModal({ entry, projects, allTasks, tasksByI
           updateField={updateField}
           projects={projects}
           taskOptions={taskOptions}
+          parentTaskIds={parentTaskIds}
           formTypeLabel={formTypeLabel}
           preview={previewTimesheetHours(form)}
         />
