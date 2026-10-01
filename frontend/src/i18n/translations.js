@@ -690,6 +690,7 @@ export const es = {
   'Tarefa': 'Tarea',
   'Selecione um projeto para escolher a tarefa.': 'Seleccione un proyecto para elegir la tarea.',
   'Sem tarefa (apontamento no projeto)': 'Sin tarea (registro en el proyecto)',
+  'tarefa-pai, selecione uma tarefa-filha': 'tarea padre, seleccione una tarea hija',
   'Traslado (deslocamento) — sem tarefa específica': 'Traslado — sin tarea específica',
   'Selecione um projeto para marcar Traslado.': 'Seleccione un proyecto para marcar Traslado.',
   'Tipo de apontamento': 'Tipo de registro',

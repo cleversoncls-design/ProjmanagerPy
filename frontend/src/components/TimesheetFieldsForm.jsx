@@ -9,7 +9,7 @@ import { FormField, TextInput, Select, TextArea } from './FormField'
  * nem botões de ação — quem usa este componente é responsável pelo
  * `<form onSubmit>`/Salvar/Cancelar em volta (formatos diferentes: card
  * inline em TimesheetsPage, `<Modal>` em TimesheetEditModal). */
-export default function TimesheetFieldsForm({ form, updateField, projects, taskOptions, formTypeLabel, preview }) {
+export default function TimesheetFieldsForm({ form, updateField, projects, taskOptions, parentTaskIds, formTypeLabel, preview }) {
   const { t } = useLanguage()
   // Só projetos ativos no dropdown pra lançar hora nova (pedido do
   // usuário — não faz sentido apontar num projeto ainda em planejamento ou
@@ -48,11 +48,19 @@ export default function TimesheetFieldsForm({ form, updateField, projects, taskO
         <FormField label={t('Tarefa')} hint={!form.project_id ? t('Selecione um projeto para escolher a tarefa.') : undefined}>
           <Select value={form.task_id} onChange={updateField('task_id')} disabled={!form.project_id || form.is_transit}>
             <option value="">{t('Sem tarefa (apontamento no projeto)')}</option>
-            {taskOptions.map((task) => (
-              <option key={task.id} value={task.id}>
-                {task.wbs_code} — {task.name}
-              </option>
-            ))}
+            {taskOptions.map((task) => {
+              // Tarefas "pai" (com tarefas-filha) aparecem na lista — servem
+              // de referência pra identificar a etapa, já que filhas de
+              // etapas diferentes podem ter o mesmo nome — mas não podem
+              // ser selecionadas (apontamento só nas tarefas-filha).
+              const isParent = parentTaskIds?.has(task.id)
+              return (
+                <option key={task.id} value={task.id} disabled={isParent}>
+                  {task.wbs_code} — {task.name}
+                  {isParent ? ` (${t('tarefa-pai, selecione uma tarefa-filha')})` : ''}
+                </option>
+              )
+            })}
           </Select>
         </FormField>
         <FormField label={t('Tipo de apontamento')} hint={t('Segue automaticamente o tipo da tarefa (Gestão/Consultoria).')}>
