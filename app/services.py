@@ -1166,7 +1166,8 @@ def resource_utilization(session: Session, *, start: date, end: date, resource_i
             {
                 "resource_id": resource.id,
                 "user_id": resource.user_id,
-                "role_title": resource.role_title,
+                "function": resource.function,
+                "level": resource.level,
                 "period_start": start,
                 "period_end": end,
                 "capacity_hours": capacity_hours,

@@ -198,7 +198,6 @@ def test_list_resources_filters_by_user_and_allows_consultant(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -298,7 +297,6 @@ def test_timesheet_requires_assignment_active_project_and_allows_same_day_duplic
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -344,7 +342,6 @@ def test_only_admin_pm_manage_project_resources_consultant_falls_back_to_it(clie
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -391,7 +388,6 @@ def test_task_assignment_still_restricts_even_with_project_link(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -406,7 +402,6 @@ def test_task_assignment_still_restricts_even_with_project_link(client, setup):
         "/resources",
         json={
             "user_id": other_user_resp["id"],
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -444,7 +439,7 @@ def test_project_manager_can_timesheet_any_task_without_allocation(client, setup
 
     pm_resource = client.post(
         "/resources",
-        json={"user_id": pm.id, "role_title": "Gerente", "internal_cost_per_hour": "80", "billing_rate_per_hour": "150"},
+        json={"user_id": pm.id, "internal_cost_per_hour": "80", "billing_rate_per_hour": "150"},
         headers=admin_headers,
     ).json()
     task = client.post(
@@ -481,7 +476,6 @@ def test_pending_approvals_scoped_to_manager_for_internal_pm(client, db_session,
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -522,7 +516,6 @@ def test_timesheets_filter_by_date_range(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -557,7 +550,6 @@ def test_timesheets_filter_by_client(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -680,7 +672,6 @@ def test_approving_timesheet_updates_task_actual_hours(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -728,7 +719,6 @@ def test_timesheet_blocked_when_project_not_active(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -894,7 +884,6 @@ def test_resource_can_be_linked_to_a_calendar(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
             "calendar_id": calendar["id"],
@@ -913,7 +902,6 @@ def test_resource_can_be_linked_to_a_calendar(client, setup):
         "/resources",
         json={
             "user_id": other_user["id"],
-            "role_title": "Outro",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
             "calendar_id": "id-inexistente",
@@ -929,7 +917,6 @@ def test_update_resource_changes_role_and_cost(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -938,12 +925,13 @@ def test_update_resource_changes_role_and_cost(client, setup):
 
     updated = client.patch(
         f"/resources/{resource['id']}",
-        json={"role_title": "Consultor sênior", "internal_cost_per_hour": "65"},
+        json={"function": "CONSULTANT", "level": 3, "internal_cost_per_hour": "65"},
         headers=admin_headers,
     )
     assert updated.status_code == 200
     body = updated.json()
-    assert body["role_title"] == "Consultor sênior"
+    assert body["function"] == "CONSULTANT"
+    assert body["level"] == 3
     assert float(body["internal_cost_per_hour"]) == 65.0
     # Campos não enviados no PATCH continuam com o valor original.
     assert float(body["billing_rate_per_hour"]) == 100.0
@@ -989,7 +977,6 @@ def test_adhoc_timesheet_without_task_or_project(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -1235,7 +1222,6 @@ def test_resources_utilization_endpoint_requires_internal_role(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -1640,7 +1626,6 @@ def test_delete_task_blocked_when_it_has_timesheet_entries(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -1693,7 +1678,6 @@ def test_closed_task_blocks_new_timesheet(client, setup):
         "/resources",
         json={
             "user_id": setup["consultant"].id,
-            "role_title": "Consultor",
             "internal_cost_per_hour": "50",
             "billing_rate_per_hour": "100",
         },
@@ -1925,7 +1909,7 @@ def test_timesheet_transit_requires_project_and_rejects_task(client, setup):
     consultant_headers = auth_headers(client, setup["consultant"].email)
     client.post(
         "/resources",
-        json={"user_id": setup["consultant"].id, "role_title": "Consultor", "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
         headers=admin_headers,
     )
 
@@ -1962,7 +1946,7 @@ def test_timesheet_transit_has_its_own_bucket_in_financials_by_task_type(client,
     consultant_headers = auth_headers(client, setup["consultant"].email)
     client.post(
         "/resources",
-        json={"user_id": setup["consultant"].id, "role_title": "Consultor", "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
         headers=admin_headers,
     )
     created = client.post(
@@ -1991,7 +1975,7 @@ def test_cannot_timesheet_parent_task_only_child(client, setup):
     ).json()
     resource = client.post(
         "/resources",
-        json={"user_id": setup["consultant"].id, "role_title": "Consultor", "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
         headers=admin_headers,
     ).json()
     client.post(f"/tasks/{parent['id']}/assignments", json={"resource_id": resource["id"], "allocated_hours": "5"}, headers=admin_headers)
@@ -2046,3 +2030,83 @@ def test_project_margin_percentage_is_declared_and_hidden_from_external_roles(cl
     cleared = client.patch(f"/projects/{project_id}", json={"margin_percentage": None}, headers=admin_headers)
     assert cleared.status_code == 200
     assert cleared.json()["margin_percentage"] is None
+
+
+# ---------------------------------------------------------------------------
+# "melhorias, parte 4"
+# ---------------------------------------------------------------------------
+
+
+def test_resource_function_and_level_are_optional_and_structured(client, setup):
+    """Pedido do usuário: Função (categoria) e Nível (1 a 4) substituem o
+    antigo campo de texto livre "role_title" — dois campos independentes,
+    ambos opcionais (decisão confirmada: sem migração automática do texto
+    livre, cada recurso recebe os valores quando alguém editar)."""
+    admin_headers = setup["admin_headers"]
+
+    no_function_no_level = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    )
+    assert no_function_no_level.status_code == 201
+    assert no_function_no_level.json()["function"] is None
+    assert no_function_no_level.json()["level"] is None
+
+    with_both = client.patch(
+        f"/resources/{no_function_no_level.json()['id']}",
+        json={"function": "DEVELOPER", "level": 4},
+        headers=admin_headers,
+    )
+    assert with_both.status_code == 200
+    assert with_both.json()["function"] == "DEVELOPER"
+    assert with_both.json()["level"] == 4
+
+
+def test_resource_level_must_be_between_1_and_4(client, setup):
+    admin_headers = setup["admin_headers"]
+    out_of_range = client.post(
+        "/resources",
+        json={
+            "user_id": setup["consultant"].id,
+            "function": "CONSULTANT",
+            "level": 5,
+            "internal_cost_per_hour": "50",
+            "billing_rate_per_hour": "100",
+        },
+        headers=admin_headers,
+    )
+    assert out_of_range.status_code == 422
+
+
+def test_task_min_level_defaults_to_1_and_is_validated(client, setup):
+    """Pedido do usuário: "Nível mínimo" da tarefa — obrigatório (decisão
+    confirmada), default 1 ("qualquer nível serve") pra não travar criação
+    de tarefas que não se importam com nível."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+
+    default_level = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Sem nível informado", "wbs_code": "30"}, headers=admin_headers
+    )
+    assert default_level.status_code == 201
+    assert default_level.json()["min_level"] == 1
+
+    explicit_level = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Nível 3", "wbs_code": "31", "min_level": 3},
+        headers=admin_headers,
+    )
+    assert explicit_level.status_code == 201
+    assert explicit_level.json()["min_level"] == 3
+
+    out_of_range = client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Nível inválido", "wbs_code": "32", "min_level": 5},
+        headers=admin_headers,
+    )
+    assert out_of_range.status_code == 422
+
+    updated = client.patch(f"/tasks/{explicit_level.json()['id']}", json={"min_level": 2}, headers=admin_headers)
+    assert updated.status_code == 200
+    assert updated.json()["min_level"] == 2

@@ -8,6 +8,27 @@ export const ROLE_LABELS = {
   CLIENT_USER: 'Usuário-chave',
 }
 
+// Função (categoria) e Nível (senioridade) do Recurso (pedido do usuário,
+// "melhorias parte 4") — substituem o antigo campo de texto livre
+// "role_title". Dois campos independentes (ver app/models.py
+// ResourceFunction/Resource.level): RESOURCE_LEVEL_LABELS usa as chaves 1 a
+// 4 (número simples, não um enum — permite comparação >= direta no filtro
+// de "Nível mínimo" da tarefa, ver resourceFunctionLevelLabel abaixo e o
+// filtro de recursos em ProjectDetailPage.jsx).
+export const RESOURCE_FUNCTION_LABELS = {
+  CONSULTANT: 'Consultor',
+  DEVELOPER: 'Desenvolvedor',
+  SPECIALIST: 'Especialista',
+  PROJECT_MANAGER: 'Gerente de Projetos',
+}
+
+export const RESOURCE_LEVEL_LABELS = {
+  1: 'Nível 1',
+  2: 'Nível 2',
+  3: 'Nível 3',
+  4: 'Nível 4',
+}
+
 export const MANAGEMENT_ROLES = ['ADMIN', 'INTERNAL_PM']
 export const INTERNAL_ROLES = ['ADMIN', 'INTERNAL_PM', 'CONSULTANT']
 
@@ -227,6 +248,8 @@ function translateMap(map, lang) {
 export function getLabels(lang) {
   return {
     ROLE_LABELS: translateMap(ROLE_LABELS, lang),
+    RESOURCE_FUNCTION_LABELS: translateMap(RESOURCE_FUNCTION_LABELS, lang),
+    RESOURCE_LEVEL_LABELS: translateMap(RESOURCE_LEVEL_LABELS, lang),
     PROJECT_STATUS_LABELS: translateMap(PROJECT_STATUS_LABELS, lang),
     TASK_STATUS_LABELS: translateMap(TASK_STATUS_LABELS, lang),
     TASK_STATUS_LABELS_SHORT: translateMap(TASK_STATUS_LABELS_SHORT, lang),
@@ -240,4 +263,18 @@ export function getLabels(lang) {
     WEEKDAY_LABELS: WEEKDAY_LABELS.map((day) => translate(lang, day)),
     TIMESHEET_STATUS_LABELS: translateMap(TIMESHEET_STATUS_LABELS, lang),
   }
+}
+
+// Rótulo combinado de Função + Nível do recurso — usado em toda tela que
+// hoje mostra "o cargo do recurso" como texto (ex.: nome de exibição
+// quando o usuário vinculado não está disponível). Substitui o antigo
+// `resource.role_title` (texto livre); `labels` é o resultado de
+// `getLabels(lang)` já traduzido. Qualquer um dos dois campos pode estar
+// vazio (ainda não preenchido, ver Resource.function/level no backend).
+export function resourceFunctionLevelLabel(resource, labels) {
+  if (!resource) return ''
+  const functionLabel = resource.function ? labels.RESOURCE_FUNCTION_LABELS[resource.function] : ''
+  const levelLabel = resource.level ? labels.RESOURCE_LEVEL_LABELS[resource.level] : ''
+  if (functionLabel && levelLabel) return `${functionLabel} · ${levelLabel}`
+  return functionLabel || levelLabel || ''
 }

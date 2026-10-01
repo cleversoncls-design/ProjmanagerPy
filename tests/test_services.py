@@ -88,7 +88,7 @@ def test_financials_hide_no_data_and_calculate_margin():
     db.add_all([client, user]); db.flush()
     project = Project(client_id=client.id, manager_id=user.id, code="PRJ-2", name="Projeto", sold_value=Decimal("1000"))
     db.add(project); db.flush()
-    task = Task(project_id=project.id, name="Tarefa", wbs_code="1"); resource = Resource(user_id=user.id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100"))
+    task = Task(project_id=project.id, name="Tarefa", wbs_code="1"); resource = Resource(user_id=user.id, internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100"))
     db.add_all([task, resource]); db.flush()
     db.add(Timesheet(task_id=task.id, resource_id=resource.id, date=date(2026, 8, 24), hours_spent=Decimal("10")))
     db.add(ProjectExpense(project_id=project.id, description="Viagem", category="Deslocamento", amount=Decimal("100"), expense_date=date(2026, 8, 24))); db.commit()
@@ -104,7 +104,7 @@ def test_financials_include_adhoc_timesheet_allocated_to_project():
     db = session()
     project = _make_project(db, code="PRJ-ADHOC")
     resource = Resource(
-        user_id=project.manager_id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
+        user_id=project.manager_id, internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
     )
     db.add(resource)
     db.flush()
@@ -286,7 +286,7 @@ def test_financials_by_task_type_splits_management_consulting_and_adhoc():
     mgmt_task = Task(project_id=project.id, name="Gestão", wbs_code="1", task_type=TaskType.MANAGEMENT)
     cons_task = Task(project_id=project.id, name="Consultoria", wbs_code="2", task_type=TaskType.CONSULTING)
     resource = Resource(
-        user_id=project.manager_id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
+        user_id=project.manager_id, internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
     )
     db.add_all([mgmt_task, cons_task, resource])
     db.flush()
@@ -313,7 +313,7 @@ def test_project_burndown_reflects_timesheets_and_planned_end_dates():
     project.end_date = date(2026, 8, 17)
     task = Task(project_id=project.id, name="Única", wbs_code="1", estimated_hours=Decimal("10"), planned_end_date=date(2026, 8, 10))
     resource = Resource(
-        user_id=project.manager_id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
+        user_id=project.manager_id, internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
     )
     db.add_all([task, resource])
     db.flush()
@@ -340,7 +340,6 @@ def test_resource_utilization_computes_capacity_and_actual_hours():
     db.add(Holiday(calendar_id=calendar.id, date=date(2026, 8, 5), description="Feriado"))
     resource = Resource(
         user_id=project.manager_id,
-        role_title="Consultor",
         internal_cost_per_hour=Decimal("50"),
         billing_rate_per_hour=Decimal("100"),
         daily_capacity_hours=Decimal("8"),
@@ -368,7 +367,7 @@ def test_velocity_series_buckets_hours_by_week():
     project = _make_project(db, code="PRJ-VEL")
     task = Task(project_id=project.id, name="T", wbs_code="1")
     resource = Resource(
-        user_id=project.manager_id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
+        user_id=project.manager_id, internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
     )
     db.add_all([task, resource])
     db.flush()
@@ -396,7 +395,7 @@ def test_project_roi_uses_margin_over_real_cost():
     project.sold_value = Decimal("1000")
     task = Task(project_id=project.id, name="T", wbs_code="1")
     resource = Resource(
-        user_id=project.manager_id, role_title="Consultor", internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
+        user_id=project.manager_id, internal_cost_per_hour=Decimal("50"), billing_rate_per_hour=Decimal("100")
     )
     db.add_all([task, resource])
     db.flush()

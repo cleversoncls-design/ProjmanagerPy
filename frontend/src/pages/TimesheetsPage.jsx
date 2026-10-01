@@ -20,7 +20,7 @@ import IconButton from '../components/IconButton'
 import { FormField, TextInput, Select } from '../components/FormField'
 import { CheckIcon, XIcon, PencilIcon, TrashIcon } from '../components/icons'
 import { formatDate, formatTime, formatHoursDuration } from '../utils/format'
-import { MANAGEMENT_ROLES, TIMESHEET_STATUS_TONE } from '../utils/labels'
+import { MANAGEMENT_ROLES, TIMESHEET_STATUS_TONE, resourceFunctionLevelLabel } from '../utils/labels'
 import { emptyTimesheetForm, entryToTimesheetForm, previewTimesheetHours, timesheetFormToPayload, isTimesheetEditable } from '../utils/timesheetForm'
 
 function todayIso() {
@@ -73,8 +73,11 @@ export default function TimesheetsPage() {
 
   const usersById = useMemo(() => Object.fromEntries(users.map((u) => [u.id, u])), [users])
   const resourcesById = useMemo(
-    () => Object.fromEntries(resources.map((r) => [r.id, { ...r, userName: usersById[r.user_id]?.name || r.role_title }])),
-    [resources, usersById],
+    () =>
+      Object.fromEntries(
+        resources.map((r) => [r.id, { ...r, userName: usersById[r.user_id]?.name || resourceFunctionLevelLabel(r, labels) || r.id }]),
+      ),
+    [resources, usersById, labels],
   )
   const projectsById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects])
   const tasksById = useMemo(() => Object.fromEntries(allTasks.map((task) => [task.id, task])), [allTasks])
@@ -378,7 +381,7 @@ export default function TimesheetsPage() {
                 <option value="">{t('Todos')}</option>
                 {resources.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {resourcesById[r.id]?.userName || r.role_title}
+                    {resourcesById[r.id]?.userName || r.id}
                   </option>
                 ))}
               </Select>

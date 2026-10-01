@@ -73,18 +73,18 @@ def build_tasks_workbook(session: Session, project: Project) -> bytes:
     task_ids = list(tasks_by_id.keys())
 
     # Recursos alocados por tarefa — mesma regra de exibição do frontend
-    # (TasksTab.resourceLabel): nome do usuário dono do recurso, ou o
-    # cargo (role_title) se o recurso não tiver usuário vinculado.
+    # (TasksTab.resourceLabel): nome do usuário dono do recurso
+    # (Resource.user_id é obrigatório e único, então sempre existe).
     resources_by_task: dict[str, list[str]] = {}
     if task_ids:
         assignment_rows = session.execute(
-            select(TaskAssignment.task_id, User.name, Resource.role_title)
+            select(TaskAssignment.task_id, User.name)
             .join(Resource, Resource.id == TaskAssignment.resource_id)
             .join(User, User.id == Resource.user_id)
             .where(TaskAssignment.task_id.in_(task_ids))
         ).all()
-        for task_id, user_name, role_title in assignment_rows:
-            resources_by_task.setdefault(task_id, []).append(user_name or role_title)
+        for task_id, user_name in assignment_rows:
+            resources_by_task.setdefault(task_id, []).append(user_name)
 
     # Predecessoras por tarefa (sucessora) — mesma regra de exibição do
     # frontend (coluna "Predecessora(s)"): WBS da predecessora + tipo de

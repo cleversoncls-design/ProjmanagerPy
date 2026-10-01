@@ -49,7 +49,7 @@ def list_resources(
     stmt = select(Resource)
     if user_id:
         stmt = stmt.where(Resource.user_id == user_id)
-    return list(db.scalars(stmt.order_by(Resource.role_title)).all())
+    return list(db.scalars(stmt.order_by(Resource.function, Resource.level)).all())
 
 
 @router.get("/utilization", response_model=list[ResourceUtilizationRow])
