@@ -95,6 +95,50 @@ def test_only_admin_can_create_client(client, setup):
     assert allowed.status_code == 201
 
 
+def test_only_admin_can_update_client(client, setup):
+    """Pedido do usuário ("mais melhorias"): "O cadastro de clientes não
+    permite modificar dados" — adicionado PATCH /clients/{id}, com a mesma
+    restrição de create_client (só Administrador)."""
+    client_id = setup["client_a"].id
+    pm_headers = auth_headers(client, setup["pm"].email)
+    admin_headers = setup["admin_headers"]
+
+    denied = client.patch(f"/clients/{client_id}", json={"legal_name": "Tentativa PM"}, headers=pm_headers)
+    assert denied.status_code == 403
+
+    updated = client.patch(
+        f"/clients/{client_id}",
+        json={
+            "legal_name": "Cliente A Atualizado",
+            "address": "Av. Principal 123",
+            "zip_code": "7000",
+            "primary_contact_phone": "+595 981 000000",
+        },
+        headers=admin_headers,
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["legal_name"] == "Cliente A Atualizado"
+    # Campos que ClientRead não expunha antes (pedido "mais melhorias") —
+    # precisam ir e voltar certinho pelo PATCH/GET sem precisar reenviar o
+    # resto do cadastro (exclude_unset no TaskUpdate/ClientUpdate).
+    assert body["address"] == "Av. Principal 123"
+    assert body["zip_code"] == "7000"
+    assert body["primary_contact_phone"] == "+595 981 000000"
+
+    fetched = client.get(f"/clients/{client_id}", headers=admin_headers).json()
+    assert fetched["address"] == "Av. Principal 123"
+    assert fetched["code"] == "CLI-A"  # não mandado no PATCH — permanece intacto
+
+
+def test_update_client_rejects_duplicate_code(client, setup):
+    """Trocar o código de um cliente pro código já usado por outro cliente
+    não pode ser permitido (mesma regra de unicidade do create_client)."""
+    admin_headers = setup["admin_headers"]
+    conflict = client.patch(f"/clients/{setup['client_a'].id}", json={"code": "CLI-B"}, headers=admin_headers)
+    assert conflict.status_code == 409
+
+
 def test_consultant_cannot_administer_project_or_tasks(client, setup):
     """Revisão de acessos do usuário: "Administrar projetos"/"Administrar
     tarefas" ficaram só com Admin/Gerente de Projetos — Consultor perdeu a
@@ -1755,3 +1799,75 @@ def test_calendar_set_default_unsets_previous(client, setup):
 
     first_after = client.get(f"/calendars/{first['id']}", headers=admin_headers).json()
     assert first_after["is_default"] is False
+
+
+def test_task_auto_completes_at_100_percent(client, setup):
+    """Pedido do usuário ("mais melhorias"): quando uma tarefa chega a 100%
+    de progresso, ela muda sozinha pra Concluída — sem precisar que o
+    usuário também mexa no status manualmente."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Tarefa", "wbs_code": "11"}, headers=admin_headers
+    ).json()
+    client.patch(f"/tasks/{task['id']}", json={"status": "IN_PROGRESS"}, headers=admin_headers)
+
+    updated = client.patch(f"/tasks/{task['id']}", json={"progress_percentage": "100"}, headers=admin_headers)
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "COMPLETED"
+    assert float(updated.json()["progress_percentage"]) == 100.0
+
+
+def test_task_auto_complete_does_not_override_explicit_status(client, setup):
+    """O auto-complete em 100% não pode atropelar uma escolha explícita de
+    status mandada no mesmo PATCH — ex.: o usuário encerra (CLOSED) uma
+    tarefa já com 100% de progresso, não deve "voltar" pra COMPLETED."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Tarefa", "wbs_code": "12"}, headers=admin_headers
+    ).json()
+    client.patch(f"/tasks/{task['id']}", json={"status": "IN_PROGRESS"}, headers=admin_headers)
+
+    updated = client.patch(
+        f"/tasks/{task['id']}", json={"progress_percentage": "100", "status": "CLOSED"}, headers=admin_headers
+    )
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "CLOSED"
+
+
+def test_task_auto_complete_with_unchanged_status_in_payload(client, setup):
+    """O formulário de edição do front sempre manda "status" junto no
+    payload (não é um diff) — quando o valor mandado é igual ao que a
+    tarefa já tinha (ou seja, não foi uma troca explícita), o auto-complete
+    em 100% continua disparando normalmente."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Tarefa", "wbs_code": "13"}, headers=admin_headers
+    ).json()
+    client.patch(f"/tasks/{task['id']}", json={"status": "IN_PROGRESS"}, headers=admin_headers)
+
+    updated = client.patch(
+        f"/tasks/{task['id']}",
+        json={"progress_percentage": "100", "status": "IN_PROGRESS", "name": "Tarefa"},
+        headers=admin_headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "COMPLETED"
+
+
+def test_task_auto_complete_does_not_resurrect_closed_task(client, setup):
+    """Uma tarefa já Encerrada (CLOSED) que ganha um PATCH elevando o
+    progresso a 100% sem tocar no status continua Encerrada — o
+    auto-complete não ressuscita um estado já finalizado pra COMPLETED."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Tarefa", "wbs_code": "14"}, headers=admin_headers
+    ).json()
+    client.patch(f"/tasks/{task['id']}", json={"status": "CLOSED"}, headers=admin_headers)
+
+    updated = client.patch(f"/tasks/{task['id']}", json={"progress_percentage": "100"}, headers=admin_headers)
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "CLOSED"

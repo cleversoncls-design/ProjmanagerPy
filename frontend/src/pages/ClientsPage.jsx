@@ -4,9 +4,11 @@ import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
 import Table from '../components/Table'
 import Button from '../components/Button'
+import IconButton from '../components/IconButton'
 import Modal from '../components/Modal'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
+import { PencilIcon } from '../components/icons'
 import { FormField, TextInput } from '../components/FormField'
 import { useLanguage } from '../context/LanguageContext'
 
@@ -31,6 +33,14 @@ export default function ClientsPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  // Editar cliente (pedido do usuário, "mais melhorias": "O cadastro de
+  // clientes não permite modificar dados") — modal separado do de criação,
+  // mesmo padrão já usado em UsersPage (editTarget/editForm).
+  const [editTarget, setEditTarget] = useState(null)
+  const [editForm, setEditForm] = useState(null)
+  const [editFormError, setEditFormError] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
 
   function loadClients() {
     setLoading(true)
@@ -64,6 +74,43 @@ export default function ClientsPage() {
     }
   }
 
+  function openEditModal(row) {
+    setEditTarget(row)
+    setEditForm({
+      code: row.code,
+      legal_name: row.legal_name,
+      trade_name: row.trade_name || '',
+      tax_id: row.tax_id || '',
+      city: row.city || '',
+      state: row.state || '',
+      primary_contact_name: row.primary_contact_name || '',
+      primary_contact_email: row.primary_contact_email || '',
+      primary_contact_phone: row.primary_contact_phone || '',
+    })
+    setEditFormError('')
+  }
+
+  function updateEditField(field) {
+    return (event) => setEditForm((prev) => ({ ...prev, [field]: event.target.value }))
+  }
+
+  async function handleSaveEdit(event) {
+    event.preventDefault()
+    setEditFormError('')
+    setSavingEdit(true)
+    try {
+      const payload = Object.fromEntries(Object.entries(editForm).filter(([, value]) => value !== ''))
+      await clientsApi.updateClient(editTarget.id, payload)
+      setEditTarget(null)
+      setEditForm(null)
+      loadClients()
+    } catch (err) {
+      setEditFormError(err.message)
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
   return (
     <div>
       <PageHeader
@@ -85,6 +132,16 @@ export default function ClientsPage() {
               { key: 'location', header: t('Cidade/UF'), render: (row) => [row.city, row.state].filter(Boolean).join('/') || '—' },
               { key: 'primary_contact_name', header: t('Contato') },
               { key: 'primary_contact_email', header: t('E-mail do contato') },
+              {
+                key: 'actions',
+                header: '',
+                align: 'right',
+                render: (row) => (
+                  <div className="flex justify-end">
+                    <IconButton icon={PencilIcon} label={t('Editar')} onClick={() => openEditModal(row)} />
+                  </div>
+                ),
+              },
             ]}
             rows={clients}
             getRowKey={(row) => row.id}
@@ -140,6 +197,59 @@ export default function ClientsPage() {
               </Button>
               <Button type="submit" disabled={submitting}>
                 {submitting ? t('Salvando…') : t('Salvar')}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {editTarget && editForm && (
+        <Modal title={`${t('Editar cliente')} — ${editTarget.legal_name}`} onClose={() => setEditTarget(null)} wide>
+          <form onSubmit={handleSaveEdit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label={t('Código')} required>
+                <TextInput required value={editForm.code} onChange={updateEditField('code')} />
+              </FormField>
+              <FormField label={t('Razão social')} required>
+                <TextInput required value={editForm.legal_name} onChange={updateEditField('legal_name')} />
+              </FormField>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label={t('Nome fantasia')}>
+                <TextInput value={editForm.trade_name} onChange={updateEditField('trade_name')} />
+              </FormField>
+              <FormField label="CNPJ/CPF">
+                <TextInput value={editForm.tax_id} onChange={updateEditField('tax_id')} />
+              </FormField>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label={t('Cidade')}>
+                <TextInput value={editForm.city} onChange={updateEditField('city')} />
+              </FormField>
+              <FormField label="UF" hint={t('2 letras')}>
+                <TextInput maxLength={2} value={editForm.state} onChange={updateEditField('state')} />
+              </FormField>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <FormField label={t('Nome do contato')}>
+                <TextInput value={editForm.primary_contact_name} onChange={updateEditField('primary_contact_name')} />
+              </FormField>
+              <FormField label={t('E-mail do contato')}>
+                <TextInput type="email" value={editForm.primary_contact_email} onChange={updateEditField('primary_contact_email')} />
+              </FormField>
+              <FormField label={t('Telefone do contato')}>
+                <TextInput value={editForm.primary_contact_phone} onChange={updateEditField('primary_contact_phone')} />
+              </FormField>
+            </div>
+
+            <ErrorBanner message={editFormError} />
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="secondary" onClick={() => setEditTarget(null)}>
+                {t('Cancelar')}
+              </Button>
+              <Button type="submit" disabled={savingEdit}>
+                {savingEdit ? t('Salvando…') : t('Salvar')}
               </Button>
             </div>
           </form>

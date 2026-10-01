@@ -11,3 +11,7 @@ export function createClient(payload) {
 export function getClient(clientId) {
   return api.get(`/clients/${clientId}`)
 }
+
+export function updateClient(clientId, payload) {
+  return api.patch(`/clients/${clientId}`, payload)
+}

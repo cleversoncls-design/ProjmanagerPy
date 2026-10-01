@@ -10,7 +10,19 @@ from ..audit import record_audit
 from ..database import get_db
 from ..deps import EXTERNAL_ROLES, get_current_user, require_project_access
 from ..i18n import t as translate
-from ..models import AuditAction, Project, Resource, Task, TaskApprovalStatus, TaskAssignment, TaskDependency, Timesheet, User
+from ..models import (
+    TASK_FINISHED_STATUSES,
+    AuditAction,
+    Project,
+    Resource,
+    Task,
+    TaskApprovalStatus,
+    TaskAssignment,
+    TaskDependency,
+    TaskStatus,
+    Timesheet,
+    User,
+)
 from ..schemas import (
     RescheduleRequest,
     TaskAssignmentCreate,
@@ -150,8 +162,30 @@ def update_task(
         or "planned_start_date" in changes
         or "planned_end_date" in changes
     )
+    previous_status = task.status
     for field, value in changes.items():
         setattr(task, field, value)
+    # "Quando a tarefa for completada com 100%, muda pra finalizada" (pedido
+    # do usuário) — dispara quando o progress_percentage deste PATCH chega a
+    # 100. O form de edição (ProjectDetailPage.jsx) sempre manda "status"
+    # junto no payload (é um form completo, não um diff), então não dá pra
+    # checar só "status" in changes" pra saber se foi uma escolha explícita:
+    # comparamos o valor recebido com o status que a tarefa já tinha antes
+    # deste PATCH — só conta como escolha explícita (e então não mexe) se o
+    # valor enviado for DIFERENTE do anterior (ex.: usuário escolheu
+    # Encerrada/Não iniciada de propósito junto com os 100%). Também não
+    # ressuscita uma tarefa que já estava Concluída/Encerrada. Entra em
+    # "changes" pra aparecer no audit log também.
+    status_explicitly_changed = "status" in changes and changes["status"] != previous_status
+    if (
+        "progress_percentage" in changes
+        and not status_explicitly_changed
+        and task.status not in TASK_FINISHED_STATUSES
+        and task.progress_percentage is not None
+        and Decimal(task.progress_percentage) >= 100
+    ):
+        task.status = TaskStatus.COMPLETED
+        changes["status"] = TaskStatus.COMPLETED
     if duration_days is not None or estimated_hours is not None:
         apply_effort_driven(
             task,

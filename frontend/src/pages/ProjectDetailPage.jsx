@@ -29,6 +29,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ClockIcon,
   ColumnsIcon,
   CopyIcon,
   DownloadIcon,
@@ -869,6 +870,25 @@ function buildOrderedTasks(tasks) {
   return ordered
 }
 
+/** Linhas realmente visíveis de uma árvore já achatada (buildOrderedTasks)
+ * depois de remover a descendência de toda tarefa-pai recolhida — mesma
+ * lógica de "Expandir/recolher" (+/-, estilo MS Project) reusada pela aba
+ * Tarefas e pelo Gantt. */
+function filterCollapsedTasks(orderedTasks, collapsedTaskIds) {
+  if (collapsedTaskIds.size === 0) return orderedTasks
+  const visible = []
+  let skipFromDepth = null
+  for (const task of orderedTasks) {
+    if (skipFromDepth !== null) {
+      if (task.depth > skipFromDepth) continue
+      skipFromDepth = null
+    }
+    visible.push(task)
+    if (collapsedTaskIds.has(task.id)) skipFromDepth = task.depth
+  }
+  return visible
+}
+
 // Colunas "do meio" da grade de Tarefas (entre o nome da tarefa e as ações
 // da linha) que o usuário pode reordenar/esconder — da mesma forma que o
 // pedido descreveu: "de duração até aprovação do cliente". WBS/nome (fixas
@@ -1007,6 +1027,52 @@ function ColumnsModal({ order, hidden, onClose, onSave }) {
   )
 }
 
+/** Confirmação antes de marcar TODAS as tarefas elegíveis do projeto como
+ * "Em andamento" de uma vez (pedido do usuário). Só afeta Não
+ * iniciada/Atrasada — Concluída e Encerrada (desativada) ficam como
+ * estavam, pra não desfazer um trabalho já fechado (decisão confirmada
+ * com o usuário). Sem endpoint de bulk update no backend: PATCH um a um,
+ * mesmo padrão já usado em ServiceOrdersPage.handleBulkStatus. */
+function StartAllTasksConfirmModal({ count, onClose, onConfirm }) {
+  const { t } = useLanguage()
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleConfirm() {
+    setSaving(true)
+    setError('')
+    try {
+      await onConfirm()
+      onClose()
+    } catch (err) {
+      setError(err.message)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={t('Marcar todas como Em andamento?')} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--text-secondary)]">
+          {t(
+            'Muda {n} tarefa(s) Não iniciada/Atrasada para Em andamento. Tarefas Concluídas ou Encerradas não são afetadas.',
+            { n: count },
+          )}
+        </p>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="button" disabled={saving} onClick={handleConfirm}>
+            {saving ? t('Atualizando…') : t('Confirmar')}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 /** Modal de confirmação pra apagar uma tarefa — a API recusa (409) quando
  * ela tem filhas na EAP ou já tem apontamento de horas lançado (ver
  * DELETE /tasks/{id}); a mensagem de erro do backend já explica qual dos
@@ -1068,6 +1134,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
   const [showBaselineModal, setShowBaselineModal] = useState(false)
   const [showColumnsModal, setShowColumnsModal] = useState(false)
   const [showCopyTasksModal, setShowCopyTasksModal] = useState(false)
+  const [showStartAllModal, setShowStartAllModal] = useState(false)
   const [columnPrefs, setColumnPrefs] = useState(loadTaskColumnPrefs)
   // Expandir/recolher tarefas-pai (+ -, estilo MS Project) — só visual, não
   // persiste entre sessões (reabrir a tela sempre mostra tudo expandido).
@@ -1115,20 +1182,11 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
   // recolhida. orderedTasks continua intacto (usado por outros lugares,
   // como os seletores de pai/predecessora, que precisam enxergar tudo
   // independente do que está recolhido na grade).
-  const visibleTasks = useMemo(() => {
-    if (collapsedTaskIds.size === 0) return orderedTasks
-    const visible = []
-    let skipFromDepth = null
-    for (const task of orderedTasks) {
-      if (skipFromDepth !== null) {
-        if (task.depth > skipFromDepth) continue
-        skipFromDepth = null
-      }
-      visible.push(task)
-      if (collapsedTaskIds.has(task.id)) skipFromDepth = task.depth
-    }
-    return visible
-  }, [orderedTasks, collapsedTaskIds])
+  const visibleTasks = useMemo(() => filterCollapsedTasks(orderedTasks, collapsedTaskIds), [orderedTasks, collapsedTaskIds])
+  const startEligibleCount = useMemo(
+    () => (schedule?.tasks || []).filter((t) => t.status === 'NOT_STARTED' || t.status === 'DELAYED').length,
+    [schedule],
+  )
 
   function toggleTaskCollapsed(taskId) {
     setCollapsedTaskIds((prev) => {
@@ -1192,6 +1250,20 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
     withBusy(nextStatus === 'CLOSED' ? t('Desativando tarefa…') : t('Ativando tarefa…'), () =>
       tasksApi.updateTask(task.id, { status: nextStatus }),
     )
+  }
+
+  /** "Marcar todas como Em andamento" (pedido do usuário) — só as tarefas
+   * Não iniciada/Atrasada entram; Concluída/Encerrada ficam como estavam
+   * (decisão confirmada com o usuário). PATCH um a um (não existe bulk
+   * update no backend) — deixa o erro propagar pro catch do próprio modal
+   * de confirmação (StartAllTasksConfirmModal), em vez de usar withBusy
+   * (que engole o erro em setError e fecharia o modal mesmo numa falha). */
+  async function handleStartAllTasks() {
+    const eligible = (schedule?.tasks || []).filter((t) => t.status === 'NOT_STARTED' || t.status === 'DELAYED')
+    for (const task of eligible) {
+      await tasksApi.updateTask(task.id, { status: 'IN_PROGRESS' })
+    }
+    loadSchedule()
   }
 
   async function handleExport() {
@@ -1463,6 +1535,12 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
                 onClick={() => withBusy(t('Recalculando datas do projeto…'), () => tasksApi.rescheduleProject(projectId))}
               />
               <IconButton
+                icon={ClockIcon}
+                label={t('Marcar todas como Em andamento')}
+                disabled={Boolean(busyMessage) || startEligibleCount === 0}
+                onClick={() => setShowStartAllModal(true)}
+              />
+              <IconButton
                 icon={PlusIcon}
                 label={t('Nova tarefa')}
                 variant="primary"
@@ -1490,6 +1568,10 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
 
       {showCopyTasksModal && (
         <CopyTasksModal projectId={projectId} onClose={() => setShowCopyTasksModal(false)} onCopied={handleTasksCopied} />
+      )}
+
+      {showStartAllModal && (
+        <StartAllTasksConfirmModal count={startEligibleCount} onClose={() => setShowStartAllModal(false)} onConfirm={handleStartAllTasks} />
       )}
 
       {showColumnsModal && (
@@ -2296,6 +2378,22 @@ function GanttTab({ projectId, project }) {
   // parent_task_id (mesmo critério usado na aba Tarefas). Precisa ficar
   // antes dos "return" condicionais abaixo — hooks não podem vir depois.
   const parentTaskIds = useMemo(() => new Set((data?.tasks || []).map((task) => task.parent_task_id).filter(Boolean)), [data])
+  // Expandir/recolher tarefas-pai (+ -, estilo MS Project) — mesma lógica
+  // da aba Tarefas (buildOrderedTasks/filterCollapsedTasks), reaproveitada
+  // aqui. orderedTasks dá a ordem hierárquica + depth; visibleTasks é o que
+  // realmente é desenhado (linhas da timeline e do PNG exportado).
+  const [collapsedTaskIds, setCollapsedTaskIds] = useState(() => new Set())
+  const orderedTasks = useMemo(() => buildOrderedTasks(data?.tasks || []), [data])
+  const visibleTasks = useMemo(() => filterCollapsedTasks(orderedTasks, collapsedTaskIds), [orderedTasks, collapsedTaskIds])
+
+  function toggleTaskCollapsed(taskId) {
+    setCollapsedTaskIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(taskId)) next.delete(taskId)
+      else next.add(taskId)
+      return next
+    })
+  }
 
   if (loading) return <Spinner />
   if (error) return <ErrorBanner message={error} />
@@ -2348,7 +2446,7 @@ function GanttTab({ projectId, project }) {
     const padX = 16
     const padY = 12
     const width = GANTT_LABEL_COL_PX + layout.totalWidthPx + padX * 2
-    const height = headerH + data.tasks.length * rowH + legendH + padY * 2
+    const height = headerH + visibleTasks.length * rowH + legendH + padY * 2
 
     const scale = 2 // resolução maior pra ficar nítido ao ampliar/imprimir
     const canvas = document.createElement('canvas')
@@ -2362,6 +2460,8 @@ function GanttTab({ projectId, project }) {
     const grid = resolveGanttColor('var(--grid)')
     const textSecondary = resolveGanttColor('var(--text-secondary)')
     const textMuted = resolveGanttColor('var(--text-muted)')
+    const progressGood = resolveGanttColor('var(--status-good)')
+    const progressWarning = resolveGanttColor('var(--status-warning)')
 
     ctx.fillStyle = surface
     ctx.fillRect(0, 0, width, height)
@@ -2417,11 +2517,13 @@ function GanttTab({ projectId, project }) {
     ctx.stroke()
 
     ctx.font = '11px sans-serif'
-    data.tasks.forEach((task, idx) => {
+    visibleTasks.forEach((task, idx) => {
       const y = headerH + idx * rowH
       const start = ganttStart(task)
       const end = ganttEnd(task)
       const color = resolveGanttColor(TASK_TYPE_COLORS[task.task_type] || 'var(--text-muted)')
+      const progress = Math.min(100, Math.max(0, Number(task.progress_percentage) || 0))
+      const progressColor = progress >= 100 ? progressGood : progress > 0 ? progressWarning : null
 
       ctx.strokeStyle = border
       layout.units.forEach((u) => {
@@ -2438,7 +2540,7 @@ function GanttTab({ projectId, project }) {
       // aparece na tela (ver isParentTask/parentTaskIds no JSX abaixo).
       ctx.font = parentTaskIds.has(task.id) ? 'bold 11px sans-serif' : '11px sans-serif'
       const label = `${task.wbs_code} ${task.name}`
-      ctx.fillText(ganttTruncateForCanvas(ctx, label, GANTT_LABEL_COL_PX - 8), 0, y + rowH / 2)
+      ctx.fillText(ganttTruncateForCanvas(ctx, label, GANTT_LABEL_COL_PX - 8 - task.depth * 10), task.depth * 10, y + rowH / 2)
       ctx.font = '11px sans-serif'
 
       if (start && end) {
@@ -2454,19 +2556,33 @@ function GanttTab({ projectId, project }) {
           ctx.restore()
         } else {
           const w = layout.pxWidthBetween(start, end)
-          ganttRoundRect(ctx, left, y + rowH / 2 - 6, w, 12, 3)
+          const barY = y + rowH / 2 - 6
+          ganttRoundRect(ctx, left, barY, w, 12, 3)
           ctx.fill()
+          // % de progresso em outra cor (laranja parcial, verde concluído —
+          // pedido do usuário), clipado ao mesmo contorno arredondado da
+          // barra pra não "vazar" quadrado pelos cantos.
+          if (progressColor) {
+            ctx.save()
+            ganttRoundRect(ctx, left, barY, w, 12, 3)
+            ctx.clip()
+            ctx.fillStyle = progressColor
+            ctx.fillRect(left, barY, w * (progress / 100), 12)
+            ctx.restore()
+          }
         }
       }
     })
 
-    const legendY = headerH + data.tasks.length * rowH + legendH / 2
+    const legendY = headerH + visibleTasks.length * rowH + legendH / 2
     ctx.font = '10px sans-serif'
     ctx.textAlign = 'left'
     let lx = 0
     ;[
       { label: t('Consultoria'), color: resolveGanttColor(TASK_TYPE_COLORS.CONSULTING) },
       { label: t('Gestão'), color: resolveGanttColor(TASK_TYPE_COLORS.MANAGEMENT) },
+      { label: t('Progresso parcial'), color: progressWarning },
+      { label: t('Progresso concluído'), color: progressGood },
     ].forEach((item) => {
       ctx.fillStyle = item.color
       ctx.beginPath()
@@ -2514,7 +2630,19 @@ function GanttTab({ projectId, project }) {
             </Button>
           )}
         </div>
-        <IconButton icon={DownloadIcon} label={t('Exportar PNG')} onClick={handleExportPng} />
+        <div className="flex gap-1.5">
+          {parentTaskIds.size > 0 && (
+            <>
+              <IconButton icon={ChevronDownIcon} label={t('Expandir tudo')} onClick={() => setCollapsedTaskIds(new Set())} />
+              <IconButton
+                icon={ChevronRightIcon}
+                label={t('Recolher tudo')}
+                onClick={() => setCollapsedTaskIds(new Set(parentTaskIds))}
+              />
+            </>
+          )}
+          <IconButton icon={DownloadIcon} label={t('Exportar PNG')} onClick={handleExportPng} />
+        </div>
       </div>
 
       <div className="overflow-x-auto">
@@ -2548,13 +2676,15 @@ function GanttTab({ projectId, project }) {
           </div>
 
           <div className="mt-1 space-y-0.5">
-            {data.tasks.map((task) => {
+            {visibleTasks.map((task) => {
               const start = ganttStart(task)
               const end = ganttEnd(task)
               const hasDates = Boolean(start && end)
               const color = TASK_TYPE_COLORS[task.task_type] || 'var(--text-muted)'
               const preds = predecessorCount[task.id] || 0
               const isParentTask = parentTaskIds.has(task.id)
+              const progress = Math.min(100, Math.max(0, Number(task.progress_percentage) || 0))
+              const progressColor = progress >= 100 ? 'var(--status-good)' : progress > 0 ? 'var(--status-warning)' : null
               return (
                 // Sem "items-center" aqui de propósito: com ele, a coluna
                 // fixa (sticky) abaixo só ficava tão alta quanto o texto
@@ -2571,9 +2701,21 @@ function GanttTab({ projectId, project }) {
                     className={`sticky left-0 z-10 flex shrink-0 items-center truncate bg-[var(--surface)] pr-2 text-xs text-[var(--text-secondary)] ${
                       isParentTask ? 'font-semibold' : ''
                     }`}
-                    style={{ width: GANTT_LABEL_COL_PX, height: GANTT_ROW_PX }}
+                    style={{ width: GANTT_LABEL_COL_PX, height: GANTT_ROW_PX, paddingLeft: task.depth * 14 }}
                     title={task.name}
                   >
+                    {isParentTask ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleTaskCollapsed(task.id)}
+                        title={collapsedTaskIds.has(task.id) ? t('Expandir') : t('Recolher')}
+                        className="mr-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--page)]"
+                      >
+                        {collapsedTaskIds.has(task.id) ? <ChevronRightIcon className="h-3 w-3" /> : <ChevronDownIcon className="h-3 w-3" />}
+                      </button>
+                    ) : (
+                      <span className="mr-0.5 inline-block h-4 w-4 shrink-0" />
+                    )}
                     <span className="text-[var(--text-muted)]">{task.wbs_code}</span> {task.name}
                     {preds > 0 && (
                       <span className="text-[var(--text-muted)]">
@@ -2599,14 +2741,21 @@ function GanttTab({ projectId, project }) {
                         />
                       ) : (
                         <span
-                          className="absolute top-1/2 h-4 -translate-y-1/2 rounded"
+                          className="absolute top-1/2 h-4 -translate-y-1/2 overflow-hidden rounded"
                           style={{
                             left: layout.pxFromDate(start),
                             width: layout.pxWidthBetween(start, end),
                             backgroundColor: color,
                           }}
-                          title={`${formatDate(start)} – ${formatDate(end)}`}
-                        />
+                          title={`${formatDate(start)} – ${formatDate(end)} · ${formatPercent(progress)}`}
+                        >
+                          {/* % de progresso em outra cor (laranja parcial,
+                              verde concluído — pedido do usuário), preenchida
+                              da esquerda pra direita por cima da cor de tipo
+                              da tarefa (que continua visível no restante da
+                              barra). */}
+                          {progressColor && <span className="block h-full" style={{ width: `${progress}%`, backgroundColor: progressColor }} />}
+                        </span>
                       )
                     ) : (
                       <span className="absolute inset-y-0 left-2 flex items-center text-xs text-[var(--text-muted)]">{t('sem datas')}</span>
@@ -2631,6 +2780,14 @@ function GanttTab({ projectId, project }) {
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rotate-45" style={{ backgroundColor: 'var(--text-muted)' }} />
           {t('Marco')}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: 'var(--status-warning)' }} />
+          {t('Progresso parcial')}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: 'var(--status-good)' }} />
+          {t('Progresso concluído')}
         </span>
       </div>
     </Card>
