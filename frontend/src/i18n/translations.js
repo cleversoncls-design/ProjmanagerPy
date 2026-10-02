@@ -707,6 +707,12 @@ export const es = {
     'No es posible cambiar el consultor de una agenda ya creada — elimínela y cree una nueva.',
   'Mover agendamento?': '¿Mover agenda?',
   'Mover de {from} para {to}?': '¿Mover de {from} a {to}?',
+  // Tarefas vinculadas ao bloco da Agenda (pedido do usuário: "adicionar
+  // uma ou mais tarefas, sem horas, para a agenda") — ver
+  // ResourceScheduleTask, app/models.py.
+  'Selecione um projeto para escolher as tarefas.': 'Seleccione un proyecto para elegir las tareas.',
+  'Este projeto ainda não tem tarefas cadastradas.': 'Este proyecto todavía no tiene tareas registradas.',
+  'Opcional — o que o consultor precisa trabalhar neste bloco.': 'Opcional — lo que el consultor necesita trabajar en este bloque.',
 
   // --- Apontamento de horas (Fase 2 do agendamento) ---
   'Apontamento de horas': 'Registro de horas',

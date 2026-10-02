@@ -2183,6 +2183,111 @@ def test_schedule_blocked_on_resource_absence_day(client, setup):
     assert now_ok.status_code == 201
 
 
+def test_schedule_tasks_checklist(client, setup):
+    """Pedido do usuário: um bloco da Agenda pode levar uma ou mais tarefas
+    — sem hora própria, só uma lista do que o consultor precisa trabalhar
+    naquele horário (ver ResourceScheduleTask, app/models.py). Precisam
+    pertencer ao mesmo projeto do agendamento e não ter tarefas-filhas
+    (mesma regra do apontamento de horas)."""
+    project_a_id = setup["project_a"].id
+    project_b_id = setup["project_b"].id
+    admin_headers = setup["admin_headers"]
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+
+    parent = client.post(f"/projects/{project_a_id}/tasks", json={"name": "Compras", "wbs_code": "50"}, headers=admin_headers).json()
+    child = client.post(
+        f"/projects/{project_a_id}/tasks",
+        json={"name": "Configurar Cotação", "wbs_code": "50.1", "parent_task_id": parent["id"]},
+        headers=admin_headers,
+    ).json()
+    other_task = client.post(
+        f"/projects/{project_a_id}/tasks", json={"name": "Configurar Pedido de Compras", "wbs_code": "51"}, headers=admin_headers
+    ).json()
+    task_other_project = client.post(
+        f"/projects/{project_b_id}/tasks", json={"name": "Tarefa de outro projeto", "wbs_code": "1"}, headers=admin_headers
+    ).json()
+
+    # Tarefa de outro projeto é recusada.
+    wrong_project = client.post(
+        "/resource-schedules",
+        json={
+            "resource_id": resource["id"],
+            "project_id": project_a_id,
+            "date": "2026-08-29",
+            "start_time": "08:00",
+            "end_time": "18:00",
+            "task_ids": [task_other_project["id"]],
+        },
+        headers=admin_headers,
+    )
+    assert wrong_project.status_code == 422
+
+    # Tarefa "pai" (tem tarefa-filha) é recusada — só tarefa-folha.
+    is_parent = client.post(
+        "/resource-schedules",
+        json={
+            "resource_id": resource["id"],
+            "project_id": project_a_id,
+            "date": "2026-08-29",
+            "start_time": "08:00",
+            "end_time": "18:00",
+            "task_ids": [parent["id"]],
+        },
+        headers=admin_headers,
+    )
+    assert is_parent.status_code == 422
+
+    # Duas tarefas-folha do mesmo projeto: ok, aparecem na leitura.
+    created = client.post(
+        "/resource-schedules",
+        json={
+            "resource_id": resource["id"],
+            "project_id": project_a_id,
+            "date": "2026-08-29",
+            "start_time": "08:00",
+            "end_time": "18:00",
+            "task_ids": [child["id"], other_task["id"]],
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    created_body = created.json()
+    assert {t["id"] for t in created_body["tasks"]} == {child["id"], other_task["id"]}
+
+    # PATCH substitui a lista inteira (não soma) — e sem informar task_ids,
+    # a lista existente permanece intacta (mesmo critério de PATCH parcial
+    # do resto do endpoint).
+    untouched = client.patch(f"/resource-schedules/{created_body['id']}", json={"description": "ajuste"}, headers=admin_headers)
+    assert untouched.status_code == 200
+    assert {t["id"] for t in untouched.json()["tasks"]} == {child["id"], other_task["id"]}
+
+    replaced = client.patch(
+        f"/resource-schedules/{created_body['id']}", json={"task_ids": [other_task["id"]]}, headers=admin_headers
+    )
+    assert replaced.status_code == 200
+    assert [t["id"] for t in replaced.json()["tasks"]] == [other_task["id"]]
+
+    cleared = client.patch(f"/resource-schedules/{created_body['id']}", json={"task_ids": []}, headers=admin_headers)
+    assert cleared.status_code == 200
+    assert cleared.json()["tasks"] == []
+
+    # Trocar o projeto do agendamento sem informar task_ids limpa as tarefas
+    # vinculadas — elas eram do projeto antigo e não fazem mais sentido.
+    with_task = client.patch(
+        f"/resource-schedules/{created_body['id']}", json={"task_ids": [other_task["id"]]}, headers=admin_headers
+    )
+    assert with_task.status_code == 200
+    project_changed = client.patch(
+        f"/resource-schedules/{created_body['id']}", json={"project_id": project_b_id}, headers=admin_headers
+    )
+    assert project_changed.status_code == 200
+    assert project_changed.json()["tasks"] == []
+
+
 def test_hours_breakdown_report_aggregates_project_transit_and_absence_hours(client, setup):
     """Pedido do usuário: um relatório que acompanhe, no mesmo lugar, horas
     de projeto, Traslado e ausência — totais da empresa e por consultor

@@ -478,6 +478,12 @@ class ResourceScheduleCreate(BaseModel):
     start_time: time
     end_time: time
     description: str | None = None
+    # Tarefas do bloco (pedido do usuário: "adicionar uma ou mais tarefas,
+    # sem horas, para a agenda") — precisam pertencer a `project_id` e não
+    # ter tarefas-filhas (mesma regra de "só tarefa-folha" do apontamento de
+    # horas, ver _resolve_task_and_project em routers/timesheets.py);
+    # validado em create_schedule, routers/schedules.py.
+    task_ids: list[str] = []
 
 
 class ResourceScheduleUpdate(BaseModel):
@@ -501,6 +507,10 @@ class ResourceScheduleUpdate(BaseModel):
     start_time: time | None = None
     end_time: time | None = None
     description: str | None = None
+    # None = não mexe na lista de tarefas; uma lista (mesmo vazia) substitui
+    # a lista inteira — mesmo critério de "PATCH parcial" do resto da classe
+    # (`exclude_unset`, ver update_schedule em routers/schedules.py).
+    task_ids: list[str] | None = None
 
 
 class ResourceScheduleRead(ORMModel):
@@ -512,6 +522,9 @@ class ResourceScheduleRead(ORMModel):
     end_time: time
     description: str | None
     created_at: datetime
+    # Lista do que o consultor precisa trabalhar neste bloco (pedido do
+    # usuário) — ver ResourceSchedule.tasks (app/models.py).
+    tasks: list[TaskRead] = []
 
 
 # ---------------------------------------------------------------------------

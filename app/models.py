@@ -444,6 +444,41 @@ class ResourceSchedule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     resource: Mapped[Resource] = relationship()
     project: Mapped[Project] = relationship()
+    # Tarefas vinculadas ao bloco (pedido do usuário: "adicionar uma ou mais
+    # tarefas, sem horas, para a agenda" — o consultor vê, ao abrir o
+    # agendamento, o que precisa trabalhar naquele horário). Sem hora
+    # própria por tarefa: a hora é só a do bloco inteiro (start_time/
+    # end_time acima); não confundir com TaskAssignment (aloca capacidade
+    # na tarefa) nem com Timesheet.task_id (apontamento de verdade, feito
+    # depois). order_by created_at preserva a ordem em que as tarefas foram
+    # adicionadas (ver ResourceScheduleTask abaixo).
+    schedule_tasks: Mapped[list["ResourceScheduleTask"]] = relationship(
+        back_populates="schedule", cascade="all, delete-orphan", order_by="ResourceScheduleTask.created_at"
+    )
+
+    @property
+    def tasks(self) -> list["Task"]:
+        """Achata `schedule_tasks` (ResourceScheduleTask, a tabela de
+        ligação) para list[Task] — é isso que ResourceScheduleRead.tasks
+        (TaskRead) espera; o modelo de ligação em si nunca precisa vazar
+        pra fora da API."""
+        return [link.task for link in self.schedule_tasks]
+
+
+class ResourceScheduleTask(Base):
+    """Ligação agenda↔tarefa (pedido do usuário) — puramente uma lista do
+    que fazer naquele bloco, sem `allocated_hours` (diferente de
+    TaskAssignment): a tarefa aparece na Agenda só como item de checklist,
+    nunca lança hora sozinha."""
+
+    __tablename__ = "resource_schedule_tasks"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    schedule_id: Mapped[str] = mapped_column(ForeignKey("resource_schedules.id", ondelete="CASCADE"), nullable=False, index=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    __table_args__ = (UniqueConstraint("schedule_id", "task_id", name="uq_schedule_task"),)
+    schedule: Mapped[ResourceSchedule] = relationship(back_populates="schedule_tasks")
+    task: Mapped["Task"] = relationship()
 
 
 class TaskAssignment(Base):

@@ -5,6 +5,7 @@ import * as resourcesApi from '../api/resources'
 import * as usersApi from '../api/users'
 import * as clientsApi from '../api/clients'
 import * as projectsApi from '../api/projects'
+import * as tasksApi from '../api/tasks'
 import * as calendarsApi from '../api/calendars'
 import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
@@ -88,6 +89,7 @@ export default function SchedulesPage() {
   const [users, setUsers] = useState([])
   const [clients, setClients] = useState([])
   const [projects, setProjects] = useState([])
+  const [allTasks, setAllTasks] = useState([])
   const [schedules, setSchedules] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -113,11 +115,19 @@ export default function SchedulesPage() {
 
   // Referência (recursos/usuários/clientes/projetos) carregada uma vez —
   // usada pros filtros e pra montar os rótulos/cores dos blocos da agenda.
+  // Tarefas de todos os projetos (mesmo padrão de TimesheetsPage.jsx)
+  // alimentam o checklist "Tarefas" do agendamento (pedido do usuário).
   useEffect(() => {
     resourcesApi.listResources().then(setResources).catch(() => {})
     usersApi.listUsers().then(setUsers).catch(() => {})
     clientsApi.listClients().then(setClients).catch(() => {})
-    projectsApi.listProjects().then(setProjects).catch(() => {})
+    projectsApi
+      .listProjects()
+      .then((rows) => {
+        setProjects(rows)
+        Promise.all(rows.map((p) => tasksApi.listTasks(p.id).catch(() => []))).then((lists) => setAllTasks(lists.flat()))
+      })
+      .catch(() => {})
   }, [])
 
   // Carrega os feriados do calendário padrão uma única vez (lista de
@@ -422,6 +432,7 @@ export default function SchedulesPage() {
           defaultDate={formTarget.date}
           resourceOptions={resourceOptions}
           projects={projects}
+          allTasks={allTasks}
           canManage={canManage}
           onClose={() => setFormTarget(null)}
           onSaved={() => {
@@ -542,7 +553,7 @@ function MoveScheduleConfirmModal({ schedule, newDate, resourceName, projectLabe
  * campos ficam desabilitados e os botões Salvar/Excluir somem, sobrando
  * só "Fechar". Reforça na UI o que a API já impõe (_MANAGE_ROLES em
  * routers/schedules.py). */
-function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, canManage, onClose, onSaved }) {
+function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, allTasks, canManage, onClose, onSaved }) {
   const { t, labels } = useLanguage()
   const isEdit = Boolean(schedule)
   const readOnly = !canManage
@@ -553,6 +564,9 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, c
     start_time: schedule?.start_time?.slice(0, 5) || '',
     end_time: schedule?.end_time?.slice(0, 5) || '',
     description: schedule?.description || '',
+    // Tarefas do bloco (pedido do usuário: "adicionar uma ou mais tarefas,
+    // sem horas, para a agenda") — ver ResourceScheduleTask, app/models.py.
+    task_ids: schedule?.tasks?.map((task) => task.id) || [],
   })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -586,6 +600,29 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, c
   function updateField(field) {
     return (event) => setForm((prev) => ({ ...prev, [field]: event.target.value }))
   }
+
+  // Trocar o projeto limpa as tarefas já marcadas — elas pertencem ao
+  // projeto anterior e deixam de fazer sentido aqui (mesmo critério
+  // aplicado no backend quando project_id muda sem informar task_ids, ver
+  // update_schedule em routers/schedules.py).
+  function updateProjectId(event) {
+    const value = event.target.value
+    setForm((prev) => ({ ...prev, project_id: value, task_ids: [] }))
+  }
+
+  function toggleTask(taskId) {
+    setForm((prev) => ({
+      ...prev,
+      task_ids: prev.task_ids.includes(taskId) ? prev.task_ids.filter((id) => id !== taskId) : [...prev.task_ids, taskId],
+    }))
+  }
+
+  // Tarefas-folha do projeto selecionado, pra montar o checklist — mesmo
+  // critério de taskOptions/parentTaskIds já usado em TimesheetsPage.jsx
+  // (tarefa "pai" aparece na lista só como referência, desabilitada; o
+  // apontamento/agendamento só aceita tarefa-folha).
+  const projectTasks = useMemo(() => allTasks.filter((task) => task.project_id === form.project_id), [allTasks, form.project_id])
+  const parentTaskIds = useMemo(() => new Set(allTasks.map((task) => task.parent_task_id).filter(Boolean)), [allTasks])
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -641,7 +678,7 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, c
           </Select>
         </FormField>
         <FormField label={t('Projeto')} required>
-          <Select required disabled={readOnly} value={form.project_id} onChange={updateField('project_id')}>
+          <Select required disabled={readOnly} value={form.project_id} onChange={updateProjectId}>
             <option value="">{t('Selecione…')}</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
@@ -661,6 +698,52 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, c
             <TextInput type="time" required disabled={readOnly} value={form.end_time} onChange={updateField('end_time')} />
           </FormField>
         </div>
+
+        {/* Tarefas do bloco (pedido do usuário) — no modo consulta
+            (Consultor), vira uma lista enxuta só do que já está vinculado
+            ("o que ele precisa trabalhar"); quem gerencia vê o checklist
+            inteiro do projeto pra marcar/desmarcar. */}
+        {readOnly ? (
+          schedule?.tasks?.length > 0 && (
+            <FormField label={t('Tarefas')}>
+              <ul className="list-disc list-inside space-y-1 rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--text-primary)]">
+                {schedule.tasks.map((task) => (
+                  <li key={task.id}>
+                    {task.wbs_code} — {task.name}
+                  </li>
+                ))}
+              </ul>
+            </FormField>
+          )
+        ) : (
+          <FormField
+            label={t('Tarefas')}
+            hint={
+              !form.project_id
+                ? t('Selecione um projeto para escolher as tarefas.')
+                : projectTasks.length === 0
+                  ? t('Este projeto ainda não tem tarefas cadastradas.')
+                  : t('Opcional — o que o consultor precisa trabalhar neste bloco.')
+            }
+          >
+            <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
+              {projectTasks.map((task) => {
+                const isParent = parentTaskIds.has(task.id)
+                return (
+                  <label
+                    key={task.id}
+                    className={`flex items-center gap-2 rounded px-1 py-0.5 text-xs ${isParent ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'}`}
+                  >
+                    <input type="checkbox" checked={form.task_ids.includes(task.id)} disabled={isParent} onChange={() => toggleTask(task.id)} />
+                    {task.wbs_code} — {task.name}
+                    {isParent ? ` (${t('tarefa-pai, selecione uma tarefa-filha')})` : ''}
+                  </label>
+                )
+              })}
+            </div>
+          </FormField>
+        )}
+
         <FormField label={t('Descrição')}>
           <TextArea rows={2} disabled={readOnly} value={form.description} onChange={updateField('description')} />
         </FormField>
