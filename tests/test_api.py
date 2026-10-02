@@ -2898,7 +2898,13 @@ def _sample_task_group_payload():
                     {"name": "Documentar requisitos", "duration_days": "1", "estimated_hours": "4"},
                 ],
             },
-            {"name": "Configuração inicial", "duration_days": "3", "estimated_hours": "24", "is_milestone": True},
+            {
+                "name": "Configuração inicial",
+                "duration_days": "3",
+                "estimated_hours": "24",
+                "is_milestone": True,
+                "min_level": 3,
+            },
         ],
     }
 
@@ -2916,6 +2922,13 @@ def test_task_group_crud_preserves_nested_hierarchy(client, setup):
     assert len(levantamento["children"]) == 2
     assert {child["name"] for child in levantamento["children"]} == {"Entrevista com o cliente", "Documentar requisitos"}
     assert body["items"][1]["is_milestone"] is True
+    # Nível mínimo (pedido do usuário: "ter o campo de Nivel mínimo igual
+    # nas tarefas dos projetos") — informado no item persiste, e um item sem
+    # o campo (os filhos de "Levantamento") cai no default (1), mesmo
+    # critério de Task.min_level.
+    assert body["items"][1]["min_level"] == 3
+    assert levantamento["min_level"] == 1
+    assert all(child["min_level"] == 1 for child in levantamento["children"])
 
     listed = client.get("/task-groups", headers=admin_headers)
     assert listed.status_code == 200
@@ -3004,6 +3017,13 @@ def test_apply_task_group_clones_tree_as_children_and_recalculates_wbs(client, s
     # quantidade de horas de cada tarefa já no próprio molde).
     assert float(tasks_by_name["Configuração inicial"]["estimated_hours"]) == 24
     assert float(tasks_by_name["Entrevista com o cliente"]["estimated_hours"]) == 8
+
+    # Nível mínimo do item do grupo vira o Nível mínimo da tarefa clonada —
+    # é o que permite já chegar com essa informação pronta (sem precisar
+    # reconfigurar tarefa por tarefa depois de aplicar o grupo), inclusive
+    # entrando na validação de agenda (ver _resolve_schedule_tasks).
+    assert tasks_by_name["Configuração inicial"]["min_level"] == 3
+    assert tasks_by_name["Levantamento"]["min_level"] == 1
 
 
 def test_apply_task_group_rejects_unknown_group(client, setup):

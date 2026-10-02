@@ -133,6 +133,7 @@ const EMPTY_GROUP_ITEM_FORM = {
   duration_days: '1',
   estimated_hours: '0',
   is_milestone: false,
+  min_level: 1,
   modality: 'BOTH',
 }
 
@@ -188,6 +189,11 @@ export default function TaskGroupDetailPage() {
     { key: 'task_type', header: t('Tipo'), render: (row) => labels.TASK_TYPE_LABELS[row.task_type] || row.task_type },
     { key: 'duration_days', header: t('Duração'), align: 'right', render: (row) => `${formatNumber(row.duration_days)} d` },
     { key: 'estimated_hours', header: t('Horas'), align: 'right', render: (row) => `${formatNumber(row.estimated_hours)} h` },
+    {
+      key: 'min_level',
+      header: t('Nível mínimo'),
+      render: (row) => labels.RESOURCE_LEVEL_LABELS[row.min_level] || row.min_level,
+    },
     { key: 'modality', header: t('Modalidade'), render: (row) => labels.TASK_MODALITY_LABELS[row.modality] || row.modality },
     {
       key: 'actions',
@@ -288,6 +294,7 @@ function TaskGroupItemModal({ groupId, group, tree, mode, item, defaultParentKey
           duration_days: item.duration_days,
           estimated_hours: item.estimated_hours,
           is_milestone: item.is_milestone,
+          min_level: item.min_level,
           modality: item.modality,
           parent_key: '',
         }
@@ -317,6 +324,7 @@ function TaskGroupItemModal({ groupId, group, tree, mode, item, defaultParentKey
       duration_days: form.duration_days || '1',
       estimated_hours: form.estimated_hours || '0',
       is_milestone: form.is_milestone,
+      min_level: Number(form.min_level) || 1,
       modality: form.modality,
     }
     const nextTree = isEdit ? updateNode(tree, item._key, patch) : addChild(tree, form.parent_key || null, { ...emptyItem(), ...patch })
@@ -365,12 +373,31 @@ function TaskGroupItemModal({ groupId, group, tree, mode, item, defaultParentKey
           </FormField>
         )}
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           <FormField label={t('Duração (dias)')}>
             <TextInput type="number" step="any" min="0" value={form.duration_days} onChange={updateField('duration_days')} />
           </FormField>
           <FormField label={t('Horas')}>
             <TextInput type="number" step="any" min="0" value={form.estimated_hours} onChange={updateField('estimated_hours')} />
+          </FormField>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          {/* Nível mínimo (pedido do usuário: "ter o campo de Nível mínimo
+              igual nas tarefas dos projetos. Para já carregar os
+              agrupadores com essa informação") — mesmo campo/rótulos de
+              Task.min_level (ver "Editar tarefa" em ProjectDetailPage.jsx),
+              já suportado de ponta a ponta no backend (TaskGroupItem.
+              min_level, apply_task_group_to_task clona pro Task criado) —
+              só faltava esta tela deixar editar. */}
+          <FormField label={t('Nível mínimo')} hint={t('Herdado pela tarefa criada ao aplicar o grupo — filtra o seletor de Recurso lá.')}>
+            <Select value={form.min_level} onChange={updateField('min_level')}>
+              {Object.entries(labels.RESOURCE_LEVEL_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
           </FormField>
           <FormField label={t('Modalidade')}>
             <Select value={form.modality} onChange={updateField('modality')}>

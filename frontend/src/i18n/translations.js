@@ -169,6 +169,11 @@ export const es = {
   'Nível mínimo': 'Nivel mínimo',
   'Filtra o seletor de Recurso abaixo — recursos sem nível definido continuam aparecendo.':
     'Filtra el selector de Recurso abajo — los recursos sin nivel definido siguen apareciendo.',
+  // Mesmo campo do "Editar tarefa" de um projeto, só que no item do Grupo
+  // de Tarefas (pedido do usuário) — hint diferente porque aqui não existe
+  // seletor de Recurso na hora (só quando o grupo é aplicado numa tarefa).
+  'Herdado pela tarefa criada ao aplicar o grupo — filtra o seletor de Recurso lá.':
+    'Se hereda en la tarea creada al aplicar el grupo — filtra el selector de Recurso allí.',
   '% concluído': '% completado',
   '% concluído (Duração)': '% completado (Duración)',
   '% concluído (Trabalho)': '% completado (Trabajo)',
