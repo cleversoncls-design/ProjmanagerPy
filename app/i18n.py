@@ -140,6 +140,13 @@ _ES: dict[str, str] = {
     "Não é possível vincular uma tarefa que tem tarefas-filhas na Agenda — vincule a tarefa-filha": (
         "No es posible vincular una tarea que tiene tareas hijas en la Agenda — vincule la tarea hija"
     ),
+    # Cruzamento Nível do recurso x Nível mínimo da tarefa na Agenda (pedido
+    # do usuário) — "{level}" é substituído por str.format() depois da
+    # tradução (ver _resolve_schedule_tasks, routers/schedules.py), por
+    # isso o placeholder precisa estar igual nas duas versões.
+    "Nível do recurso (nível {level}) é menor que o nível mínimo exigido pelas tarefas a seguir": (
+        "El nivel del recurso (nivel {level}) es menor que el nivel mínimo exigido por las siguientes tareas"
+    ),
     "Token de acesso ausente": "Token de acceso ausente",
     "Token inválido ou expirado": "Token inválido o expirado",
     "Um apontamento não pode passar de 24 horas": "Un registro de horas no puede superar las 24 horas",

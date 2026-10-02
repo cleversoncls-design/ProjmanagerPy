@@ -63,7 +63,7 @@ def _check_absence(db: Session, resource_id: str, day: date) -> bool:
     )
 
 
-def _resolve_schedule_tasks(db: Session, project_id: str, task_ids: list[str], user: User) -> list[Task]:
+def _resolve_schedule_tasks(db: Session, project_id: str, task_ids: list[str], user: User, resource: Resource) -> list[Task]:
     """Valida as tarefas vinculadas a um bloco da Agenda (pedido do
     usuário: "adicionar uma ou mais tarefas, sem horas, para a agenda") —
     cada uma precisa existir, pertencer ao MESMO projeto do agendamento e
@@ -71,7 +71,19 @@ def _resolve_schedule_tasks(db: Session, project_id: str, task_ids: list[str], u
     de horas — ver _resolve_task_and_project em routers/timesheets.py: uma
     tarefa "pai"/resumo de EAP não é um item de trabalho de verdade).
     Ignora id repetido em vez de recusar (lista vem de checkboxes no
-    frontend, nunca deveria repetir, mas não há necessidade de travar nisso)."""
+    frontend, nunca deveria repetir, mas não há necessidade de travar nisso).
+
+    Pedido do usuário: cruza o Nível do recurso (Resource.level) com o
+    Nível mínimo de cada tarefa (Task.min_level) — se o nível do recurso
+    for MENOR que o mínimo exigido por alguma tarefa selecionada, bloqueia
+    o agendamento inteiro e aponta quais tarefas travaram (em vez de só
+    recusar sem dizer por quê). Recurso sem nível definido (`level=None`)
+    nunca bloqueia — mesmo critério já usado no seletor de recursos da aba
+    Tarefas (ProjectDetailPage.jsx: "um recurso sem nível definido continua
+    aparecendo"), porque não dá pra saber se ele cumpre o mínimo ou não.
+    Diferente daquele seletor (que só FILTRA a lista, sem travar nada no
+    backend — ver comentário de Task.min_level em app/models.py), aqui é a
+    primeira vez que esse nível vira uma trava de verdade no servidor."""
     tasks: list[Task] = []
     seen: set[str] = set()
     for task_id in task_ids:
@@ -91,6 +103,15 @@ def _resolve_schedule_tasks(db: Session, project_id: str, task_ids: list[str], u
                 ),
             )
         tasks.append(task)
+    if resource.level is not None:
+        blocking = [task for task in tasks if resource.level < task.min_level]
+        if blocking:
+            names = "; ".join(f"{task.wbs_code} — {task.name} (mín. {task.min_level})" for task in blocking)
+            prefix = translate(
+                "Nível do recurso (nível {level}) é menor que o nível mínimo exigido pelas tarefas a seguir",
+                user.language,
+            ).format(level=resource.level)
+            raise HTTPException(status_code=422, detail=f"{prefix}: {names}")
     return tasks
 
 
@@ -100,7 +121,8 @@ def create_schedule(
     user: User = Depends(require_roles(*_MANAGE_ROLES)),
     db: Session = Depends(get_db),
 ) -> ResourceSchedule:
-    if not db.get(Resource, data.resource_id):
+    resource = db.get(Resource, data.resource_id)
+    if not resource:
         raise HTTPException(status_code=404, detail=translate("Recurso não encontrado", user.language))
     if not db.get(Project, data.project_id):
         raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
@@ -110,7 +132,7 @@ def create_schedule(
         raise HTTPException(status_code=409, detail=translate("Recurso está ausente nesta data e não pode ser agendado", user.language))
     if _check_overlap(db, data.resource_id, data.date, data.start_time, data.end_time):
         raise HTTPException(status_code=409, detail=translate("Recurso já tem agendamento nesse horário", user.language))
-    tasks = _resolve_schedule_tasks(db, data.project_id, data.task_ids, user)
+    tasks = _resolve_schedule_tasks(db, data.project_id, data.task_ids, user, resource)
     schedule = ResourceSchedule(**data.model_dump(exclude={"task_ids"}))
     schedule.schedule_tasks = [ResourceScheduleTask(task_id=task.id) for task in tasks]
     db.add(schedule)
@@ -178,7 +200,9 @@ def update_schedule(
         raise HTTPException(status_code=409, detail=translate("Recurso já tem agendamento nesse horário", user.language))
     if task_ids is not None:
         project_id_for_tasks = changes.get("project_id", schedule.project_id)
-        tasks = _resolve_schedule_tasks(db, project_id_for_tasks, task_ids, user)
+        # resource_id não é editável em ResourceScheduleUpdate — o recurso
+        # pra checagem de nível é sempre o já vinculado ao agendamento.
+        tasks = _resolve_schedule_tasks(db, project_id_for_tasks, task_ids, user, schedule.resource)
         schedule.schedule_tasks = [ResourceScheduleTask(task_id=task.id) for task in tasks]
     elif "project_id" in changes and changes["project_id"] != schedule.project_id:
         # Projeto trocado sem informar task_ids explicitamente — as tarefas

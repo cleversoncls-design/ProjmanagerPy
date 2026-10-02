@@ -624,6 +624,18 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, a
   const projectTasks = useMemo(() => allTasks.filter((task) => task.project_id === form.project_id), [allTasks, form.project_id])
   const parentTaskIds = useMemo(() => new Set(allTasks.map((task) => task.parent_task_id).filter(Boolean)), [allTasks])
 
+  // Pedido do usuário: cruza o Nível do consultor com o Nível mínimo de
+  // cada tarefa marcada — recurso sem nível definido nunca bloqueia (mesmo
+  // critério do seletor de recursos na aba Tarefas, ver ProjectDetailPage.jsx).
+  // Aviso só do lado do cliente, pra não deixar nem tentar salvar — a API
+  // (routers/schedules.py, _resolve_schedule_tasks) recusa o mesmo jeito,
+  // inclusive numa edição onde esta tela não tivesse a info mais recente.
+  const selectedResource = useMemo(() => resourceOptions.find((resource) => resource.id === form.resource_id), [resourceOptions, form.resource_id])
+  const levelBlockedTasks = useMemo(() => {
+    if (!selectedResource || selectedResource.level == null) return []
+    return projectTasks.filter((task) => form.task_ids.includes(task.id) && selectedResource.level < task.min_level)
+  }, [selectedResource, projectTasks, form.task_ids])
+
   async function handleSubmit(event) {
     event.preventDefault()
     if (readOnly) return
@@ -729,14 +741,21 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, a
             <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-[var(--border)] p-2">
               {projectTasks.map((task) => {
                 const isParent = parentTaskIds.has(task.id)
+                // Pedido do usuário: marca na própria lista qual tarefa está
+                // travando (não só no aviso de baixo, que já resume todas).
+                const isLevelBlocked =
+                  !isParent && selectedResource && selectedResource.level != null && selectedResource.level < task.min_level && form.task_ids.includes(task.id)
                 return (
                   <label
                     key={task.id}
-                    className={`flex items-center gap-2 rounded px-1 py-0.5 text-xs ${isParent ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'}`}
+                    className={`flex items-center gap-2 rounded px-1 py-0.5 text-xs ${
+                      isLevelBlocked ? 'text-[var(--status-critical)]' : isParent ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'
+                    }`}
                   >
                     <input type="checkbox" checked={form.task_ids.includes(task.id)} disabled={isParent} onChange={() => toggleTask(task.id)} />
                     {task.wbs_code} — {task.name}
                     {isParent ? ` (${t('tarefa-pai, selecione uma tarefa-filha')})` : ''}
+                    {isLevelBlocked ? ` (${t('nível mínimo {level}', { level: task.min_level })})` : ''}
                   </label>
                 )
               })}
@@ -751,6 +770,15 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, a
         {absenceWarning && (
           <p className="rounded-lg border border-[var(--status-critical)]/30 bg-[var(--status-critical)]/5 px-3 py-2 text-xs text-[var(--status-critical)]">
             {t('Este consultor está ausente ({type}) nesta data — não é possível agendar.', { type: absenceWarning })}
+          </p>
+        )}
+
+        {levelBlockedTasks.length > 0 && (
+          <p className="rounded-lg border border-[var(--status-critical)]/30 bg-[var(--status-critical)]/5 px-3 py-2 text-xs text-[var(--status-critical)]">
+            {t('Nível do consultor (nível {level}) é menor que o nível mínimo exigido pelas tarefas a seguir: {tasks}', {
+              level: selectedResource?.level,
+              tasks: levelBlockedTasks.map((task) => `${task.wbs_code} — ${task.name} (mín. ${task.min_level})`).join('; '),
+            })}
           </p>
         )}
 
@@ -787,7 +815,7 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, a
                 <Button type="button" variant="secondary" onClick={onClose}>
                   {t('Cancelar')}
                 </Button>
-                <Button type="submit" disabled={saving || Boolean(absenceWarning)}>
+                <Button type="submit" disabled={saving || Boolean(absenceWarning) || levelBlockedTasks.length > 0}>
                   {saving ? t('Salvando…') : t('Salvar')}
                 </Button>
               </div>

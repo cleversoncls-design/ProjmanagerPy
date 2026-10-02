@@ -2463,6 +2463,91 @@ def test_schedule_tasks_checklist(client, setup):
 
     cleared = client.patch(f"/resource-schedules/{created_body['id']}", json={"task_ids": []}, headers=admin_headers)
     assert cleared.status_code == 200
+
+
+def test_schedule_blocks_when_resource_level_below_task_min_level(client, setup):
+    """Pedido do usuário: cruza o Nível do recurso com o Nível mínimo da
+    tarefa — nível menor bloqueia o agendamento inteiro e a mensagem lista
+    qual(is) tarefa(s) travaram. Nível igual ou maior passa normalmente, e
+    um recurso sem nível definido nunca é bloqueado (mesmo critério do
+    seletor de recursos da aba Tarefas)."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+
+    level_1_resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "level": 1, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    no_level_resource = client.post(
+        "/resources",
+        json={"user_id": setup["client_pm_a"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    assert no_level_resource["level"] is None
+
+    task_level_2 = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Entrevista com o cliente", "wbs_code": "60", "min_level": 2}, headers=admin_headers
+    ).json()
+    task_level_1 = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Checklist simples", "wbs_code": "61", "min_level": 1}, headers=admin_headers
+    ).json()
+
+    # Nível 1 x mínimo 2: bloqueia, e a mensagem aponta a tarefa que travou.
+    blocked = client.post(
+        "/resource-schedules",
+        json={
+            "resource_id": level_1_resource["id"],
+            "project_id": project_id,
+            "date": "2026-08-29",
+            "start_time": "08:00",
+            "end_time": "18:00",
+            "task_ids": [task_level_1["id"], task_level_2["id"]],
+        },
+        headers=admin_headers,
+    )
+    assert blocked.status_code == 422
+    assert "60" in blocked.json()["detail"]
+    assert "61" not in blocked.json()["detail"]
+
+    # Mesmo recurso, só a tarefa de nível 1: passa normalmente.
+    allowed = client.post(
+        "/resource-schedules",
+        json={
+            "resource_id": level_1_resource["id"],
+            "project_id": project_id,
+            "date": "2026-08-29",
+            "start_time": "08:00",
+            "end_time": "18:00",
+            "task_ids": [task_level_1["id"]],
+        },
+        headers=admin_headers,
+    )
+    assert allowed.status_code == 201
+
+    # Recurso sem nível definido: nunca bloqueia, mesmo na tarefa de nível 2.
+    allowed_no_level = client.post(
+        "/resource-schedules",
+        json={
+            "resource_id": no_level_resource["id"],
+            "project_id": project_id,
+            "date": "2026-08-29",
+            "start_time": "08:00",
+            "end_time": "18:00",
+            "task_ids": [task_level_2["id"]],
+        },
+        headers=admin_headers,
+    )
+    assert allowed_no_level.status_code == 201
+
+    # PATCH também revalida — trocar pra uma lista com a tarefa de nível 2
+    # continua bloqueado pro recurso nível 1 (o resource_id do agendamento já
+    # criado não muda, PATCH não aceita esse campo).
+    patched = client.patch(
+        f"/resource-schedules/{allowed.json()['id']}", json={"task_ids": [task_level_2["id"]]}, headers=admin_headers
+    )
+    assert patched.status_code == 422
+    assert "60" in patched.json()["detail"]
     assert cleared.json()["tasks"] == []
 
     # Trocar o projeto do agendamento sem informar task_ids limpa as tarefas

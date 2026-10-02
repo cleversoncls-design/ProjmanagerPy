@@ -792,6 +792,13 @@ export const es = {
     'Este consultor está ausente ({type}) en esta fecha — no es posible agendar.',
   '{resource} está ausente ({type}) em {date} — não é possível agendar nesta data.':
     '{resource} está ausente ({type}) el {date} — no es posible agendar en esta fecha.',
+  // Cruzamento Nível do consultor x Nível mínimo da tarefa na Agenda
+  // (pedido do usuário) — mesmo aviso replicado no backend (ver app/i18n.py,
+  // chave "Nível do recurso (nível {level})..." — mensagens separadas
+  // porque o texto do botão/lista muda ("consultor" aqui, "recurso" lá).
+  'Nível do consultor (nível {level}) é menor que o nível mínimo exigido pelas tarefas a seguir: {tasks}':
+    'El nivel del consultor (nivel {level}) es menor que el nivel mínimo exigido por las siguientes tareas: {tasks}',
+  'nível mínimo {level}': 'nivel mínimo {level}',
   'Tipo de apontamento': 'Tipo de registro',
   'Segue automaticamente o tipo da tarefa (Gestão/Consultoria).': 'Sigue automáticamente el tipo de la tarea (Gestión/Consultoría).',
   // % de Avanço da Tarefa + classificador Normal/Retrabalho (pedido do
