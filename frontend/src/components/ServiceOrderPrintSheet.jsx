@@ -31,6 +31,23 @@ import { formatDate, formatTime, formatHoursDuration, minutesToHM } from '../uti
  * usuário. Só o bloco Entrada/Salida/Intervalo/Total/Tarea/Detalles
  * continua se repetindo, uma vez por apontamento, na mesma folha (Hoja
  * continua "1 / 1" — nunca quebramos em mais de uma página por OS). */
+// Classificador Normal/Retrabalho + motivo(s) (pedido do usuário: imprimir
+// na Ordem de Serviço, por tarefa) — rótulos fixos em espanhol, igual ao
+// resto do documento oficial (nunca passam por t()/idioma da interface,
+// ver nota acima); mesmos valores de WORK_CLASSIFICATION_LABELS/
+// REWORK_REASON_LABELS (utils/labels.js) traduzidos pro espanhol.
+const WORK_CLASSIFICATION_LABELS_ES = { NORMAL: 'Normal', REWORK: 'Retrabajo' }
+const REWORK_REASON_LABELS_ES = {
+  PRODUCT_ERROR: 'Error de Producto',
+  INITIAL_CONFIG_ERROR: 'Error de Configuración inicial',
+  DATA_LOAD_ERROR: 'Error de datos cargados',
+  USER_DELAY_OR_ABSENCE: 'Retraso / Falta de Usuarios',
+  ACCESS_ISSUE_SERVICE_SERVER: 'Problemas de Acceso (Servicios / Servidor)',
+  ACCESS_ISSUE_NETWORK: 'Problemas de Acceso (Red)',
+  CONSULTANT_CHANGE: 'Cambio de Consultor',
+  POWER_OUTAGE: 'Falta de Energía Eléctrica',
+}
+
 export default function ServiceOrderPrintSheet({ order, tasksById }) {
   const { labels } = useLanguage()
 
@@ -136,6 +153,26 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
               Tarea(s): <span className="os-field font-bold">{tareaLabel(activity)}</span>
             </p>
           </div>
+
+          {/* Classificador Normal/Retrabalho + motivo(s) (pedido do
+              usuário) — só existe num apontamento de tarefa do projeto
+              (work_classification nulo em Traslado/Avulso, ver
+              Timesheet.work_classification). */}
+          {activity.work_classification && (
+            <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5">
+              <p>
+                Clasificación: <span className="os-field font-bold">{WORK_CLASSIFICATION_LABELS_ES[activity.work_classification] || activity.work_classification}</span>
+              </p>
+              {activity.work_classification === 'REWORK' && (
+                <p>
+                  Motivo del Retrabajo:{' '}
+                  <span className="os-field font-bold">
+                    {(activity.rework_reasons || []).map((reason) => REWORK_REASON_LABELS_ES[reason] || reason).join(', ') || '—'}
+                  </span>
+                </p>
+              )}
+            </div>
+          )}
 
           <p className="mt-2">Detalles</p>
           <p className="os-field mt-1 inline-block">{activity.description || '—'}</p>

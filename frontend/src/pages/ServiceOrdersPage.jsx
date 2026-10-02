@@ -464,6 +464,13 @@ export default function ServiceOrdersPage() {
                                           tone={TIMESHEET_STATUS_TONE[activity.status]}
                                         />
                                         {activity.unscheduled && <StatusPill label={t('Fora da agenda')} tone="serious" />}
+                                        {activity.work_classification === 'REWORK' && (
+                                          <StatusPill
+                                            label={t('Retrabalho')}
+                                            tone="warning"
+                                            title={(activity.rework_reasons || []).map((reason) => labels.REWORK_REASON_LABELS[reason] || reason).join(', ')}
+                                          />
+                                        )}
                                       </div>
                                     </td>
                                     <td className="px-2 py-1.5 text-right">

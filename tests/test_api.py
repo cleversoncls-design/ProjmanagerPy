@@ -2264,6 +2264,43 @@ def test_timesheet_rework_and_progress_only_accepted_with_task_id(client, setup)
     assert with_reasons.status_code == 422
 
 
+def test_service_order_activity_includes_work_classification_and_reasons(client, setup):
+    """Pedido do usuário: a Ordem de Serviço imprime, por tarefa, a
+    classificação Normal/Retrabalho e o(s) motivo(s) de retrabalho — ver
+    ServiceOrderPrintSheet.jsx. `GET /reports/service-orders` é quem
+    alimenta tanto a tabela quanto a impressão, então basta confirmar que
+    `service_orders` (services.py) repassa os dois campos do Timesheet."""
+    task, _resource, consultant_headers = _assigned_task_timesheet_setup(client, setup)
+    admin_headers = setup["admin_headers"]
+
+    created = client.post(
+        "/timesheets",
+        json={
+            "task_id": task["id"],
+            "date": "2026-08-27",
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "work_classification": "REWORK",
+            "rework_reasons": ["DATA_LOAD_ERROR"],
+        },
+        headers=consultant_headers,
+    )
+    assert created.status_code == 201
+
+    report = client.get(
+        "/reports/service-orders",
+        params={"start": "2026-08-27", "end": "2026-08-27", "project_id": setup["project_a"].id},
+        headers=admin_headers,
+    )
+    assert report.status_code == 200
+    orders = report.json()
+    assert len(orders) == 1
+    activities = orders[0]["activities"]
+    assert len(activities) == 1
+    assert activities[0]["work_classification"] == "REWORK"
+    assert activities[0]["rework_reasons"] == ["DATA_LOAD_ERROR"]
+
+
 def test_schedule_blocked_on_resource_absence_day(client, setup):
     """Pedido do usuário ("Sim, já incluir nesta etapa"): a Agenda de
     consultores não pode agendar um recurso num dia em que ele tem ausência

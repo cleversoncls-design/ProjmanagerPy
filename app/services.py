@@ -1463,6 +1463,8 @@ def service_orders(
             Timesheet.status,
             Timesheet.unscheduled,
             Timesheet.is_transit,
+            Timesheet.work_classification,
+            Timesheet.rework_reasons,
         )
         .outerjoin(Task, Task.id == Timesheet.task_id)
         .where(
@@ -1496,6 +1498,8 @@ def service_orders(
                 "status": row.status,
                 "unscheduled": row.unscheduled,
                 "is_transit": row.is_transit,
+                "work_classification": row.work_classification,
+                "rework_reasons": row.rework_reasons,
             }
         )
     if not groups:

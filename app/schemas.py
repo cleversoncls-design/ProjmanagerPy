@@ -861,6 +861,12 @@ class ServiceOrderActivity(BaseModel):
     status: TimesheetStatus
     unscheduled: bool
     is_transit: bool
+    # Classificador Normal/Retrabalho + motivo(s) (pedido do usuário: também
+    # impressos na Ordem de Serviço, por tarefa) — só vêm preenchidos junto
+    # de task_id, mesma regra de Timesheet (ver _validate_rework,
+    # routers/timesheets.py).
+    work_classification: WorkClassification | None
+    rework_reasons: list[str] | None
 
 
 class ServiceOrderRow(BaseModel):
