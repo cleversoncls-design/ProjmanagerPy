@@ -876,13 +876,17 @@ function CopyTasksModal({ projectId, onClose, onCopied }) {
   )
 }
 
-/** "Aplicar grupo de tarefas" (pedido do usuário) — clona a árvore de um
- * Grupo de Tarefas (cadastrado em /task-groups, ver TaskGroupsPage) como
- * tarefas-filhas da tarefa `task`, pra acelerar a criação de estruturas
- * parecidas dentro de um projeto já existente. Ver
+/** "Aplicar grupo de tarefas" (pedido do usuário) — cria uma nova tarefa
+ * com o NOME do Grupo de Tarefas escolhido (cadastrado em /task-groups,
+ * ver TaskGroupsPage) como filha da tarefa `task`, e clona a árvore de
+ * itens do grupo como filhas dessa nova tarefa — pra acelerar a criação
+ * de estruturas parecidas dentro de um projeto já existente, deixando
+ * claro de qual grupo cada "galho" da EAP veio (pedido do usuário depois
+ * de ver a primeira versão: "o Agrupador precisa ser uma tarefa também, e
+ * as subtarefas dele vêm como filhas do [grupo]"). Ver
  * services.apply_task_group_to_task no backend pro que exatamente é
- * clonado (sem data/recurso/dependência) e `recalculate_wbs`, rodado logo
- * em seguida, pro WBS/EAP renumerar com os nós novos. */
+ * criado/clonado (sem data/recurso/dependência) e `recalculate_wbs`,
+ * rodado logo em seguida, pro WBS/EAP renumerar com os nós novos. */
 function ApplyTaskGroupModal({ task, onClose, onApplied }) {
   const { t } = useLanguage()
   const [groups, setGroups] = useState([])
@@ -918,7 +922,7 @@ function ApplyTaskGroupModal({ task, onClose, onApplied }) {
     <Modal title={`${t('Aplicar grupo de tarefas')} — ${task.wbs_code} ${task.name}`} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <p className="text-sm text-[var(--text-secondary)]">
-          {t('Clona as tarefas do grupo escolhido como tarefas-filhas desta tarefa. Sem datas, recursos alocados nem dependências — ajuste isso depois, se precisar.')}
+          {t('O grupo escolhido entra como uma nova tarefa-filha desta tarefa, com as tarefas do grupo como filhas dela. Sem datas, recursos alocados nem dependências — ajuste isso depois, se precisar.')}
         </p>
         <FormField label={t('Grupo de tarefas')} required>
           <Select required value={taskGroupId} onChange={(event) => setTaskGroupId(event.target.value)} disabled={loadingGroups}>

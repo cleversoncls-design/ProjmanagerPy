@@ -281,8 +281,8 @@ export const es = {
   'Removendo…': 'Quitando…',
   'Informe o nome da tarefa.': 'Informe el nombre de la tarea.',
   'Aplicar grupo de tarefas': 'Aplicar grupo de tareas',
-  'Clona as tarefas do grupo escolhido como tarefas-filhas desta tarefa. Sem datas, recursos alocados nem dependências — ajuste isso depois, se precisar.':
-    'Clona las tareas del grupo elegido como tareas hijas de esta tarea. Sin fechas, recursos asignados ni dependencias — ajústelo después, si lo necesita.',
+  'O grupo escolhido entra como uma nova tarefa-filha desta tarefa, com as tarefas do grupo como filhas dela. Sem datas, recursos alocados nem dependências — ajuste isso depois, se precisar.':
+    'El grupo elegido entra como una nueva tarea hija de esta tarea, con las tareas del grupo como hijas de ella. Sin fechas, recursos asignados ni dependencias — ajústelo después, si lo necesita.',
   'Grupo de tarefas': 'Grupo de tareas',
   'Aplicando…': 'Aplicando…',
   'Horas': 'Horas',

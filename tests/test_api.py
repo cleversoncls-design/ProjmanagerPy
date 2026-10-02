@@ -2853,19 +2853,30 @@ def test_apply_task_group_clones_tree_as_children_and_recalculates_wbs(client, s
 
     schedule = client.get(f"/projects/{project_id}/schedule", headers=admin_headers).json()
     tasks_by_name = {t["name"]: t for t in schedule["tasks"]}
+    # A tarefa "envelope" com o NOME do grupo é criada primeiro, como filha
+    # de "Fase Fiscal" — pedido do usuário depois de ver a primeira versão
+    # (que jogava os itens direto como filhas da tarefa pai, sem indicar de
+    # qual grupo cada um vinha): "o Agrupador precisa ser uma tarefa
+    # também, e as subtarefas dele vêm como filhas do [grupo]".
+    assert "Implantação módulo Fiscal" in tasks_by_name
     assert "Levantamento" in tasks_by_name
     assert "Configuração inicial" in tasks_by_name
     assert "Entrevista com o cliente" in tasks_by_name
     assert "Documentar requisitos" in tasks_by_name
 
-    # WBS/EAP renumerado: as tarefas clonadas entram como filhas da tarefa
-    # "1" (Fase Fiscal), então ganham códigos "1.x"/"1.x.y" — nenhum
-    # "_tmp_" (placeholder provisório de apply_task_group_to_task) deve
-    # sobrar depois do recalculate_wbs que o endpoint roda em seguida.
-    assert tasks_by_name["Levantamento"]["parent_task_id"] == parent_task["id"]
-    assert tasks_by_name["Levantamento"]["wbs_code"].startswith("1.")
+    # WBS/EAP renumerado: a tarefa envelope entra como filha da tarefa "1"
+    # (Fase Fiscal), e os itens do grupo entram como filhas DELA — não mais
+    # direto em "Fase Fiscal". Nenhum "_tmp_" (placeholder provisório de
+    # apply_task_group_to_task) deve sobrar depois do recalculate_wbs que o
+    # endpoint roda em seguida.
+    group_wrapper = tasks_by_name["Implantação módulo Fiscal"]
+    assert group_wrapper["parent_task_id"] == parent_task["id"]
+    assert group_wrapper["wbs_code"].startswith("1.")
+    assert tasks_by_name["Levantamento"]["parent_task_id"] == group_wrapper["id"]
+    assert tasks_by_name["Configuração inicial"]["parent_task_id"] == group_wrapper["id"]
+    assert tasks_by_name["Levantamento"]["wbs_code"].startswith(f"{group_wrapper['wbs_code']}.")
     assert tasks_by_name["Entrevista com o cliente"]["parent_task_id"] == tasks_by_name["Levantamento"]["id"]
-    assert tasks_by_name["Entrevista com o cliente"]["wbs_code"].startswith("1.1.")
+    assert tasks_by_name["Entrevista com o cliente"]["wbs_code"].startswith(f"{tasks_by_name['Levantamento']['wbs_code']}.")
     assert not any(t["wbs_code"].startswith("_tmp_") for t in schedule["tasks"])
 
     # Nenhuma tarefa clonada carrega data planejada nem alocação — o grupo

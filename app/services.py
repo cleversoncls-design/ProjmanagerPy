@@ -407,31 +407,47 @@ def copy_project_tasks(session: Session, source_project_id: str, target_project:
 
 
 def apply_task_group_to_task(session: Session, task_group_id: str, parent_task: Task) -> list[Task]:
-    """Aplica um TaskGroup (ver app/models.py) dentro de `parent_task` —
-    clona a árvore inteira do grupo (TaskGroupItem) como tarefas-filhas
-    novas de `parent_task`, no mesmo projeto dela. Pedido do usuário: um
-    "agrupador de tarefas" reutilizável pra acelerar a criação de projetos
-    parecidos.
+    """Aplica um TaskGroup (ver app/models.py) dentro de `parent_task`.
+    Pedido do usuário: um "agrupador de tarefas" reutilizável pra acelerar
+    a criação de projetos parecidos.
+
+    Cria primeiro uma tarefa "envelope" com o NOME do próprio grupo, como
+    tarefa-filha nova de `parent_task` — e só então clona a árvore inteira
+    do grupo (TaskGroupItem) como tarefas-filhas dessa tarefa envelope (não
+    direto em `parent_task`). Pedido do usuário, olhando o resultado da
+    primeira versão (que jogava os itens do grupo direto como filhas de
+    `parent_task`, sem indicar de qual grupo cada um veio): "o Agrupador
+    precisa ser uma tarefa também, e as subtarefas dele vêm como filhas do
+    [nome do grupo]". Isso também é o que permite aplicar grupos
+    diferentes em partes diferentes do cronograma dentro da mesma tarefa
+    pai (cada aplicação vira seu próprio "galho" na EAP, nomeado como o
+    grupo correspondente) sem misturar os itens de um grupo com os de
+    outro.
 
     Sem nenhuma TaskAssignment (recurso alocado é sempre específico de cada
     projeto, mesmo critério de `copy_project_tasks`) e sem nenhuma
     TaskDependency (um TaskGroup não carrega dependência nenhuma — é só
-    estrutura/duração/trabalho). Datas planejadas ficam em branco: sem
-    predecessora (o grupo não carrega dependência) e sem Início próprio no
-    molde, não há o que calcular — igual uma Task criada manualmente sem
-    `planned_start_date` (ver routers/tasks.py `create_task`). Por isso
-    quem chama esta função não precisa (nem deveria) rodar
-    `recalculate_schedule` depois — só `recalculate_wbs`, pro WBS/EAP do
-    projeto renumerar com os nós novos (ver routers/tasks.py
-    `apply_task_group`).
+    estrutura/duração/trabalho) — nem na tarefa envelope, nem nos itens
+    clonados. Datas planejadas ficam em branco: sem predecessora (o grupo
+    não carrega dependência) e sem Início próprio no molde, não há o que
+    calcular — igual uma Task criada manualmente sem `planned_start_date`
+    (ver routers/tasks.py `create_task`). Por isso quem chama esta função
+    não precisa (nem deveria) rodar `recalculate_schedule` depois — só
+    `recalculate_wbs`, pro WBS/EAP do projeto renumerar com os nós novos
+    (ver routers/tasks.py `apply_task_group`).
 
-    Duração e Trabalho (estimated_hours) são copiados direto do item — ao
-    contrário de `create_task`/`copy_project_tasks`, aqui NÃO passam pelo
-    motor effort-driven (`apply_effort_driven`): o usuário pediu pra
-    informar a quantidade de horas de cada tarefa já no próprio molde (sem
-    nenhum recurso real por trás pra derivar uma capacidade), então esse
-    valor é o que deve valer na tarefa clonada — editável depois, como
-    qualquer tarefa, se uma alocação de recurso precisar recalcular.
+    A tarefa envelope em si fica com Duração/Trabalho no default do modelo
+    (1 dia / 0h) — como qualquer tarefa-pai com filhas, o que a grade de
+    Tarefas mostra de verdade pra ela é o rollup agregado das descendentes
+    (ver `_task_rollups`/`rollup_duration_days`/`rollup_estimated_hours`),
+    não esse valor cru. Duração e Trabalho dos ITENS clonados continuam
+    copiados direto de cada TaskGroupItem — ao contrário de
+    `create_task`/`copy_project_tasks`, aqui NÃO passam pelo motor
+    effort-driven (`apply_effort_driven`): o usuário pediu pra informar a
+    quantidade de horas de cada tarefa já no próprio molde (sem nenhum
+    recurso real por trás pra derivar uma capacidade), então esse valor é o
+    que deve valer na tarefa clonada — editável depois, como qualquer
+    tarefa, se uma alocação de recurso precisar recalcular.
 
     `wbs_code` recebe um placeholder único (`_tmp_<id>`, mesmo padrão de
     `recalculate_wbs`) — provisório até o `recalculate_wbs` que o chamador
@@ -478,8 +494,21 @@ def apply_task_group_to_task(session: Session, task_group_id: str, parent_task: 
         for child in by_parent.get(item.id, []):
             clone(child, new_task.id)
 
+    wrapper_id = str(uuid.uuid4())
+    wrapper_task = Task(
+        id=wrapper_id,
+        project_id=parent_task.project_id,
+        parent_task_id=parent_task.id,
+        name=group.name,
+        wbs_code=f"_tmp_{wrapper_id}",
+        task_type=TaskType.CONSULTING,
+    )
+    session.add(wrapper_task)
+    session.flush()
+    created.append(wrapper_task)
+
     for top_item in by_parent.get(None, []):
-        clone(top_item, parent_task.id)
+        clone(top_item, wrapper_task.id)
 
     return created
 
