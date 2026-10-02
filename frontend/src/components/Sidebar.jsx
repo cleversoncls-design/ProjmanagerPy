@@ -17,6 +17,7 @@ import {
   FileTextIcon,
   HomeIcon,
   LayersIcon,
+  MailIcon,
   UsersIcon,
 } from './icons'
 
@@ -58,7 +59,12 @@ const NAV_SECTIONS = [
     type: 'group',
     key: 'configuracoes',
     label: 'Configurações',
-    items: [{ to: '/users', label: 'Usuários e recursos', icon: UsersIcon, roles: ADMIN_LIKE_ROLES }],
+    items: [
+      { to: '/users', label: 'Usuários e recursos', icon: UsersIcon, roles: ADMIN_LIKE_ROLES },
+      // "Processo de envio de emails" (pedido do usuário) — configurador
+      // de SMTP, mesmo critério de acesso de Usuários (dado sensível).
+      { to: '/email-settings', label: 'E-mail', icon: MailIcon, roles: ADMIN_LIKE_ROLES },
+    ],
   },
   // "Relatórios" (pedido do usuário): saiu de ADMIN_LIKE_ROLES pra
   // MANAGEMENT_ROLES — Gerente de Projetos ganhou este item do menu

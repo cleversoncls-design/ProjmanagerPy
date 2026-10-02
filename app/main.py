@@ -18,6 +18,7 @@ from .routers import (
     calendars,
     changes,
     clients,
+    email_settings,
     expenses,
     intakes,
     projects,
@@ -101,6 +102,7 @@ def health_check() -> dict[str, str]:
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(clients.router)
+app.include_router(email_settings.router)
 app.include_router(intakes.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)

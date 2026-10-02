@@ -12,6 +12,7 @@ from .models import (
     AuditAction,
     ChangeStatus,
     DependencyType,
+    EmailSecurity,
     IntakeStatus,
     Language,
     ProjectStatus,
@@ -1053,3 +1054,48 @@ class ProjectStatisticsResponse(BaseModel):
     variance_finish_days: Decimal | None
     percent_complete_duration: Decimal
     percent_complete_work: Decimal
+
+
+# ---------------------------------------------------------------------------
+# Configuração de e-mail (pedido do usuário: "processo de envio de emails")
+# ---------------------------------------------------------------------------
+
+
+class EmailSettingsUpdate(BaseModel):
+    """Corpo de `PUT /email-settings` — sempre o formulário INTEIRO (tela
+    de configuração única, não uma lista de registros), exceto a senha:
+    omitida (ou `None`), mantém a já salva; `""` explícito apaga a senha
+    salva. Nunca devolvida de volta pela API (ver EmailSettingsRead)."""
+
+    enabled: bool = False
+    smtp_host: str = Field(min_length=1, max_length=255)
+    smtp_port: int = Field(ge=1, le=65535)
+    security: EmailSecurity = EmailSecurity.STARTTLS
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    from_email: EmailStr
+    from_name: str | None = None
+
+
+class EmailSettingsRead(BaseModel):
+    """`id`/`updated_at` nulos = configuração ainda nunca foi salva (tela
+    em branco). `password_configured` substitui a senha de verdade, que
+    nunca é devolvida pela API depois de salva."""
+
+    id: str | None = None
+    enabled: bool
+    smtp_host: str
+    smtp_port: int
+    security: EmailSecurity
+    smtp_username: str | None
+    password_configured: bool
+    from_email: str
+    from_name: str | None
+    last_test_at: datetime | None
+    last_test_ok: bool | None
+    last_test_error: str | None
+    updated_at: datetime | None
+
+
+class EmailTestRequest(BaseModel):
+    to_email: EmailStr

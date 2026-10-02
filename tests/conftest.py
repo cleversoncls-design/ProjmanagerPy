@@ -4,6 +4,9 @@ import os
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-not-for-production")
+# Chave Fernet fixa só para os testes (ver app/crypto.py) — gerada uma vez
+# com `Fernet.generate_key()`, nunca usada fora deste conftest.
+os.environ.setdefault("EMAIL_CREDENTIALS_ENCRYPTION_KEY", "V5l-2tqoDHxI1C91WnlSfR6uxUJwOU_xOIoN7mOm67M=")
 
 import pytest
 from fastapi.testclient import TestClient

@@ -882,6 +882,32 @@ export const es = {
   'Por projeto': 'Por proyecto',
   'Nenhum apontamento no período.': 'Ningún registro en el período.',
   'Nenhuma hora de projeto no período.': 'Ninguna hora de proyecto en el período.',
+
+  // --- Configuração de E-mail (pedido do usuário: "processo de envio de
+  // emails") — Configurações > E-mail, EmailSettingsPage.jsx ---
+  'Configuração de E-mail': 'Configuración de correo electrónico',
+  'Dados de SMTP usados para os avisos automáticos do sistema (agendamentos, aprovações pendentes e outros).':
+    'Datos de SMTP usados para los avisos automáticos del sistema (agendas, aprobaciones pendientes y otros).',
+  'Servidor SMTP': 'Servidor SMTP',
+  'Ativo — manda os avisos automáticos de verdade': 'Activo — envía los avisos automáticos de verdad',
+  'Porta': 'Puerto',
+  'Segurança da conexão': 'Seguridad de la conexión',
+  'STARTTLS (recomendado)': 'STARTTLS (recomendado)',
+  'Usuário SMTP': 'Usuario SMTP',
+  'Senha SMTP': 'Contraseña SMTP',
+  'Já há uma senha salva — deixe em branco para mantê-la.': 'Ya hay una contraseña guardada — déjelo en blanco para mantenerla.',
+  'E-mail de origem (remetente)': 'Correo de origen (remitente)',
+  'Nome do remetente': 'Nombre del remitente',
+  'Configuração salva.': 'Configuración guardada.',
+  'Enviar e-mail de teste': 'Enviar correo de prueba',
+  'Manda um e-mail de teste pros dados já salvos ao lado — funciona mesmo com "Ativo" ainda desligado.':
+    'Envía un correo de prueba a los datos ya guardados al lado — funciona incluso con "Activo" todavía apagado.',
+  'Enviar teste para': 'Enviar prueba a',
+  'Enviando…': 'Enviando…',
+  'Enviar teste': 'Enviar prueba',
+  'Salve a configuração antes de testar.': 'Guarde la configuración antes de probar.',
+  'Último teste: sucesso': 'Última prueba: éxito',
+  'Último teste: falhou': 'Última prueba: falló',
 }
 
 export function translate(lang, text, vars) {

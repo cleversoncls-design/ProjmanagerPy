@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,7 @@ from ..database import get_db
 from ..deps import INTERNAL_ROLES, MANAGEMENT_ROLES, require_roles
 from ..i18n import t as translate
 from ..models import Project, Resource, ResourceSchedule, ResourceScheduleTask, Task, Timesheet, TimesheetStatus, User
+from ..notifications import notify_resource_schedule
 from ..schemas import ResourceScheduleCreate, ResourceScheduleRead, ResourceScheduleUpdate
 
 router = APIRouter(prefix="/resource-schedules", tags=["resource-schedules"])
@@ -118,6 +119,7 @@ def _resolve_schedule_tasks(db: Session, project_id: str, task_ids: list[str], u
 @router.post("", response_model=ResourceScheduleRead, status_code=status.HTTP_201_CREATED)
 def create_schedule(
     data: ResourceScheduleCreate,
+    background_tasks: BackgroundTasks,
     user: User = Depends(require_roles(*_MANAGE_ROLES)),
     db: Session = Depends(get_db),
 ) -> ResourceSchedule:
@@ -138,6 +140,12 @@ def create_schedule(
     db.add(schedule)
     db.commit()
     db.refresh(schedule)
+    # Pedido do usuário (caso 1 do "processo de envio de emails": "Agendas
+    # definidas para consultores") — em BackgroundTasks, depois do commit:
+    # roda só depois da resposta ser mandada, nunca atrasa nem derruba a
+    # criação do agendamento se o SMTP estiver fora do ar (ver
+    # app/notifications.py, mesma regra da integração com Google Calendar).
+    background_tasks.add_task(notify_resource_schedule, schedule.id, created=True)
     return schedule
 
 
@@ -173,6 +181,7 @@ def list_schedules(
 def update_schedule(
     schedule_id: str,
     data: ResourceScheduleUpdate,
+    background_tasks: BackgroundTasks,
     user: User = Depends(require_roles(*_MANAGE_ROLES)),
     db: Session = Depends(get_db),
 ) -> ResourceSchedule:
@@ -180,6 +189,12 @@ def update_schedule(
     if not schedule:
         raise HTTPException(status_code=404, detail=translate("Agendamento não encontrado", user.language))
     changes = data.model_dump(exclude_unset=True)
+    # Pedido do usuário (caso 1 do "processo de envio de emails") — só
+    # reavisa o consultor quando algo que de fato muda o bloco pra ele
+    # muda (data/horário/projeto/tarefas); editar só a descrição, por
+    # exemplo, não dispara um novo e-mail.
+    _notify_fields = {"date", "start_time", "end_time", "project_id", "task_ids"}
+    should_notify = bool(_notify_fields & changes.keys())
     # task_ids não é coluna de ResourceSchedule (é a lista de ligação
     # ResourceScheduleTask) — tratado à parte abaixo, nunca pelo
     # setattr(schedule, field, value) genérico do final da função.
@@ -212,6 +227,8 @@ def update_schedule(
         setattr(schedule, field, value)
     db.commit()
     db.refresh(schedule)
+    if should_notify:
+        background_tasks.add_task(notify_resource_schedule, schedule.id, created=False)
     return schedule
 
 

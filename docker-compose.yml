@@ -27,6 +27,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       JWT_SECRET_KEY: "${JWT_SECRET_KEY:?Defina JWT_SECRET_KEY no arquivo .env (ex.: openssl rand -hex 32)}"
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-480}
+      # Opcional (sem `:?`, de propósito) — ao contrário da JWT_SECRET_KEY,
+      # não exige redeploy imediato de quem já tinha o sistema no ar antes
+      # desta funcionalidade existir. Só é necessária quando alguém de
+      # fato for salvar uma senha de SMTP na tela Configurações > E-mail
+      # (ver app/crypto.py) — até lá, o sistema sobe normalmente sem ela.
+      EMAIL_CREDENTIALS_ENCRYPTION_KEY: ${EMAIL_CREDENTIALS_ENCRYPTION_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-0}
       RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}

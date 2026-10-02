@@ -10,6 +10,7 @@ import ProjectsPage from './pages/ProjectsPage'
 import ProjectDetailPage from './pages/ProjectDetailPage'
 import ClientsPage from './pages/ClientsPage'
 import UsersPage from './pages/UsersPage'
+import EmailSettingsPage from './pages/EmailSettingsPage'
 import CalendarsPage from './pages/CalendarsPage'
 import TaskGroupsPage from './pages/TaskGroupsPage'
 import TaskGroupDetailPage from './pages/TaskGroupDetailPage'
@@ -54,6 +55,10 @@ export default function App() {
                   <Route element={<ProtectedRoute roles={ADMIN_LIKE_ROLES} />}>
                     <Route path="/clients" element={<ClientsPage />} />
                     <Route path="/users" element={<UsersPage />} />
+                    {/* Configurador de SMTP (pedido do usuário: "processo de
+                        envio de emails") — mesmo critério de acesso de
+                        Usuários, dado sensível. */}
+                    <Route path="/email-settings" element={<EmailSettingsPage />} />
                   </Route>
 
                   {/* "Agenda de consultores" e "Relatórios" saíram de

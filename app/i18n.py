@@ -147,6 +147,37 @@ _ES: dict[str, str] = {
     "Nível do recurso (nível {level}) é menor que o nível mínimo exigido pelas tarefas a seguir": (
         "El nivel del recurso (nivel {level}) es menor que el nivel mínimo exigido por las siguientes tareas"
     ),
+    # "Processo de envio de emails" (pedido do usuário) — assunto/corpo dos
+    # avisos de agendamento e do resumo de aprovações pendentes (ver
+    # app/notifications.py) + mensagens do configurador de SMTP (ver
+    # app/routers/email_settings.py). "{name}"/"{count}"/"{hours}" são
+    # substituídos por str.format() depois da tradução, mesmo critério já
+    # usado pelo cruzamento de Nível logo acima.
+    "Novo agendamento criado na sua Agenda de consultores": "Nueva agenda creada en tu Agenda de consultores",
+    "Agendamento atualizado na sua Agenda de consultores": "Agenda actualizada en tu Agenda de consultores",
+    "Olá, {name}!": "¡Hola, {name}!",
+    "Um novo bloco foi agendado para você na Agenda de consultores:": (
+        "Se agendó un nuevo bloque para usted en la Agenda de consultores:"
+    ),
+    "Um bloco da sua Agenda foi alterado:": "Se modificó un bloque de tu Agenda:",
+    "Projeto": "Proyecto",
+    "Data": "Fecha",
+    "Horário": "Horario",
+    "Tarefas vinculadas": "Tareas vinculadas",
+    "Nenhuma tarefa vinculada a este bloco": "Ninguna tarea vinculada a este bloque",
+    "Apontamentos aguardando sua aprovação": "Registros de horas esperando tu aprobación",
+    "Há {count} apontamento(s) aguardando sua aprovação, totalizando {hours}h:": (
+        "Hay {count} registro(s) de horas esperando tu aprobación, totalizando {hours}h:"
+    ),
+    "Consultor": "Consultor",
+    "Tarefa": "Tarea",
+    "Horas": "Horas",
+    "Avulso/Traslado": "Suelto/Traslado",
+    "Configuração de e-mail ainda não foi salva": "La configuración de correo aún no fue guardada",
+    "E-mail de teste — ProjmanagerPy": "Correo de prueba — ProjmanagerPy",
+    "Este é um e-mail de teste da configuração de SMTP do ProjmanagerPy.": (
+        "Este es un correo de prueba de la configuración de SMTP de ProjmanagerPy."
+    ),
     "Token de acesso ausente": "Token de acceso ausente",
     "Token inválido ou expirado": "Token inválido o expirado",
     "Um apontamento não pode passar de 24 horas": "Un registro de horas no puede superar las 24 horas",

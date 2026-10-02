@@ -298,3 +298,10 @@ export const LayersIcon = (props) => (
     <path d="M3.5 16 12 20.5 20.5 16" />
   </Icon>
 )
+
+export const MailIcon = (props) => (
+  <Icon {...props}>
+    <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
+    <path d="m4 7 8 6 8-6" />
+  </Icon>
+)

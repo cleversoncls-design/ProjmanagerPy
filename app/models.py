@@ -780,6 +780,51 @@ class TaskDependency(Base):
     __table_args__ = (UniqueConstraint("predecessor_task_id", "successor_task_id", name="uq_dependency_pair"),)
 
 
+class EmailSecurity(StrEnum):
+    NONE = "NONE"
+    STARTTLS = "STARTTLS"
+    SSL = "SSL"
+
+
+class EmailSettings(Base):
+    """Configuração de SMTP usada para o envio de e-mails do sistema
+    (pedido do usuário: "será necessário criar um configurador de dados
+    para envio de email? para indicar servidor, usuario, senha, tipos de
+    autentitcação, email de origem, etc."). Decisão confirmada com o
+    usuário: fica numa tela de Configurações (não em variável de
+    ambiente), pra um Admin poder trocar sem precisar de acesso ao
+    servidor nem redeploy.
+
+    Linha única — a API sempre lê/atualiza a primeira (e única) linha da
+    tabela (ver app/routers/email_settings.py); não existe endpoint pra
+    criar uma segunda. `smtp_password_encrypted` nunca fica em texto puro
+    (ver app/crypto.py — mesma técnica de criptografia simétrica reversível
+    planejada para os tokens OAuth do Google Calendar, Fernet/`cryptography`)
+    e nunca é devolvida pela API depois de salva — `EmailSettingsRead` só
+    expõe `password_configured: bool`. `last_test_*` guarda o resultado do
+    botão "Enviar e-mail de teste" da tela: o ambiente onde este código é
+    desenvolvido não tem rede até um servidor SMTP de verdade, então a
+    validação de que os dados batem só acontece no servidor real do
+    usuário — mesma limitação já registrada na integração com Google
+    Calendar."""
+
+    __tablename__ = "email_settings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    smtp_host: Mapped[str] = mapped_column(String(255), nullable=False)
+    smtp_port: Mapped[int] = mapped_column(Integer, nullable=False, default=587)
+    security: Mapped[EmailSecurity] = mapped_column(nullable=False, default=EmailSecurity.STARTTLS)
+    smtp_username: Mapped[str | None] = mapped_column(String(255))
+    smtp_password_encrypted: Mapped[str | None] = mapped_column(Text)
+    from_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    from_name: Mapped[str | None] = mapped_column(String(255))
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_test_ok: Mapped[bool | None] = mapped_column(Boolean)
+    last_test_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+
 class AuditAction(StrEnum):
     CREATE = "CREATE"
     UPDATE = "UPDATE"

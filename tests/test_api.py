@@ -3037,3 +3037,352 @@ def test_apply_task_group_rejects_unknown_group(client, setup):
         f"/tasks/{parent_task['id']}/apply-task-group", json={"task_group_id": "id-inexistente"}, headers=admin_headers
     )
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Processo de envio de e-mails (configurador de SMTP + avisos automáticos)
+# ---------------------------------------------------------------------------
+
+
+def test_email_settings_crud_restricted_to_admin_like_roles(client, setup):
+    """Pedido do usuário: configurador de dados de SMTP numa tela de
+    Configurações, ADMIN_LIKE_ROLES (mesmo critério de Usuários/Clientes —
+    dado sensível). Sem nada salvo ainda, GET devolve um "formulário em
+    branco" em vez de 404 (a tela sempre tem o que mostrar)."""
+    admin_headers = setup["admin_headers"]
+    pm_headers = auth_headers(client, setup["pm"].email)
+
+    blank = client.get("/email-settings", headers=admin_headers)
+    assert blank.status_code == 200
+    blank_body = blank.json()
+    assert blank_body["id"] is None
+    assert blank_body["enabled"] is False
+    assert blank_body["password_configured"] is False
+    assert blank_body["updated_at"] is None
+
+    denied_get = client.get("/email-settings", headers=pm_headers)
+    assert denied_get.status_code == 403
+    denied_put = client.put(
+        "/email-settings",
+        json={"enabled": True, "smtp_host": "smtp.exemplo.com", "smtp_port": 587, "from_email": "nao-responda@exemplo.com"},
+        headers=pm_headers,
+    )
+    assert denied_put.status_code == 403
+
+    saved = client.put(
+        "/email-settings",
+        json={
+            "enabled": True,
+            "smtp_host": "smtp.exemplo.com",
+            "smtp_port": 587,
+            "security": "STARTTLS",
+            "smtp_username": "no-reply@exemplo.com",
+            "smtp_password": "senha-smtp-super-secreta",
+            "from_email": "no-reply@exemplo.com",
+            "from_name": "ProjmanagerPy",
+        },
+        headers=admin_headers,
+    )
+    assert saved.status_code == 200
+    saved_body = saved.json()
+    assert saved_body["id"] is not None
+    assert saved_body["password_configured"] is True
+    # A senha nunca volta na resposta, de jeito nenhum — nem como campo
+    # dedicado nem escondida em outro lugar do payload.
+    assert "senha-smtp-super-secreta" not in saved.text
+    assert "smtp_password" not in saved_body
+
+    fetched_again = client.get("/email-settings", headers=admin_headers)
+    assert fetched_again.json()["smtp_host"] == "smtp.exemplo.com"
+
+
+def test_email_settings_update_keeps_password_or_clears_explicitly(client, setup):
+    """Omitir `smtp_password` num PUT seguinte mantém a senha já salva
+    (não precisa redigitar a senha toda vez que só quer trocar o host,
+    por exemplo); `smtp_password: ""` explícito apaga a senha salva."""
+    admin_headers = setup["admin_headers"]
+    client.put(
+        "/email-settings",
+        json={"enabled": False, "smtp_host": "smtp.a.com", "smtp_port": 587, "smtp_password": "senha-1", "from_email": "a@a.com"},
+        headers=admin_headers,
+    )
+
+    updated = client.put(
+        "/email-settings",
+        json={"enabled": False, "smtp_host": "smtp.b.com", "smtp_port": 465, "security": "SSL", "from_email": "a@a.com"},
+        headers=admin_headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["password_configured"] is True
+    assert updated.json()["smtp_host"] == "smtp.b.com"
+
+    cleared = client.put(
+        "/email-settings",
+        json={
+            "enabled": False,
+            "smtp_host": "smtp.b.com",
+            "smtp_port": 465,
+            "security": "SSL",
+            "smtp_password": "",
+            "from_email": "a@a.com",
+        },
+        headers=admin_headers,
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["password_configured"] is False
+
+
+class _FakeSmtpConnection:
+    """Dublê de `smtplib.SMTP`/`SMTP_SSL` — grava o que seria mandado de
+    verdade, sem nenhuma conexão de rede (este ambiente de desenvolvimento
+    não tem rede até um servidor SMTP real, ver docstring de EmailSettings
+    em app/models.py)."""
+
+    instances: list["_FakeSmtpConnection"] = []
+
+    def __init__(self, host, port, timeout=None):
+        self.host = host
+        self.port = port
+        self.tls_started = False
+        self.logged_in = None
+        self.sent = None
+        _FakeSmtpConnection.instances.append(self)
+
+    def starttls(self):
+        self.tls_started = True
+
+    def login(self, username, password):
+        self.logged_in = (username, password)
+
+    def sendmail(self, from_addr, to_addrs, msg):
+        self.sent = (from_addr, to_addrs, msg)
+
+    def quit(self):
+        pass
+
+
+def test_email_settings_test_email_sends_via_configured_smtp(client, setup, monkeypatch):
+    """Botão "Enviar e-mail de teste" — manda de verdade pros dados JÁ
+    SALVOS, mesmo com "Ativo" ainda desligado (precisa poder validar as
+    credenciais antes de ligar pra valer), e grava o resultado em
+    `last_test_*` sem alterar o `enabled` salvo."""
+    admin_headers = setup["admin_headers"]
+    client.put(
+        "/email-settings",
+        json={
+            "enabled": False,
+            "smtp_host": "smtp.exemplo.com",
+            "smtp_port": 587,
+            "security": "STARTTLS",
+            "smtp_username": "no-reply@exemplo.com",
+            "smtp_password": "senha-smtp",
+            "from_email": "no-reply@exemplo.com",
+        },
+        headers=admin_headers,
+    )
+
+    _FakeSmtpConnection.instances = []
+    monkeypatch.setattr("app.email_service.smtplib.SMTP", _FakeSmtpConnection)
+
+    tested = client.post("/email-settings/test-email", json={"to_email": "destino@exemplo.com"}, headers=admin_headers)
+    assert tested.status_code == 200
+    body = tested.json()
+    assert body["last_test_ok"] is True
+    assert body["last_test_error"] is None
+    assert body["last_test_at"] is not None
+    assert body["enabled"] is False  # não liga sozinho
+
+    assert len(_FakeSmtpConnection.instances) == 1
+    sent_instance = _FakeSmtpConnection.instances[0]
+    assert sent_instance.logged_in == ("no-reply@exemplo.com", "senha-smtp")
+    assert sent_instance.sent[1] == ["destino@exemplo.com"]
+
+
+def test_email_settings_test_email_records_failure_without_raising(client, setup, monkeypatch):
+    admin_headers = setup["admin_headers"]
+    client.put(
+        "/email-settings",
+        json={"enabled": False, "smtp_host": "smtp.exemplo.com", "smtp_port": 587, "from_email": "no-reply@exemplo.com"},
+        headers=admin_headers,
+    )
+
+    def boom(*args, **kwargs):
+        raise OSError("Connection refused")
+
+    monkeypatch.setattr("app.email_service.smtplib.SMTP", boom)
+
+    tested = client.post("/email-settings/test-email", json={"to_email": "destino@exemplo.com"}, headers=admin_headers)
+    assert tested.status_code == 200
+    body = tested.json()
+    assert body["last_test_ok"] is False
+    assert "Connection refused" in body["last_test_error"]
+
+
+def test_email_settings_test_email_requires_saved_config(client, setup):
+    admin_headers = setup["admin_headers"]
+    response = client.post("/email-settings/test-email", json={"to_email": "destino@exemplo.com"}, headers=admin_headers)
+    assert response.status_code == 422
+
+
+def test_schedule_creation_and_update_trigger_email_notification(client, setup, monkeypatch):
+    """Pedido do usuário (caso 1 do "processo de envio de emails": "Agendas
+    definidas para consultores"). Monkeypatcha `app.notifications.
+    send_email` (não a configuração de SMTP de verdade) pra isolar "o
+    agendamento dispara o aviso certo" da camada de envio em si, já
+    coberta pelos testes de email_settings acima."""
+    sent = []
+
+    def fake_send_email(db, *, to_email, to_name, subject, html_body, text_body=None):
+        sent.append({"to_email": to_email, "to_name": to_name, "subject": subject})
+        return True, None
+
+    monkeypatch.setattr("app.notifications.send_email", fake_send_email)
+
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    task = client.post(f"/projects/{project_id}/tasks", json={"name": "Tarefa X", "wbs_code": "70"}, headers=admin_headers).json()
+
+    created = client.post(
+        "/resource-schedules",
+        json={
+            "resource_id": resource["id"],
+            "project_id": project_id,
+            "date": "2026-09-01",
+            "start_time": "08:00",
+            "end_time": "12:00",
+            "task_ids": [task["id"]],
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    assert len(sent) == 1
+    assert sent[0]["to_email"] == setup["consultant"].email
+    assert sent[0]["to_name"] == setup["consultant"].name
+
+    schedule_id = created.json()["id"]
+    sent.clear()
+
+    # Editar só a descrição não dispara um novo aviso (nada que importe
+    # pro consultor mudou de verdade).
+    only_description = client.patch(
+        f"/resource-schedules/{schedule_id}", json={"description": "Observação qualquer"}, headers=admin_headers
+    )
+    assert only_description.status_code == 200
+    assert sent == []
+
+    # Trocar o horário dispara um novo aviso ("Agendamento atualizado").
+    rescheduled = client.patch(
+        f"/resource-schedules/{schedule_id}", json={"start_time": "09:00", "end_time": "13:00"}, headers=admin_headers
+    )
+    assert rescheduled.status_code == 200
+    assert len(sent) == 1
+
+
+def test_schedule_notification_is_noop_without_email_settings_configured(client, setup):
+    """Sem EmailSettings salva (ambiente recém-instalado), criar um
+    agendamento continua funcionando normalmente — o aviso por e-mail é só
+    "não há o que fazer" (ver send_email), nunca uma falha que derruba a
+    operação principal (mesma regra da integração com Google Calendar)."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+
+    created = client.post(
+        "/resource-schedules",
+        json={
+            "resource_id": resource["id"],
+            "project_id": project_id,
+            "date": "2026-09-02",
+            "start_time": "08:00",
+            "end_time": "12:00",
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+
+
+def test_send_pending_approval_digests_groups_by_project_manager(client, setup, db_session, monkeypatch):
+    """Pedido do usuário (caso 2: "Aviso de Registro de Horas/Tarefas para
+    aprovar... para o gerente do projeto" — "Resumo periódico" confirmado,
+    não um e-mail por apontamento). Agrupa por `Project.manager_id`: dois
+    projetos de gerentes diferentes geram dois e-mails, cada um só com os
+    apontamentos pendentes dos projetos daquele gerente."""
+    admin_headers = setup["admin_headers"]
+    project_a = setup["project_a"]  # gerenciado por setup["pm"]
+    pm = setup["pm"]
+
+    other_manager = make_user(db_session, role=UserRole.INTERNAL_PM, email="outro.gerente@example.com")
+    other_project = make_project(db_session, client_id=setup["client_a"].id, manager_id=other_manager.id, code="PRJ-C")
+    activated = client.patch(f"/projects/{other_project.id}", json={"status": ProjectStatus.ACTIVE.value}, headers=admin_headers)
+    assert activated.status_code == 200
+
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    # _resolve_task_and_project (routers/timesheets.py) exige o recurso
+    # alocado na tarefa OU vinculado ao projeto (ProjectResource) pra
+    # apontar horas — sem isso o consultor levaria 403 em vez do 201
+    # esperado aqui.
+    for project_id in (project_a.id, other_project.id):
+        link = client.post(f"/projects/{project_id}/resources", json={"resource_id": resource["id"]}, headers=admin_headers)
+        assert link.status_code == 201
+
+    task_a = client.post(f"/projects/{project_a.id}/tasks", json={"name": "Tarefa A", "wbs_code": "80"}, headers=admin_headers).json()
+    task_c = client.post(
+        f"/projects/{other_project.id}/tasks", json={"name": "Tarefa C", "wbs_code": "81"}, headers=admin_headers
+    ).json()
+
+    entry_a = client.post(
+        "/timesheets",
+        json={"task_id": task_a["id"], "date": "2026-09-03", "start_time": "08:00", "end_time": "12:00"},
+        headers=consultant_headers,
+    )
+    assert entry_a.status_code == 201
+    entry_c = client.post(
+        "/timesheets",
+        json={"task_id": task_c["id"], "date": "2026-09-03", "start_time": "13:00", "end_time": "17:00"},
+        headers=consultant_headers,
+    )
+    assert entry_c.status_code == 201
+
+    sent = []
+
+    def fake_send_email(db, *, to_email, to_name, subject, html_body, text_body=None):
+        sent.append({"to_email": to_email, "to_name": to_name})
+        return True, None
+
+    monkeypatch.setattr("app.notifications.send_email", fake_send_email)
+
+    from app.notifications import send_pending_approval_digests
+
+    summaries = send_pending_approval_digests(db_session, dry_run=False)
+
+    by_email = {s["manager_email"]: s for s in summaries}
+    assert pm.email in by_email
+    assert other_manager.email in by_email
+    assert by_email[pm.email]["count"] == 1
+    assert by_email[other_manager.email]["count"] == 1
+    assert float(by_email[pm.email]["total_hours"]) == 4
+    assert float(by_email[other_manager.email]["total_hours"]) == 4
+
+    assert len(sent) == 2
+    assert {row["to_email"] for row in sent} == {pm.email, other_manager.email}
+
+    # --dry-run não manda nenhum e-mail de verdade, só devolve o resumo.
+    sent.clear()
+    dry_summaries = send_pending_approval_digests(db_session, dry_run=True)
+    assert len(dry_summaries) == 2
+    assert sent == []
