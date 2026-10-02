@@ -456,7 +456,18 @@ export default function ServiceOrdersPage() {
                                     </td>
                                     <td className="px-2 py-1.5 text-right text-[var(--text-secondary)]">{minutesToHM(activity.break_minutes)}</td>
                                     <td className="px-2 py-1.5 text-right font-medium text-[var(--text-primary)]">{formatHoursDuration(activity.hours)}</td>
-                                    <td className="px-2 py-1.5 text-[var(--text-secondary)]">{activity.description || '—'}</td>
+                                    <td className="px-2 py-1.5 text-[var(--text-secondary)]">
+                                      {activity.description || '—'}
+                                      {/* Pedido do usuário: o motivo do retrabalho precisa
+                                          ficar visível, não só no tooltip do selo (difícil de
+                                          descobrir) — mesma ideia de TimesheetsPage/
+                                          TimesheetApprovalsPage. */}
+                                      {activity.work_classification === 'REWORK' && (
+                                        <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                                          {t('Motivo do retrabalho')}: {(activity.rework_reasons || []).map((reason) => labels.REWORK_REASON_LABELS[reason] || reason).join(', ') || '—'}
+                                        </p>
+                                      )}
+                                    </td>
                                     <td className="px-2 py-1.5">
                                       <div className="flex items-center gap-1.5">
                                         <StatusPill
@@ -464,13 +475,7 @@ export default function ServiceOrdersPage() {
                                           tone={TIMESHEET_STATUS_TONE[activity.status]}
                                         />
                                         {activity.unscheduled && <StatusPill label={t('Fora da agenda')} tone="serious" />}
-                                        {activity.work_classification === 'REWORK' && (
-                                          <StatusPill
-                                            label={t('Retrabalho')}
-                                            tone="warning"
-                                            title={(activity.rework_reasons || []).map((reason) => labels.REWORK_REASON_LABELS[reason] || reason).join(', ')}
-                                          />
-                                        )}
+                                        {activity.work_classification === 'REWORK' && <StatusPill label={t('Retrabalho')} tone="warning" />}
                                       </div>
                                     </td>
                                     <td className="px-2 py-1.5 text-right">

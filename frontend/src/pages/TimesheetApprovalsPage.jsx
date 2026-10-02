@@ -192,13 +192,7 @@ export default function TimesheetApprovalsPage() {
                       {entry.task_progress_percentage != null && (
                         <span className="text-[var(--text-muted)]">{t('Avanço')}: {entry.task_progress_percentage}%</span>
                       )}
-                      {entry.work_classification === 'REWORK' && (
-                        <StatusPill
-                          label={t('Retrabalho')}
-                          tone="warning"
-                          title={(entry.rework_reasons || []).map((reason) => labels.REWORK_REASON_LABELS[reason] || reason).join(', ')}
-                        />
-                      )}
+                      {entry.work_classification === 'REWORK' && <StatusPill label={t('Retrabalho')} tone="warning" />}
                       {entry.unscheduled && <StatusPill label={t('Fora da agenda')} tone="serious" />}
                     </div>
                     <div className="flex items-center gap-2">
@@ -216,6 +210,16 @@ export default function TimesheetApprovalsPage() {
                       </Button>
                     </div>
                   </div>
+                  {/* Pedido do usuário: o motivo do retrabalho precisa ficar visível
+                      direto na tela de aprovação (não só no tooltip do selo
+                      "Retrabalho", de difícil descoberta) — mesma ideia de
+                      mostrar a Descrição logo abaixo. */}
+                  {entry.work_classification === 'REWORK' && (
+                    <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                      <span className="font-medium">{t('Motivo do retrabalho')}:</span>{' '}
+                      {(entry.rework_reasons || []).map((reason) => labels.REWORK_REASON_LABELS[reason] || reason).join(', ') || '—'}
+                    </p>
+                  )}
                   {entry.description && <p className="mt-1 text-xs text-[var(--text-muted)]">{entry.description}</p>}
                 </div>
               )

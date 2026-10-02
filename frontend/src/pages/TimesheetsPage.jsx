@@ -293,15 +293,18 @@ export default function TimesheetsPage() {
                 key: 'status',
                 header: t('Status'),
                 render: (row) => (
-                  <div className="flex items-center gap-1.5">
-                    <StatusPill label={labels.TIMESHEET_STATUS_LABELS[row.status] || row.status} tone={TIMESHEET_STATUS_TONE[row.status]} />
-                    {row.unscheduled && <StatusPill label={t('Fora da agenda')} tone="serious" />}
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <StatusPill label={labels.TIMESHEET_STATUS_LABELS[row.status] || row.status} tone={TIMESHEET_STATUS_TONE[row.status]} />
+                      {row.unscheduled && <StatusPill label={t('Fora da agenda')} tone="serious" />}
+                      {row.work_classification === 'REWORK' && <StatusPill label={t('Retrabalho')} tone="warning" />}
+                    </div>
+                    {/* Pedido do usuário: o motivo precisa ficar visível, não
+                        só no tooltip do selo (difícil de descobrir). */}
                     {row.work_classification === 'REWORK' && (
-                      <StatusPill
-                        label={t('Retrabalho')}
-                        tone="warning"
-                        title={(row.rework_reasons || []).map((reason) => labels.REWORK_REASON_LABELS[reason] || reason).join(', ')}
-                      />
+                      <p className="mt-1 text-xs text-[var(--text-muted)]">
+                        {(row.rework_reasons || []).map((reason) => labels.REWORK_REASON_LABELS[reason] || reason).join(', ') || '—'}
+                      </p>
                     )}
                   </div>
                 ),
