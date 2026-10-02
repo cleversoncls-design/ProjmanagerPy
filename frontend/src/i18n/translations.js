@@ -718,7 +718,12 @@ export const es = {
   'Interno': 'Interno',
   'Tarefa': 'Tarea',
   'Selecione um projeto para escolher a tarefa.': 'Seleccione un proyecto para elegir la tarea.',
-  'Sem tarefa (apontamento no projeto)': 'Sin tarea (registro en el proyecto)',
+  // Pedido do usuário: projeto sem tarefa nem Traslado deixou de ser um
+  // apontamento válido ("avulso" descontinuado) — ver
+  // timesheetFormNeedsTaskOrTransit (utils/timesheetForm.js) e a mesma
+  // validação no backend (_resolve_task_and_project, routers/timesheets.py).
+  'Selecione uma tarefa…': 'Seleccione una tarea…',
+  'Obrigatório — selecione uma tarefa ou marque Traslado abaixo.': 'Obligatorio — seleccione una tarea o marque Traslado abajo.',
   'tarefa-pai, selecione uma tarefa-filha': 'tarea padre, seleccione una tarea hija',
   'Traslado (deslocamento) — sem tarefa específica': 'Traslado — sin tarea específica',
   'Selecione um projeto para marcar Traslado.': 'Seleccione un proyecto para marcar Traslado.',

@@ -100,6 +100,12 @@ _ES: dict[str, str] = {
     "Somente o PM do cliente pode solicitar um novo projeto": "Solo el PM del cliente puede solicitar un nuevo proyecto",
     "Só o cliente valida suas próprias tarefas": "Solo el cliente valida sus propias tareas",
     "Só é possível apontar horas em projetos ativos": "Solo se pueden registrar horas en proyectos activos",
+    # Pedido do usuário: projeto selecionado sem tarefa e sem Traslado
+    # deixou de ser um apontamento válido ("avulso" descontinuado) — ver
+    # _resolve_task_and_project, routers/timesheets.py.
+    "Selecione uma tarefa ou marque Traslado — não é possível apontar direto no projeto": (
+        "Seleccione una tarea o marque Traslado — no es posible registrar directo en el proyecto"
+    ),
     "Não é possível apontar horas em uma tarefa desativada": "No se pueden registrar horas en una tarea desactivada",
     "Não é possível apontar horas em uma tarefa que tem tarefas-filhas — aponte na tarefa-filha": (
         "No es posible registrar horas en una tarea que tiene tareas hijas — regístrelas en la tarea hija"

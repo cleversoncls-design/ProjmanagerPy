@@ -5,7 +5,13 @@ import Modal from './Modal'
 import Button from './Button'
 import ErrorBanner from './ErrorBanner'
 import TimesheetFieldsForm from './TimesheetFieldsForm'
-import { entryToTimesheetForm, previewTimesheetHours, timesheetFormToPayload, applyExclusiveTimesheetField } from '../utils/timesheetForm'
+import {
+  entryToTimesheetForm,
+  previewTimesheetHours,
+  timesheetFormToPayload,
+  applyExclusiveTimesheetField,
+  timesheetFormNeedsTaskOrTransit,
+} from '../utils/timesheetForm'
 
 /** Modal de edição de um apontamento — usado na coluna de ações da Ordem
  * de Serviço (ServiceOrdersPage), onde não existe (e não faria sentido
@@ -80,7 +86,7 @@ export default function TimesheetEditModal({ entry, projects, allTasks, tasksByI
           <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
             {t('Cancelar')}
           </Button>
-          <Button type="submit" disabled={saving}>
+          <Button type="submit" disabled={saving || timesheetFormNeedsTaskOrTransit(form)}>
             {saving ? t('Salvando…') : t('Salvar')}
           </Button>
         </div>

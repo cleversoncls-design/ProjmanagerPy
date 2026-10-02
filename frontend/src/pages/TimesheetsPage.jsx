@@ -27,6 +27,7 @@ import {
   timesheetFormToPayload,
   isTimesheetEditable,
   applyExclusiveTimesheetField,
+  timesheetFormNeedsTaskOrTransit,
 } from '../utils/timesheetForm'
 
 function todayIso() {
@@ -231,7 +232,7 @@ export default function TimesheetsPage() {
                   {t('Cancelar')}
                 </Button>
               )}
-              <Button type="submit" disabled={saving}>
+              <Button type="submit" disabled={saving || timesheetFormNeedsTaskOrTransit(form)}>
                 {saving ? t('Salvando…') : t('Salvar')}
               </Button>
             </div>

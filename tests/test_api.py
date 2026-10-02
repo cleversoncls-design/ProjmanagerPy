@@ -1018,9 +1018,11 @@ def test_user_can_change_own_language_without_admin_role(client, setup):
 
 
 def test_adhoc_timesheet_without_task_or_project(client, setup):
-    """Apontamento avulso (padrão Clockify/Toggl): sem task_id, sem exigir
-    TaskAssignment prévio. project_id é opcional para alocar a hora avulsa
-    a um projeto sem passar pela EAP."""
+    """Hora administrativa interna (sem task_id nem project_id) continua
+    livre, sem exigir TaskAssignment prévio. O apontamento "avulso" antigo
+    (project_id sem task_id, padrão Clockify/Toggl) foi descontinuado —
+    pedido do usuário: projeto selecionado sem tarefa (e sem Traslado) agora
+    é rejeitado (ver test_timesheet_requires_task_or_transit_when_project_is_set)."""
     admin_headers = setup["admin_headers"]
     project_id = setup["project_a"].id
 
@@ -1042,17 +1044,56 @@ def test_adhoc_timesheet_without_task_or_project(client, setup):
     assert admin_hours.json()["task_id"] is None
     assert admin_hours.json()["project_id"] is None
 
+    task = client.post(f"/projects/{project_id}/tasks", json={"name": "Entrega", "wbs_code": "41"}, headers=admin_headers).json()
     project_hours = client.post(
         "/timesheets",
-        json={"project_id": project_id, "date": "2026-08-24", "start_time": "09:00", "end_time": "11:00"},
+        json={"task_id": task["id"], "date": "2026-08-24", "start_time": "09:00", "end_time": "11:00"},
         headers=consultant_headers,
     )
     assert project_hours.status_code == 201
-    assert project_hours.json()["project_id"] == project_id
 
     listed = client.get("/timesheets", params={"project_id": project_id}, headers=admin_headers)
     assert listed.status_code == 200
     assert [row["id"] for row in listed.json()] == [project_hours.json()["id"]]
+
+
+def test_timesheet_requires_task_or_transit_when_project_is_set(client, setup):
+    """Pedido do usuário: ao selecionar um projeto, é obrigatório selecionar
+    uma tarefa OU marcar Traslado — o apontamento "avulso" (projeto sem
+    tarefa) deixou de ser permitido (ver _resolve_task_and_project,
+    routers/timesheets.py)."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    )
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    rejected = client.post(
+        "/timesheets",
+        json={"project_id": project_id, "date": "2026-08-24", "start_time": "09:00", "end_time": "11:00"},
+        headers=consultant_headers,
+    )
+    assert rejected.status_code == 422
+
+    # Com Traslado marcado, projeto sem tarefa continua válido.
+    transit_ok = client.post(
+        "/timesheets",
+        json={"project_id": project_id, "date": "2026-08-24", "start_time": "09:00", "end_time": "11:00", "is_transit": True},
+        headers=consultant_headers,
+    )
+    assert transit_ok.status_code == 201
+
+    # Com uma tarefa, também válido.
+    task = client.post(f"/projects/{project_id}/tasks", json={"name": "Entrega", "wbs_code": "42"}, headers=admin_headers).json()
+    task_ok = client.post(
+        "/timesheets",
+        json={"task_id": task["id"], "date": "2026-08-24", "start_time": "11:00", "end_time": "12:00"},
+        headers=consultant_headers,
+    )
+    assert task_ok.status_code == 201
 
 
 def test_task_client_approval_workflow(client, setup):
@@ -2154,15 +2195,19 @@ def test_hours_breakdown_report_aggregates_project_transit_and_absence_hours(cli
         json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
         headers=admin_headers,
     ).json()
+    # Pedido do usuário: projeto sem tarefa (nem Traslado) não é mais um
+    # apontamento válido — precisa de uma tarefa de verdade pra gerar
+    # project_hours (ver _resolve_task_and_project, routers/timesheets.py).
+    task = client.post(f"/projects/{project_id}/tasks", json={"name": "Entrega", "wbs_code": "40"}, headers=admin_headers).json()
     consultant_headers = auth_headers(client, setup["consultant"].email)
 
-    # 2h de projeto (avulso, sem tarefa).
+    # 2h de projeto (na tarefa).
     client.post(
         "/timesheets",
-        json={"project_id": project_id, "date": "2026-08-20", "start_time": "09:00", "end_time": "11:00"},
+        json={"task_id": task["id"], "date": "2026-08-20", "start_time": "09:00", "end_time": "11:00"},
         headers=consultant_headers,
     )
-    # 3h de Traslado (sempre vinculado a projeto).
+    # 3h de Traslado (sempre vinculado a projeto, sem tarefa).
     client.post(
         "/timesheets",
         json={"project_id": project_id, "date": "2026-08-20", "start_time": "11:00", "end_time": "14:00", "is_transit": True},
@@ -2183,7 +2228,7 @@ def test_hours_breakdown_report_aggregates_project_transit_and_absence_hours(cli
     # Fora do período filtrado abaixo — não deve entrar nos totais.
     client.post(
         "/timesheets",
-        json={"project_id": project_id, "date": "2026-09-05", "start_time": "09:00", "end_time": "11:00"},
+        json={"task_id": task["id"], "date": "2026-09-05", "start_time": "09:00", "end_time": "11:00"},
         headers=consultant_headers,
     )
 

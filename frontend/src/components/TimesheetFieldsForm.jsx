@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useLanguage } from '../context/LanguageContext'
 import { FormField, TextInput, Select, TextArea } from './FormField'
+import { timesheetFormNeedsTaskOrTransit } from '../utils/timesheetForm'
 
 /** Campos de um apontamento (Data/Projeto/Tarefa/Tipo/Horário/Intervalo/
  * Total calculado/Descrição) — extraído do card "Novo/Editar apontamento"
@@ -27,6 +28,11 @@ export default function TimesheetFieldsForm({ form, updateField, projects, taskO
     return active
   }, [projects, form.project_id])
 
+  // Pedido do usuário: projeto sem tarefa nem Traslado não é mais um
+  // apontamento válido ("avulso" foi descontinuado) — ver
+  // timesheetFormNeedsTaskOrTransit, utils/timesheetForm.js.
+  const needsTaskOrTransit = timesheetFormNeedsTaskOrTransit(form)
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
@@ -47,7 +53,11 @@ export default function TimesheetFieldsForm({ form, updateField, projects, taskO
       <div className="grid grid-cols-2 gap-4">
         <FormField label={t('Tarefa')} hint={!form.project_id ? t('Selecione um projeto para escolher a tarefa.') : undefined}>
           <Select value={form.task_id} onChange={updateField('task_id')} disabled={!form.project_id || form.is_transit || Boolean(form.absence_type)}>
-            <option value="">{t('Sem tarefa (apontamento no projeto)')}</option>
+            {/* Pedido do usuário: projeto sem tarefa (nem Traslado) deixou de
+                ser um apontamento válido — esta opção é só o placeholder
+                "nada escolhido ainda", nunca um valor final aceito pelo
+                backend (ver _resolve_task_and_project, routers/timesheets.py). */}
+            <option value="">{t('Selecione uma tarefa…')}</option>
             {taskOptions.map((task) => {
               // Tarefas "pai" (com tarefas-filha) aparecem na lista — servem
               // de referência pra identificar a etapa, já que filhas de
@@ -62,6 +72,11 @@ export default function TimesheetFieldsForm({ form, updateField, projects, taskO
               )
             })}
           </Select>
+          {needsTaskOrTransit && (
+            <span className="mt-1 block text-xs text-[var(--status-critical)]">
+              {t('Obrigatório — selecione uma tarefa ou marque Traslado abaixo.')}
+            </span>
+          )}
         </FormField>
         <FormField label={t('Tipo de apontamento')} hint={t('Segue automaticamente o tipo da tarefa (Gestão/Consultoria).')}>
           <div className="flex h-[38px] items-center rounded-lg border border-[var(--border)] bg-[var(--page)] px-3 text-sm text-[var(--text-secondary)]">

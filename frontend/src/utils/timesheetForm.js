@@ -68,6 +68,15 @@ export function applyExclusiveTimesheetField(prev, field, value) {
   return { ...prev, [field]: value }
 }
 
+/** Pedido do usuário: projeto selecionado sem tarefa e sem Traslado deixou
+ * de ser permitido ("apontamento avulso") — precisa escolher uma tarefa OU
+ * marcar Traslado. Mesma regra validada (de verdade) em
+ * _resolve_task_and_project, routers/timesheets.py; usada aqui só pra
+ * desabilitar o botão Salvar e mostrar o aviso antes de tentar submeter. */
+export function timesheetFormNeedsTaskOrTransit(form) {
+  return Boolean(form.project_id) && !form.task_id && !form.is_transit && !form.absence_type
+}
+
 /** Monta o payload de POST/PUT /timesheets a partir do formulário. */
 export function timesheetFormToPayload(form) {
   const payload = {

@@ -185,15 +185,28 @@ def _resolve_task_and_project(
             if not resource_linked_to_project:
                 raise HTTPException(status_code=403, detail=translate("Recurso não está alocado nesta tarefa nem no projeto", user.language))
     elif data.project_id:
-        # Apontamento avulso (sem task na EAP) mas alocado a um projeto —
-        # ex.: reunião com o cliente, suporte pontual. Continua exigindo
-        # escopo/escrita e projeto ativo, só dispensa TaskAssignment.
+        # Chega aqui com project_id setado e task_id vazio — é o Traslado
+        # (is_transit=True, já validado no bloco do topo) OU o antigo
+        # "apontamento avulso" (projeto sem tarefa, ex.: reunião com
+        # cliente). Continua exigindo escopo/escrita e projeto ativo, só
+        # dispensa TaskAssignment.
         project = db.get(Project, data.project_id)
         if not project:
             raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
         require_project_access(project, user, write=True)
         if project.status != ProjectStatus.ACTIVE:
             raise HTTPException(status_code=422, detail=translate("Só é possível apontar horas em projetos ativos", user.language))
+        if not data.is_transit:
+            # Pedido do usuário: reverte a permissão de "avulso" (Fase 2) —
+            # um projeto selecionado sem Traslado agora EXIGE uma tarefa.
+            # TASK_TYPE_LABELS.ADHOC e o bucket "ADHOC" de
+            # financials_by_task_type (services.py) continuam existindo só
+            # para exibir registros antigos criados antes desta regra, não
+            # para permitir criar novos.
+            raise HTTPException(
+                status_code=422,
+                detail=translate("Selecione uma tarefa ou marque Traslado — não é possível apontar direto no projeto", user.language),
+            )
     # else: hora administrativa interna (sem task nem projeto) — qualquer
     # recurso autenticado pode lançar, sem checagem de escopo de cliente.
     # Ausência cai aqui também (task/project continuam None pela checagem
