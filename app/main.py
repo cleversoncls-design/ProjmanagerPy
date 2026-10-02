@@ -25,6 +25,7 @@ from .routers import (
     resources,
     risks,
     schedules,
+    task_groups,
     tasks,
     timesheets,
     users,
@@ -103,6 +104,7 @@ app.include_router(clients.router)
 app.include_router(intakes.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)
+app.include_router(task_groups.router)
 app.include_router(resources.router)
 app.include_router(schedules.router)
 app.include_router(timesheets.router)

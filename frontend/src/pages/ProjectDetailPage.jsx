@@ -8,6 +8,7 @@ import * as clientsApi from '../api/clients'
 import * as usersApi from '../api/users'
 import * as resourcesApi from '../api/resources'
 import * as calendarsApi from '../api/calendars'
+import * as taskGroupsApi from '../api/taskGroups'
 import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import PageHeader from '../components/PageHeader'
@@ -35,6 +36,7 @@ import {
   DownloadIcon,
   FlagIcon,
   HashIcon,
+  LayersIcon,
   MoveIcon,
   PencilIcon,
   PlusIcon,
@@ -874,6 +876,74 @@ function CopyTasksModal({ projectId, onClose, onCopied }) {
   )
 }
 
+/** "Aplicar grupo de tarefas" (pedido do usuário) — clona a árvore de um
+ * Grupo de Tarefas (cadastrado em /task-groups, ver TaskGroupsPage) como
+ * tarefas-filhas da tarefa `task`, pra acelerar a criação de estruturas
+ * parecidas dentro de um projeto já existente. Ver
+ * services.apply_task_group_to_task no backend pro que exatamente é
+ * clonado (sem data/recurso/dependência) e `recalculate_wbs`, rodado logo
+ * em seguida, pro WBS/EAP renumerar com os nós novos. */
+function ApplyTaskGroupModal({ task, onClose, onApplied }) {
+  const { t } = useLanguage()
+  const [groups, setGroups] = useState([])
+  const [taskGroupId, setTaskGroupId] = useState('')
+  const [loadingGroups, setLoadingGroups] = useState(true)
+  const [applying, setApplying] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    taskGroupsApi
+      .listTaskGroups()
+      .then(setGroups)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoadingGroups(false))
+  }, [])
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    if (!taskGroupId) return
+    setApplying(true)
+    setError('')
+    try {
+      await tasksApi.applyTaskGroup(task.id, taskGroupId)
+      onApplied()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  return (
+    <Modal title={`${t('Aplicar grupo de tarefas')} — ${task.wbs_code} ${task.name}`} onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <p className="text-sm text-[var(--text-secondary)]">
+          {t('Clona as tarefas do grupo escolhido como tarefas-filhas desta tarefa. Sem datas, recursos alocados nem dependências — ajuste isso depois, se precisar.')}
+        </p>
+        <FormField label={t('Grupo de tarefas')} required>
+          <Select required value={taskGroupId} onChange={(event) => setTaskGroupId(event.target.value)} disabled={loadingGroups}>
+            <option value="">{t('Selecione…')}</option>
+            {groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="submit" disabled={applying || !taskGroupId}>
+            {applying ? t('Aplicando…') : t('Aplicar')}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 /** Achata a árvore de tarefas (parent_task_id) em ordem de exibição —
  * mesma regra de desempate de services.recalculate_wbs (sort_order, com
  * wbs_code como critério estável), pra grade e os seletores de
@@ -1160,6 +1230,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
   const [editingTask, setEditingTask] = useState(null)
   const [movingTask, setMovingTask] = useState(null)
   const [deletingTask, setDeletingTask] = useState(null)
+  const [applyingGroupToTask, setApplyingGroupToTask] = useState(null)
   const [showBaselineModal, setShowBaselineModal] = useState(false)
   const [showColumnsModal, setShowColumnsModal] = useState(false)
   const [showCopyTasksModal, setShowCopyTasksModal] = useState(false)
@@ -1510,6 +1581,7 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
             disabled={Boolean(busyMessage)}
             onClick={() => handleToggleTaskActive(row)}
           />
+          <IconButton icon={LayersIcon} label={t('Aplicar grupo de tarefas')} onClick={() => setApplyingGroupToTask(row)} />
           <IconButton icon={TrashIcon} label={t('Apagar tarefa')} variant="danger" onClick={() => setDeletingTask(row)} />
         </div>
       ),
@@ -1597,6 +1669,17 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
 
       {showCopyTasksModal && (
         <CopyTasksModal projectId={projectId} onClose={() => setShowCopyTasksModal(false)} onCopied={handleTasksCopied} />
+      )}
+
+      {applyingGroupToTask && (
+        <ApplyTaskGroupModal
+          task={applyingGroupToTask}
+          onClose={() => setApplyingGroupToTask(null)}
+          onApplied={() => {
+            setApplyingGroupToTask(null)
+            loadSchedule()
+          }}
+        />
       )}
 
       {showStartAllModal && (

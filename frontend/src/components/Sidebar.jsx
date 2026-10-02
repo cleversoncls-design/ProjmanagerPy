@@ -14,6 +14,7 @@ import {
   ClockIcon,
   FileTextIcon,
   HomeIcon,
+  LayersIcon,
   UsersIcon,
 } from './icons'
 
@@ -30,6 +31,12 @@ const NAV_ITEMS = [
   { to: '/clients', label: 'Clientes', roles: ADMIN_LIKE_ROLES, icon: BuildingIcon },
   { to: '/users', label: 'Usuários e recursos', roles: ADMIN_LIKE_ROLES, icon: UsersIcon },
   { to: '/calendars', label: 'Calendários', roles: MANAGEMENT_ROLES, icon: CalendarIcon },
+  // "Grupos de Tarefas" (pedido do usuário) — agrupador reutilizável de
+  // tarefas, aplicado depois como filhas de uma tarefa de projeto (ver
+  // TaskGroupsPage/ProjectDetailPage). Página própria do menu, mesmo
+  // critério de acesso de Calendários (MANAGEMENT_ROLES) — decisão
+  // confirmada com o usuário.
+  { to: '/task-groups', label: 'Grupos de Tarefas', roles: MANAGEMENT_ROLES, icon: LayersIcon },
   // Menu novo (pedido do usuário) — hoje com um relatório (Horas por tipo:
   // Projeto/Traslado/Ausência), pensado pra receber mais no futuro
   // (ReportsIndexPage lista os cards). ADMIN_LIKE_ROLES: dado sensível —

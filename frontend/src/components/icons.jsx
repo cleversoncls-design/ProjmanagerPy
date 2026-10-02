@@ -287,3 +287,14 @@ export const BarChartIcon = (props) => (
     <rect x="15.5" y="4" width="3.5" height="16" rx="0.8" />
   </Icon>
 )
+
+// Menu "Grupos de Tarefas" (pedido do usuário) e botão "Aplicar grupo de
+// tarefas" por linha na aba Tarefas — camadas empilhadas, ícone padrão de
+// "agrupador/modelo reutilizável".
+export const LayersIcon = (props) => (
+  <Icon {...props}>
+    <path d="M12 3.5 3.5 8 12 12.5 20.5 8 12 3.5Z" />
+    <path d="M3.5 12 12 16.5 20.5 12" />
+    <path d="M3.5 16 12 20.5 20.5 16" />
+  </Icon>
+)

@@ -31,6 +31,7 @@ from ..schemas import (
     TaskCreate,
     TaskDependencyCreate,
     TaskDependencyRead,
+    TaskGroupApplyRequest,
     TaskMoveRequest,
     TaskRead,
     TaskUpdate,
@@ -40,6 +41,7 @@ from ..services import (
     DEFAULT_CAPACITY_HOURS_PER_DAY,
     capacity_hours_per_day_for_task,
     apply_effort_driven,
+    apply_task_group_to_task,
     calendar_for_project,
     calendar_from_db,
     copy_project_tasks,
@@ -549,6 +551,43 @@ def copy_tasks_from_project(
     )
     db.commit()
     updated = list(db.scalars(select(Task).where(Task.project_id == target.id).order_by(Task.wbs_code)).all())
+    return {"tasks": updated}
+
+
+@router.post("/tasks/{task_id}/apply-task-group", response_model=WbsRecalculateResponse, status_code=status.HTTP_201_CREATED)
+def apply_task_group(
+    task_id: str,
+    data: TaskGroupApplyRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Botão "Aplicar grupo de tarefas" — clona a árvore de um TaskGroup
+    (ver app/routers/task_groups.py) como tarefas-filhas de `task_id`, no
+    mesmo projeto dela, e renumera o WBS/EAP do projeto inteiro em seguida
+    (ver services.apply_task_group_to_task/recalculate_wbs). Sem
+    recalculate_schedule depois: as tarefas clonadas não carregam
+    predecessora nenhuma (um TaskGroup não tem dependência, ver docstring
+    de apply_task_group_to_task), então não há data pra recalcular. Mesma
+    restrição de quem administra tarefas em geral
+    (allow_consultant_write=False)."""
+    task = _get_task_or_404(db, task_id, user.language)
+    require_project_access(task.project, user, write=True, allow_consultant_write=False)
+    try:
+        created = apply_task_group_to_task(db, data.task_group_id, task)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    updated = recalculate_wbs(db, task.project_id)
+    record_audit(
+        db,
+        entity_type="task",
+        entity_id=task.id,
+        action=AuditAction.UPDATE,
+        user_id=user.id,
+        details={"action": "apply_task_group", "task_group_id": data.task_group_id, "tasks_created": len(created)},
+    )
+    db.commit()
+    for item in updated:
+        db.refresh(item)
     return {"tasks": updated}
 
 

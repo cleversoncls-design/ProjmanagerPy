@@ -28,6 +28,10 @@ export function copyTasksFrom(projectId, sourceProjectId) {
   return api.post(`/projects/${projectId}/copy-tasks-from/${sourceProjectId}`, {})
 }
 
+export function applyTaskGroup(taskId, taskGroupId) {
+  return api.post(`/tasks/${taskId}/apply-task-group`, { task_group_id: taskGroupId })
+}
+
 export function rescheduleTask(taskId, payload = {}) {
   return api.post(`/tasks/${taskId}/reschedule`, payload)
 }

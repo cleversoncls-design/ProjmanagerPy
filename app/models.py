@@ -430,6 +430,71 @@ class Task(Base):
     timesheets: Mapped[list[Timesheet]] = relationship(back_populates="task", cascade="all, delete-orphan")
 
 
+class TaskGroup(Base):
+    """"Grupo de Tarefas" — pedido do usuário: um agrupador reutilizável de
+    tarefas (não um projeto) que pode ser aplicado depois como filhas de
+    qualquer tarefa de um projeto real, pra acelerar a criação de projetos
+    parecidos (ex.: "Implantação módulo Fiscal" sempre tem a mesma
+    sequência de tarefas). Decisão confirmada com o usuário: cadastro novo
+    e dedicado (não reaproveitar Projeto Modelo/ProjectStatus.MODELO) — ali
+    sempre existe um projeto de verdade por trás; aqui não existe projeto
+    nenhum, só a árvore de tarefas em si. Gerenciado numa página própria do
+    menu lateral (Clientes/Recursos), não dentro da tela de Projetos.
+
+    Ver TaskGroupItem para os itens da árvore e
+    services.apply_task_group_to_task para a aplicação dentro de uma tarefa
+    de projeto."""
+
+    __tablename__ = "task_groups"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    items: Mapped[list["TaskGroupItem"]] = relationship(back_populates="group", cascade="all, delete-orphan")
+
+
+class TaskGroupItem(Base):
+    """Um nó da árvore de um TaskGroup — os campos de ESTRUTURA de uma
+    tarefa (nome, tipo, duração/trabalho, marco, nível mínimo, modalidade,
+    observações), sem nenhum campo de EXECUÇÃO (datas, status, progresso,
+    recurso alocado, dependência entre tarefas): o grupo é só um molde,
+    nunca roda apontamento nem é agendado por si só — tudo isso só passa a
+    existir de verdade quando o grupo é aplicado dentro de uma tarefa de um
+    projeto (vira Task, ver services.apply_task_group_to_task).
+
+    `parent_item_id` suporta qualquer profundidade de aninhamento (decisão
+    confirmada com o usuário: "hierarquia aninhada", não só um nível). Usa
+    `ondelete="CASCADE"` — diferente de Task.parent_task_id, que usa
+    SET NULL — porque um item de grupo não carrega histórico nem dado
+    financeiro: apagar um nó do molde apaga de propósito toda a sub-árvore
+    abaixo dele, mais simples pra quem está editando o grupo.
+
+    Sem relacionamento ORM próprio pai→filhos de propósito (child items só
+    existem via `parent_item_id`, sem `relationship()` dedicada): a árvore é
+    montada em Python a partir da lista achatada (mesmo padrão já usado por
+    `services.recalculate_wbs`/`task_dot_colors`), evitando a complexidade
+    de um self-join — ver `_build_item_tree` em app/routers/task_groups.py."""
+
+    __tablename__ = "task_group_items"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    group_id: Mapped[str] = mapped_column(ForeignKey("task_groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_item_id: Mapped[str | None] = mapped_column(ForeignKey("task_group_items.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    task_type: Mapped[TaskType] = mapped_column(nullable=False, default=TaskType.CONSULTING)
+    duration_days: Mapped[Decimal] = mapped_column(Numeric(6, 2), nullable=False, default=1)
+    estimated_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_milestone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    min_level: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    modality: Mapped[TaskModality] = mapped_column(
+        SqlEnum(TaskModality, name="task_modality"), nullable=False, default=TaskModality.BOTH
+    )
+    __table_args__ = (CheckConstraint("min_level BETWEEN 1 AND 4", name="ck_task_group_item_min_level_range"),)
+    group: Mapped[TaskGroup] = relationship(back_populates="items")
+
+
 class Resource(Base):
     __tablename__ = "resources"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))

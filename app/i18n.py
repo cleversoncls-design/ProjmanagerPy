@@ -48,6 +48,10 @@ _ES: dict[str, str] = {
     "Este usuário já possui um recurso cadastrado": "Este usuario ya tiene un recurso registrado",
     "Feriado não encontrado": "Feriado no encontrado",
     "Fora do escopo do cliente": "Fuera del alcance del cliente",
+    # Grupos de Tarefas (pedido do usuário: agrupador reutilizável de
+    # tarefas) — ver app/routers/task_groups.py, services.apply_task_group_to_task.
+    "Grupo de tarefas não encontrado": "Grupo de tareas no encontrado",
+    "Este grupo de tarefas não tem nenhuma tarefa cadastrada": "Este grupo de tareas no tiene ninguna tarea registrada",
     "Hora final precisa ser depois da hora inicial": "La hora final debe ser posterior a la hora inicial",
     "Informe ao menos um filtro (project_id, task_id, resource_id, client_id, status_filter, start ou end)": (
         "Informe al menos un filtro (project_id, task_id, resource_id, client_id, status_filter, start o end)"

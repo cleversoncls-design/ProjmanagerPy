@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import uuid
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -27,6 +28,8 @@ from .models import (
     Task,
     TaskAssignment,
     TaskDependency,
+    TaskGroup,
+    TaskGroupItem,
     TaskStatus,
     TASK_FINISHED_STATUSES,
     TaskType,
@@ -401,6 +404,88 @@ def copy_project_tasks(session: Session, source_project_id: str, target_project:
 
     session.flush()
     return list(old_to_new.values())
+
+
+def apply_task_group_to_task(session: Session, task_group_id: str, parent_task: Task) -> list[Task]:
+    """Aplica um TaskGroup (ver app/models.py) dentro de `parent_task` —
+    clona a árvore inteira do grupo (TaskGroupItem) como tarefas-filhas
+    novas de `parent_task`, no mesmo projeto dela. Pedido do usuário: um
+    "agrupador de tarefas" reutilizável pra acelerar a criação de projetos
+    parecidos.
+
+    Sem nenhuma TaskAssignment (recurso alocado é sempre específico de cada
+    projeto, mesmo critério de `copy_project_tasks`) e sem nenhuma
+    TaskDependency (um TaskGroup não carrega dependência nenhuma — é só
+    estrutura/duração/trabalho). Datas planejadas ficam em branco: sem
+    predecessora (o grupo não carrega dependência) e sem Início próprio no
+    molde, não há o que calcular — igual uma Task criada manualmente sem
+    `planned_start_date` (ver routers/tasks.py `create_task`). Por isso
+    quem chama esta função não precisa (nem deveria) rodar
+    `recalculate_schedule` depois — só `recalculate_wbs`, pro WBS/EAP do
+    projeto renumerar com os nós novos (ver routers/tasks.py
+    `apply_task_group`).
+
+    "Trabalho" (estimated_hours) é recalculado a partir da Duração do item
+    via `apply_effort_driven` (FTE genérica de 8h/dia, mesma regra de
+    `create_task` sem nenhum recurso alocado ainda) em vez de copiar
+    `TaskGroupItem.estimated_hours` direto: a tarefa clonada acabou de
+    nascer sem nenhuma alocação, igual qualquer tarefa nova criada à mão —
+    o valor guardado no molde é só o que foi informado na hora de montar o
+    grupo (sem capacidade de nenhum recurso real por trás).
+
+    `wbs_code` recebe um placeholder único (`_tmp_<id>`, mesmo padrão de
+    `recalculate_wbs`) — provisório até o `recalculate_wbs` que o chamador
+    roda em seguida atribuir o código definitivo; sem isso colidiria com a
+    constraint de unicidade por projeto assim que a segunda tarefa nova for
+    inserida.
+
+    Levanta ValueError se o grupo não existir ou não tiver nenhum item."""
+    group = session.get(TaskGroup, task_group_id)
+    if not group:
+        raise ValueError("Grupo de tarefas não encontrado")
+    items = list(session.scalars(select(TaskGroupItem).where(TaskGroupItem.group_id == task_group_id)).all())
+    if not items:
+        raise ValueError("Este grupo de tarefas não tem nenhuma tarefa cadastrada")
+
+    by_parent: dict[str | None, list[TaskGroupItem]] = defaultdict(list)
+    for item in items:
+        by_parent[item.parent_item_id].append(item)
+    for siblings in by_parent.values():
+        siblings.sort(key=lambda i: i.sort_order)
+
+    created: list[Task] = []
+
+    def clone(item: TaskGroupItem, parent_task_id: str) -> None:
+        new_id = str(uuid.uuid4())
+        new_task = Task(
+            id=new_id,
+            project_id=parent_task.project_id,
+            parent_task_id=parent_task_id,
+            name=item.name,
+            wbs_code=f"_tmp_{new_id}",
+            task_type=item.task_type,
+            sort_order=item.sort_order,
+            is_milestone=item.is_milestone,
+            notes=item.notes,
+            min_level=item.min_level,
+            modality=item.modality,
+        )
+        apply_effort_driven(
+            new_task,
+            duration_days=item.duration_days,
+            estimated_hours=None,
+            capacity_hours_per_day=DEFAULT_CAPACITY_HOURS_PER_DAY,
+        )
+        session.add(new_task)
+        session.flush()
+        created.append(new_task)
+        for child in by_parent.get(item.id, []):
+            clone(child, new_task.id)
+
+    for top_item in by_parent.get(None, []):
+        clone(top_item, parent_task.id)
+
+    return created
 
 
 def calendar_for_project(session: Session, project: Project) -> BusinessCalendar:

@@ -2754,3 +2754,132 @@ def test_project_financeiro_shows_planned_and_real_margin(client, setup):
     body = detail.json()
     assert float(body["margin_percentage"]) == 25.5
     assert "real_margin_percentage" in body["financials"]
+
+
+# ---------------------------------------------------------------------------
+# Grupos de Tarefas (TaskGroup) — agrupador reutilizável de tarefas, pedido
+# do usuário pra acelerar a criação de projetos parecidos: um molde de
+# estrutura (sem projeto por trás) aplicado depois como tarefas-filhas de
+# uma tarefa de um projeto real.
+# ---------------------------------------------------------------------------
+
+
+def _sample_task_group_payload():
+    """Grupo com dois níveis de aninhamento: uma "fase" de topo com duas
+    sub-tarefas, e uma segunda "fase" de topo sem filhas — cobre hierarquia
+    aninhada de verdade (não só uma lista achatada)."""
+    return {
+        "name": "Implantação módulo Fiscal",
+        "description": "Sequência padrão de tarefas pra implantar o módulo Fiscal.",
+        "items": [
+            {
+                "name": "Levantamento",
+                "task_type": "CONSULTING",
+                "duration_days": "2",
+                "children": [
+                    {"name": "Entrevista com o cliente", "duration_days": "1"},
+                    {"name": "Documentar requisitos", "duration_days": "1"},
+                ],
+            },
+            {"name": "Configuração inicial", "duration_days": "3", "is_milestone": True},
+        ],
+    }
+
+
+def test_task_group_crud_preserves_nested_hierarchy(client, setup):
+    admin_headers = setup["admin_headers"]
+
+    created = client.post("/task-groups", json=_sample_task_group_payload(), headers=admin_headers)
+    assert created.status_code == 201
+    body = created.json()
+    assert body["name"] == "Implantação módulo Fiscal"
+    assert len(body["items"]) == 2
+    levantamento = body["items"][0]
+    assert levantamento["name"] == "Levantamento"
+    assert len(levantamento["children"]) == 2
+    assert {child["name"] for child in levantamento["children"]} == {"Entrevista com o cliente", "Documentar requisitos"}
+    assert body["items"][1]["is_milestone"] is True
+
+    listed = client.get("/task-groups", headers=admin_headers)
+    assert listed.status_code == 200
+    assert any(g["id"] == body["id"] for g in listed.json())
+
+    fetched = client.get(f"/task-groups/{body['id']}", headers=admin_headers)
+    assert fetched.status_code == 200
+    assert len(fetched.json()["items"][0]["children"]) == 2
+
+    # PUT substitui a árvore inteira (apaga tudo e recria) — uma edição que
+    # remove uma sub-tarefa e renomeia o grupo precisa refletir exatamente
+    # isso, sem sobra da árvore anterior.
+    replaced_payload = _sample_task_group_payload()
+    replaced_payload["name"] = "Implantação módulo Fiscal (revisado)"
+    replaced_payload["items"][0]["children"] = [{"name": "Entrevista com o cliente", "duration_days": "1"}]
+    updated = client.put(f"/task-groups/{body['id']}", json=replaced_payload, headers=admin_headers)
+    assert updated.status_code == 200
+    updated_body = updated.json()
+    assert updated_body["name"] == "Implantação módulo Fiscal (revisado)"
+    assert len(updated_body["items"][0]["children"]) == 1
+
+    deleted = client.delete(f"/task-groups/{body['id']}", headers=admin_headers)
+    assert deleted.status_code == 204
+    assert client.get(f"/task-groups/{body['id']}", headers=admin_headers).status_code == 404
+
+
+def test_task_group_management_restricted_to_management_roles(client, setup):
+    """Mesmo critério de quem administra Projetos/Tarefas em geral
+    (MANAGEMENT_ROLES) — Consultor não pode gerenciar Grupos de Tarefas."""
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    denied = client.post("/task-groups", json=_sample_task_group_payload(), headers=consultant_headers)
+    assert denied.status_code == 403
+
+    denied_list = client.get("/task-groups", headers=consultant_headers)
+    assert denied_list.status_code == 403
+
+
+def test_apply_task_group_clones_tree_as_children_and_recalculates_wbs(client, setup):
+    admin_headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+
+    group = client.post("/task-groups", json=_sample_task_group_payload(), headers=admin_headers).json()
+    parent_task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Fase Fiscal", "wbs_code": "1"}, headers=admin_headers
+    ).json()
+
+    applied = client.post(
+        f"/tasks/{parent_task['id']}/apply-task-group", json={"task_group_id": group["id"]}, headers=admin_headers
+    )
+    assert applied.status_code == 201
+
+    schedule = client.get(f"/projects/{project_id}/schedule", headers=admin_headers).json()
+    tasks_by_name = {t["name"]: t for t in schedule["tasks"]}
+    assert "Levantamento" in tasks_by_name
+    assert "Configuração inicial" in tasks_by_name
+    assert "Entrevista com o cliente" in tasks_by_name
+    assert "Documentar requisitos" in tasks_by_name
+
+    # WBS/EAP renumerado: as tarefas clonadas entram como filhas da tarefa
+    # "1" (Fase Fiscal), então ganham códigos "1.x"/"1.x.y" — nenhum
+    # "_tmp_" (placeholder provisório de apply_task_group_to_task) deve
+    # sobrar depois do recalculate_wbs que o endpoint roda em seguida.
+    assert tasks_by_name["Levantamento"]["parent_task_id"] == parent_task["id"]
+    assert tasks_by_name["Levantamento"]["wbs_code"].startswith("1.")
+    assert tasks_by_name["Entrevista com o cliente"]["parent_task_id"] == tasks_by_name["Levantamento"]["id"]
+    assert tasks_by_name["Entrevista com o cliente"]["wbs_code"].startswith("1.1.")
+    assert not any(t["wbs_code"].startswith("_tmp_") for t in schedule["tasks"])
+
+    # Nenhuma tarefa clonada carrega data planejada nem alocação — o grupo
+    # não traz nenhum dos dois (ver docstring de apply_task_group_to_task).
+    assert tasks_by_name["Configuração inicial"]["planned_start_date"] is None
+
+
+def test_apply_task_group_rejects_unknown_group(client, setup):
+    admin_headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+    parent_task = client.post(
+        f"/projects/{project_id}/tasks", json={"name": "Fase", "wbs_code": "1"}, headers=admin_headers
+    ).json()
+
+    response = client.post(
+        f"/tasks/{parent_task['id']}/apply-task-group", json={"task_group_id": "id-inexistente"}, headers=admin_headers
+    )
+    assert response.status_code == 422

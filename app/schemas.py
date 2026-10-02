@@ -345,6 +345,77 @@ class WbsRecalculateResponse(BaseModel):
     tasks: list[TaskRead]
 
 
+# ---------------------------------------------------------------------------
+# Grupos de Tarefas (TaskGroup) — agrupador reutilizável de tarefas, pedido
+# do usuário pra acelerar a criação de projetos parecidos. Ver
+# models.TaskGroup/TaskGroupItem e routers/task_groups.py.
+# ---------------------------------------------------------------------------
+
+
+class TaskGroupItemCreate(BaseModel):
+    """Um nó da árvore do grupo, no formato de entrada — `children` é a
+    lista de sub-itens aninhados sob este nó (hierarquia aninhada, sem
+    limite de profundidade). Os mesmos campos de TaskCreate que fazem
+    sentido num molde de estrutura (sem datas/status/progresso: ver
+    docstring de models.TaskGroupItem)."""
+
+    name: str = Field(min_length=1, max_length=255)
+    task_type: TaskType = TaskType.CONSULTING
+    duration_days: Decimal = Field(default=Decimal("1"), gt=0)
+    estimated_hours: Decimal = Field(default=Decimal("0"), ge=0)
+    is_milestone: bool = False
+    notes: str | None = None
+    min_level: int = Field(default=1, ge=1, le=4)
+    modality: TaskModality = TaskModality.BOTH
+    children: list["TaskGroupItemCreate"] = []
+
+
+TaskGroupItemCreate.model_rebuild()
+
+
+class TaskGroupCreate(BaseModel):
+    """Corpo de POST /task-groups e PUT /task-groups/{id} — `items` é a
+    árvore completa do grupo; um PUT substitui a árvore inteira (apaga tudo
+    e recria, ver update_task_group em routers/task_groups.py), não faz
+    diff com o que já existia."""
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    items: list[TaskGroupItemCreate] = []
+
+
+class TaskGroupItemRead(ORMModel):
+    id: str
+    name: str
+    task_type: TaskType
+    duration_days: Decimal
+    estimated_hours: Decimal
+    is_milestone: bool
+    notes: str | None = None
+    min_level: int
+    modality: TaskModality
+    children: list["TaskGroupItemRead"] = []
+
+
+TaskGroupItemRead.model_rebuild()
+
+
+class TaskGroupRead(ORMModel):
+    id: str
+    name: str
+    description: str | None = None
+    created_at: datetime
+    items: list[TaskGroupItemRead] = []
+
+
+class TaskGroupApplyRequest(BaseModel):
+    """Corpo de POST /tasks/{task_id}/apply-task-group — clona a árvore do
+    grupo `task_group_id` como tarefas-filhas de `task_id`. Ver
+    services.apply_task_group_to_task."""
+
+    task_group_id: str
+
+
 class TaskScheduleRow(TaskRead):
     """Linha enriquecida para a grade de cronograma/Gantt — os campos que
     dependem da `status_date` do projeto ou do último baseline, calculados
