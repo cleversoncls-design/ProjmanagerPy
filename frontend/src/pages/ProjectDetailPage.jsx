@@ -1564,6 +1564,15 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
       key: 'actions',
       header: '',
       align: 'right',
+      // Fixa a coluna de ações na borda direita da grade (pedido do
+      // usuário: "no item (tarefa), ter um botão para importar
+      // agrupadores" — o botão "Aplicar grupo de tarefas" já existia aqui,
+      // mas com todas as colunas opcionais ligadas por padrão (Duração,
+      // Trabalho, % completado, Início, Fim, Recursos, Predecessora(s), %
+      // previsto, SPI, CPI, Linha base, Status, Aprovação do cliente) ele
+      // ficava fora da tela, só visível rolando bem pra direita — por isso
+      // parecia não existir). Ver `sticky` em components/Table.jsx.
+      sticky: true,
       render: (row) => (
         <div className="flex justify-end gap-1.5">
           <IconButton

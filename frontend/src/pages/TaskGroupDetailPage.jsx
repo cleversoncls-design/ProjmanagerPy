@@ -193,6 +193,7 @@ export default function TaskGroupDetailPage() {
       key: 'actions',
       header: '',
       align: 'right',
+      sticky: true,
       render: (row) => (
         <div className="flex justify-end gap-1.5">
           <IconButton icon={PlusIcon} label={t('Adicionar sub-tarefa')} onClick={() => setItemModal({ mode: 'create', parentKey: row._key })} />
