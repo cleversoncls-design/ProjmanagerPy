@@ -728,8 +728,7 @@ export const es = {
   'Tipo de ausência': 'Tipo de ausencia',
   'Nenhuma (trabalho normal)': 'Ninguna (trabajo normal)',
   'Desabilitado — o registro é de ausência (custo interno).': 'Deshabilitado — el registro es de ausencia (costo interno).',
-  'Limpa Projeto/Tarefa — ausência é sempre custo interno da empresa.':
-    'Limpia Proyecto/Tarea — la ausencia siempre es costo interno de la empresa.',
+  'Desabilitado — já há Projeto/Tarefa/Traslado selecionado.': 'Deshabilitado — ya hay Proyecto/Tarea/Traslado seleccionado.',
   'Férias, licença, folga etc. — nunca um custo de cliente.': 'Vacaciones, licencia, día libre, etc. — nunca un costo de cliente.',
   'Férias': 'Vacaciones',
   'Licença Médica': 'Licencia Médica',

@@ -84,9 +84,17 @@ export default function TimesheetFieldsForm({ form, updateField, projects, taskO
         </label>
         <FormField
           label={t('Tipo de ausência')}
-          hint={form.project_id || form.task_id ? t('Limpa Projeto/Tarefa — ausência é sempre custo interno da empresa.') : t('Férias, licença, folga etc. — nunca um custo de cliente.')}
+          hint={
+            form.project_id || form.task_id || form.is_transit
+              ? t('Desabilitado — já há Projeto/Tarefa/Traslado selecionado.')
+              : t('Férias, licença, folga etc. — nunca um custo de cliente.')
+          }
         >
-          <Select value={form.absence_type} onChange={updateField('absence_type')}>
+          <Select
+            value={form.absence_type}
+            onChange={updateField('absence_type')}
+            disabled={Boolean(form.project_id) || Boolean(form.task_id) || Boolean(form.is_transit)}
+          >
             <option value="">{t('Nenhuma (trabalho normal)')}</option>
             {Object.entries(labels.ABSENCE_TYPE_LABELS).map(([value, label]) => (
               <option key={value} value={value}>
