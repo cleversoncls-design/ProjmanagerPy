@@ -96,18 +96,20 @@ def _scoped_projects(db: Session, user: User, include_modelo: bool = False) -> l
 
 @router.get("/dashboard", response_model=DashboardResponse)
 def dashboard(
-    # Dashboard ficou só com ADMIN_LIKE_ROLES e os perfis externos do
-    # cliente (revisão de acessos do usuário) — Gerente de Projetos e
-    # Consultor perderam esse item de menu; mesmos perfis de DASHBOARD_ROLES
-    # no frontend (utils/labels.js), restrito aqui também pra não depender
-    # só da UI esconder a rota.
-    user: User = Depends(require_roles(*ADMIN_LIKE_ROLES, UserRole.CLIENT_PM, UserRole.CLIENT_USER)),
+    # Dashboard ficou só com ADMIN_LIKE_ROLES (reorganização de menus,
+    # pedido do usuário) — Gerente de Projetos e Consultor já não tinham
+    # esse item de menu, e agora PM do Cliente/Usuário-chave também
+    # perderam (confirmado com o usuário: Painel saiu do menu do PM do
+    # Cliente; Usuário-chave ficou sem nenhum acesso por enquanto). Mesmos
+    # perfis de DASHBOARD_ROLES no frontend (utils/labels.js), restrito
+    # aqui também pra não depender só da UI esconder a rota. O mesmo dado
+    # (escopado por cliente, sem margem) continua disponível pro perfil
+    # externo via GET /reports/portfolio, que não tem essa restrição.
+    user: User = Depends(require_roles(*ADMIN_LIKE_ROLES)),
     db: Session = Depends(get_db),
 ) -> dict:
     """Visão geral do portfólio: contagens por status, tarefas por tipo,
-    tarefas atrasadas e a listagem "portfolio" (uma linha por projeto).
-    Perfis externos enxergam só os projetos do próprio cliente, e sem
-    margem (mesmo tratamento de ProjectDetail/GET /reports/portfolio)."""
+    tarefas atrasadas e a listagem "portfolio" (uma linha por projeto)."""
     projects = _scoped_projects(db, user)
     project_ids = [p.id for p in projects]
     tasks = list(db.scalars(select(Task).where(Task.project_id.in_(project_ids))).all()) if project_ids else []
@@ -258,17 +260,21 @@ def hours_breakdown(
     resource_id: str | None = None,
     client_id: str | None = None,
     project_id: str | None = None,
-    user: User = Depends(require_roles(*ADMIN_LIKE_ROLES)),
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
     db: Session = Depends(get_db),
 ) -> dict:
     """Primeiro relatório do novo menu "Relatórios" (pedido do usuário):
     acompanha, num só lugar, horas de Projeto (cliente), Traslado e cada
     tipo de Ausência — totais da empresa + quebra por recurso (decisão
-    confirmada: "os dois níveis"). Restrito a ADMIN_LIKE_ROLES — diferente
-    de Aprovações pendentes (MANAGEMENT_ROLES, mas aí o INTERNAL_PM só vê
-    os projetos que gerencia), este relatório expõe ausência/horas de TODOS
-    os recursos da empresa, dado mais sensível. Sem `start`/`end`, usa o mês
-    corrente (mesmo padrão de GET /resources/utilization)."""
+    confirmada: "os dois níveis"). Era restrito a ADMIN_LIKE_ROLES, porque
+    expõe ausência/horas de TODOS os recursos da empresa (não só dos
+    projetos que o INTERNAL_PM gerencia); a reorganização de menus (pedido
+    do usuário) liberou Relatórios também pro Gerente de Projetos, com o
+    relatório completo mesmo — confirmado com o usuário, que pretende criar
+    relatórios por projeto (com escopo restrito) separadamente no futuro.
+    Mesmo grupo de Aprovações pendentes (MANAGEMENT_ROLES) agora. Sem
+    `start`/`end`, usa o mês corrente (mesmo padrão de GET
+    /resources/utilization)."""
     today = date.today()
     period_start = start or today.replace(day=1)
     if end:

@@ -160,22 +160,29 @@ def test_consultant_cannot_administer_project_or_tasks(client, setup):
     assert allowed_task.status_code == 201
 
 
-def test_dashboard_restricted_to_admin_and_client_roles(client, setup):
-    """Revisão de acessos do usuário: Dashboard ficou só com Admin e os
-    perfis externos do cliente — Gerente de Projetos e Consultor perderam
-    esse item de menu, restrito aqui também na API (não só escondido na
-    UI)."""
+def test_dashboard_restricted_to_admin_like_roles(client, setup):
+    """Reorganização de menus (pedido do usuário): Dashboard ficou só com
+    ADMIN_LIKE_ROLES. Gerente de Projetos e Consultor já não tinham esse
+    item; PM do Cliente e Usuário-chave perderam o que tinham (confirmado
+    com o usuário: Painel saiu do menu do PM do Cliente, e Usuário-chave
+    ficou sem nenhum acesso por enquanto) — restrito aqui também na API, não
+    só escondido na UI. O mesmo dado (escopado por cliente, sem margem)
+    continua disponível pro perfil externo via GET /reports/portfolio, que
+    não tem essa restrição (ver test_reports_portfolio_endpoint_scopes_by_client)."""
     denied_pm = client.get("/dashboard", headers=auth_headers(client, setup["pm"].email))
     assert denied_pm.status_code == 403
 
     denied_consultant = client.get("/dashboard", headers=auth_headers(client, setup["consultant"].email))
     assert denied_consultant.status_code == 403
 
+    denied_client_pm = client.get("/dashboard", headers=auth_headers(client, setup["client_pm_a"].email))
+    assert denied_client_pm.status_code == 403
+
+    denied_client_user = client.get("/dashboard", headers=auth_headers(client, setup["client_user_a"].email))
+    assert denied_client_user.status_code == 403
+
     allowed_admin = client.get("/dashboard", headers=setup["admin_headers"])
     assert allowed_admin.status_code == 200
-
-    allowed_client_pm = client.get("/dashboard", headers=auth_headers(client, setup["client_pm_a"].email))
-    assert allowed_client_pm.status_code == 200
 
 
 def test_list_users_filters_by_role_and_is_restricted_to_management(client, setup):
@@ -280,26 +287,31 @@ def test_cross_client_access_is_denied(client, setup):
     assert response.status_code == 403
 
 
-def test_client_user_is_read_only_but_client_pm_can_write(client, setup):
+def test_external_roles_cannot_write_tasks(client, setup):
     """Regressão do bug em que a checagem de escrita nunca disparava: antes
-    desta correção, CLIENT_USER também conseguia criar tarefas."""
+    da correção original, CLIENT_USER também conseguia criar tarefas.
+
+    Reorganização de menus (pedido do usuário): PM do Cliente, que antes
+    podia escrever dentro do próprio escopo de cliente, também passou a ser
+    sempre somente leitura — igual já era CLIENT_USER (ver
+    require_project_access em app/deps.py)."""
     project_id = setup["project_a"].id
 
     client_user_headers = auth_headers(client, setup["client_user_a"].email)
-    denied = client.post(
+    denied_client_user = client.post(
         f"/projects/{project_id}/tasks",
         json={"name": "Tarefa 1", "wbs_code": "1"},
         headers=client_user_headers,
     )
-    assert denied.status_code == 403
+    assert denied_client_user.status_code == 403
 
     client_pm_headers = auth_headers(client, setup["client_pm_a"].email)
-    allowed = client.post(
+    denied_client_pm = client.post(
         f"/projects/{project_id}/tasks",
         json={"name": "Tarefa 1", "wbs_code": "1"},
         headers=client_pm_headers,
     )
-    assert allowed.status_code == 201
+    assert denied_client_pm.status_code == 403
 
 
 def test_duplicate_wbs_code_in_same_project_is_rejected(client, setup):
@@ -918,10 +930,14 @@ def test_project_color_exclusivity_and_striped_on_finalize(client, setup):
 
 
 def test_external_role_cannot_change_project_financials(client, setup):
+    """PM do Cliente é sempre somente leitura (reorganização de menus,
+    pedido do usuário) — o PATCH inteiro é barrado em require_project_access
+    antes mesmo de chegar na checagem de campo financeiro por isso, o campo
+    nunca muda, mesmo que o perfil tentasse editar outra coisa junto."""
     project_id = setup["project_a"].id
     external_headers = auth_headers(client, setup["client_pm_a"].email)
     response = client.patch(f"/projects/{project_id}", json={"management_rate": "999"}, headers=external_headers)
-    assert response.status_code == 200
+    assert response.status_code == 403
 
     detail = client.get(f"/projects/{project_id}", headers=setup["admin_headers"]).json()
     assert float(detail["management_rate"]) == 0.0
@@ -1097,9 +1113,10 @@ def test_timesheet_requires_task_or_transit_when_project_is_set(client, setup):
 
 
 def test_task_client_approval_workflow(client, setup):
-    """Fluxo de validação de tarefa pelo lado do cliente: quem tem escrita
-    (interno ou CLIENT_PM) submete; só o cliente (CLIENT_PM/CLIENT_USER,
-    inclusive o último, que no resto da API é somente-leitura) aprova ou
+    """Fluxo de validação de tarefa pelo lado do cliente: um perfil interno
+    submete (reorganização de menus tirou PM do Cliente dessa rota também —
+    ver test_external_roles_cannot_write_tasks); só o cliente (CLIENT_PM/
+    CLIENT_USER, ambos sempre somente-leitura no resto da API) aprova ou
     rejeita — e só enquanto está PENDING."""
     project_id = setup["project_a"].id
     admin_headers = setup["admin_headers"]
@@ -1254,28 +1271,31 @@ def test_update_task_dates_cascades_to_successor(client, setup):
 
 
 def test_dashboard_scopes_projects_by_client_and_hides_margin_externally(client, setup):
-    """Admin enxerga o portfólio inteiro (os dois projetos do setup); um
-    perfil externo só enxerga o(s) projeto(s) do próprio cliente, e sem
-    margem na linha de portfólio — mesmo tratamento de dado financeiro do
-    resto da API."""
+    """Admin enxerga o portfólio inteiro (os dois projetos do setup), com
+    margem na linha de portfólio. A checagem de escopo por cliente e de
+    margem escondida pro perfil externo foi pra
+    test_reports_portfolio_endpoint_scopes_by_client logo abaixo —
+    reorganização de menus (pedido do usuário) tirou PM do Cliente/
+    Usuário-chave do Dashboard (ver test_dashboard_restricted_to_admin_like_roles),
+    então GET /dashboard não é mais chamável por perfil externo."""
     admin_view = client.get("/dashboard", headers=setup["admin_headers"]).json()
     assert admin_view["projects_total"] == 2
     admin_row = next(row for row in admin_view["portfolio"] if row["id"] == setup["project_a"].id)
     assert admin_row["margin"] is not None
 
-    external_headers = auth_headers(client, setup["client_pm_a"].email)
-    external_view = client.get("/dashboard", headers=external_headers).json()
-    assert external_view["projects_total"] == 1
-    assert external_view["portfolio"][0]["id"] == setup["project_a"].id
-    assert external_view["portfolio"][0]["margin"] is None
-
 
 def test_reports_portfolio_endpoint_scopes_by_client(client, setup):
+    """Diferente de GET /dashboard (restrito a ADMIN_LIKE_ROLES), este
+    endpoint continua aberto a qualquer perfil autenticado — é por aqui que
+    o PM do Cliente enxerga o próprio portfólio depois da reorganização de
+    menus. Escopado por client_id e sem margem (mesmo tratamento de dado
+    financeiro do resto da API para perfil externo)."""
     external_headers = auth_headers(client, setup["client_pm_a"].email)
     response = client.get("/reports/portfolio", headers=external_headers)
     assert response.status_code == 200
     rows = response.json()
     assert [row["id"] for row in rows] == [setup["project_a"].id]
+    assert rows[0]["margin"] is None
 
 
 def test_project_report_includes_burndown_and_hides_financials_externally(client, setup):
@@ -2536,18 +2556,29 @@ def test_hours_breakdown_report_aggregates_project_transit_and_absence_hours(cli
     assert float(by_project["hours"]) == 2.0
 
 
-def test_hours_breakdown_report_forbidden_for_internal_pm(client, setup):
-    """O relatório expõe dados sensíveis (ausência/horas de TODOS os
-    recursos da empresa) — restrito a ADMIN_LIKE_ROLES, mesmo grupo de
-    /clients e /users, não ao grupo mais amplo de Aprovações de horas
-    (MANAGEMENT_ROLES inclui INTERNAL_PM)."""
+def test_hours_breakdown_report_allowed_for_internal_pm_but_not_consultant(client, setup):
+    """Reorganização de menus (pedido do usuário): Relatórios passou a
+    aparecer também pro Gerente de Projetos, com o relatório completo
+    liberado (mesmo que ele exponha ausência/horas de TODOS os recursos da
+    empresa, não só dos projetos que o INTERNAL_PM gerencia) — decisão
+    confirmada com o usuário, que pretende tratar relatórios por projeto
+    separadamente no futuro. Continua restrito a MANAGEMENT_ROLES — o
+    Consultor, que nunca teve Relatórios no menu, segue barrado."""
     pm_headers = auth_headers(client, setup["pm"].email)
-    response = client.get(
+    allowed = client.get(
         "/reports/hours-breakdown",
         params={"start": "2026-08-01", "end": "2026-08-31"},
         headers=pm_headers,
     )
-    assert response.status_code == 403
+    assert allowed.status_code == 200
+
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    denied = client.get(
+        "/reports/hours-breakdown",
+        params={"start": "2026-08-01", "end": "2026-08-31"},
+        headers=consultant_headers,
+    )
+    assert denied.status_code == 403
 
 
 def test_cannot_timesheet_parent_task_only_child(client, setup):

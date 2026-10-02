@@ -42,6 +42,15 @@ export const es = {
   'Usuários e recursos': 'Usuarios y recursos',
   Calendários: 'Calendarios',
   Workspace: 'Espacio de trabajo',
+  // Títulos das seções do menu lateral (reorganização de menus, pedido do
+  // usuário) — ver NAV_SECTIONS em components/Sidebar.jsx.
+  Apontamentos: 'Registros de horas',
+  Configurações: 'Configuraciones',
+  // Home do perfil Usuário-chave depois da reorganização de menus (ver
+  // pages/NoAccessPage.jsx) — perfil sem nenhum item de menu por enquanto.
+  'Sem acesso': 'Sin acceso',
+  'Seu perfil ainda não tem nenhuma funcionalidade liberada neste sistema. Fale com o administrador se isso não for esperado.':
+    'Su perfil todavía no tiene ninguna funcionalidad habilitada en este sistema. Hable con el administrador si esto no es lo esperado.',
   Portfólio: 'Portafolio',
   Cadastros: 'Registros',
   'Visão geral': 'Visión general',

@@ -260,10 +260,13 @@ def submit_task_for_approval(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Task:
-    """Quem tem acesso de escrita na tarefa (interno, ou CLIENT_PM no escopo
-    do próprio cliente) marca a tarefa como pronta para o usuário-chave do
-    cliente validar. Pode ser chamado de novo depois de uma rejeição, para
-    reenviar."""
+    """Quem tem acesso de escrita na tarefa (perfil interno) marca a tarefa
+    como pronta para o cliente validar. PM do Cliente deixou de poder
+    chamar esta rota (reorganização de menus, pedido do usuário: os dois
+    perfis externos agora são sempre somente leitura — ver
+    require_project_access em app/deps.py); quem valida continua sendo só
+    o lado do cliente, pelo endpoint abaixo. Pode ser chamado de novo
+    depois de uma rejeição, para reenviar."""
     task = _get_task_or_404(db, task_id, user.language)
     require_project_access(task.project, user, write=True, allow_consultant_write=False)
     if task.client_approval_status == TaskApprovalStatus.PENDING:

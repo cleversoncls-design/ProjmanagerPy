@@ -10,6 +10,8 @@ import {
   BriefcaseIcon,
   BuildingIcon,
   CalendarIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   ClipboardCheckIcon,
   ClockIcon,
   FileTextIcon,
@@ -18,35 +20,124 @@ import {
   UsersIcon,
 } from './icons'
 
-const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', end: true, icon: HomeIcon, roles: DASHBOARD_ROLES },
-  { to: '/projects', label: 'Projetos', icon: BriefcaseIcon, roles: PROJECTS_VISIBLE_ROLES },
-  { to: '/schedules', label: 'Agenda de consultores', roles: INTERNAL_ROLES, icon: ClockIcon },
-  { to: '/timesheets', label: 'Apontamento de horas', roles: INTERNAL_ROLES, icon: ClipboardCheckIcon },
-  // Só ADMIN/INTERNAL_PM aprovam (mesmo grupo de papéis de /calendars) —
-  // antes era uma seção dentro de Apontamento de horas, virou rotina
-  // própria no menu (pedido do usuário).
-  { to: '/timesheet-approvals', label: 'Aprovações de horas', roles: MANAGEMENT_ROLES, icon: BadgeCheckIcon },
-  { to: '/service-orders', label: 'Ordens de Serviço', roles: INTERNAL_ROLES, icon: FileTextIcon },
-  { to: '/clients', label: 'Clientes', roles: ADMIN_LIKE_ROLES, icon: BuildingIcon },
-  { to: '/users', label: 'Usuários e recursos', roles: ADMIN_LIKE_ROLES, icon: UsersIcon },
-  { to: '/calendars', label: 'Calendários', roles: MANAGEMENT_ROLES, icon: CalendarIcon },
-  // "Grupos de Tarefas" (pedido do usuário) — agrupador reutilizável de
-  // tarefas, aplicado depois como filhas de uma tarefa de projeto (ver
-  // TaskGroupsPage/ProjectDetailPage). Página própria do menu, mesmo
-  // critério de acesso de Calendários (MANAGEMENT_ROLES) — decisão
-  // confirmada com o usuário.
-  { to: '/task-groups', label: 'Grupos de Tarefas', roles: MANAGEMENT_ROLES, icon: LayersIcon },
-  // Menu novo (pedido do usuário) — hoje com um relatório (Horas por tipo:
-  // Projeto/Traslado/Ausência), pensado pra receber mais no futuro
-  // (ReportsIndexPage lista os cards). ADMIN_LIKE_ROLES: dado sensível —
-  // ausência/horas de TODOS os recursos da empresa, não só dos projetos
-  // que o INTERNAL_PM gerencia (ver hours_breakdown, routers/reports.py).
-  { to: '/reports', label: 'Relatórios', roles: ADMIN_LIKE_ROLES, icon: BarChartIcon },
+// Reorganização de menus (pedido do usuário): o menu deixou de ser uma
+// lista única e virou "Painel" + "Relatórios" soltos, com três seções
+// agrupadas no meio (Projetos / Apontamentos / Configurações) — cada
+// seção lista suas próprias rotas, cada rota com seus próprios `roles`
+// (os mesmos grupos de sempre, ver utils/labels.js). Uma seção some
+// inteira quando nenhum item dela é visível pro perfil logado (ex.:
+// Consultor nunca vê a seção "Projetos").
+const NAV_SECTIONS = [
+  { type: 'item', to: '/', label: 'Dashboard', end: true, icon: HomeIcon, roles: DASHBOARD_ROLES },
+  {
+    type: 'group',
+    key: 'projetos',
+    label: 'Projetos',
+    items: [
+      { to: '/calendars', label: 'Calendários', icon: CalendarIcon, roles: MANAGEMENT_ROLES },
+      { to: '/clients', label: 'Clientes', icon: BuildingIcon, roles: ADMIN_LIKE_ROLES },
+      { to: '/projects', label: 'Projetos', icon: BriefcaseIcon, roles: PROJECTS_VISIBLE_ROLES },
+      { to: '/task-groups', label: 'Grupos de Tarefas', icon: LayersIcon, roles: MANAGEMENT_ROLES },
+      // "Agendas" (pedido do usuário): saiu de INTERNAL_ROLES pra
+      // MANAGEMENT_ROLES — Consultor perdeu este item do menu (decisão
+      // confirmada com o usuário na reorganização de menus).
+      { to: '/schedules', label: 'Agenda de consultores', icon: ClockIcon, roles: MANAGEMENT_ROLES },
+    ],
+  },
+  {
+    type: 'group',
+    key: 'apontamentos',
+    label: 'Apontamentos',
+    items: [
+      { to: '/timesheets', label: 'Apontamento de horas', icon: ClipboardCheckIcon, roles: INTERNAL_ROLES },
+      { to: '/service-orders', label: 'Ordens de Serviço', icon: FileTextIcon, roles: INTERNAL_ROLES },
+      { to: '/timesheet-approvals', label: 'Aprovações de horas', icon: BadgeCheckIcon, roles: MANAGEMENT_ROLES },
+    ],
+  },
+  {
+    type: 'group',
+    key: 'configuracoes',
+    label: 'Configurações',
+    items: [{ to: '/users', label: 'Usuários e recursos', icon: UsersIcon, roles: ADMIN_LIKE_ROLES }],
+  },
+  // "Relatórios" (pedido do usuário): saiu de ADMIN_LIKE_ROLES pra
+  // MANAGEMENT_ROLES — Gerente de Projetos ganhou este item do menu
+  // (decisão confirmada com o usuário na reorganização de menus; mesma
+  // mudança replicada em GET /reports/hours-breakdown no backend).
+  { type: 'item', to: '/reports', label: 'Relatórios', icon: BarChartIcon, roles: MANAGEMENT_ROLES },
 ]
 
 const WIDTH_EXPANDED = 252
 const WIDTH_COLLAPSED = 76
+
+const GROUP_STATE_STORAGE_KEY = 'pmpy_sidebar_open_groups'
+
+function loadOpenGroups() {
+  try {
+    const raw = localStorage.getItem(GROUP_STATE_STORAGE_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    // localStorage bloqueado/cheio (modo privado etc.) — todas as seções
+    // simplesmente começam abertas (ver isGroupOpen abaixo) e deixam de
+    // lembrar estado entre reloads, sem travar a tela.
+    return {}
+  }
+}
+
+function saveOpenGroups(state) {
+  try {
+    localStorage.setItem(GROUP_STATE_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // Idem acima — falha silenciosa, não é dado crítico.
+  }
+}
+
+/** Visível pro perfil logado? Sem `roles`, sempre visível. */
+function isVisible(entry, role) {
+  return !entry.roles || entry.roles.includes(role)
+}
+
+/** Monta a estrutura de navegação já filtrada pelo perfil: itens soltos
+ * filtrados direto, grupos filtrados por dentro (e removidos inteiros
+ * quando nenhum item sobra). */
+function buildVisibleSections(role) {
+  const sections = []
+  for (const section of NAV_SECTIONS) {
+    if (section.type === 'item') {
+      if (isVisible(section, role)) sections.push(section)
+      continue
+    }
+    const items = section.items.filter((item) => isVisible(item, role))
+    if (items.length > 0) sections.push({ ...section, items })
+  }
+  return sections
+}
+
+function NavItem({ item, expanded, indent = false }) {
+  return (
+    <NavLink
+      to={item.to}
+      end={item.end}
+      className={({ isActive }) =>
+        `nav-link flex min-h-[40px] items-center rounded-lg py-2 transition-colors ${indent ? 'pl-5 pr-2.5' : 'px-2.5'} ${!expanded ? 'justify-center' : ''} ${isActive ? 'nav-link--active' : ''}`
+      }
+    >
+      {({ isActive }) => (
+        <>
+          <item.icon size={18} style={{ color: isActive ? 'var(--nav-fg-strong)' : 'var(--nav-fg)' }} />
+          {expanded && (
+            <span
+              className="ml-3 flex-1 text-[13px] font-semibold whitespace-nowrap"
+              style={{ color: isActive ? 'var(--nav-fg-strong)' : 'var(--nav-fg)' }}
+            >
+              {item.label}
+            </span>
+          )}
+        </>
+      )}
+    </NavLink>
+  )
+}
 
 /** Menu lateral — estrutura e paleta ("chrome") portadas do app de
  * referência Resultar Servicios (components/app-sidebar.tsx). A paleta
@@ -55,12 +146,33 @@ const WIDTH_COLLAPSED = 76
  * Recolhe/expande com o mouse: fica recolhido (só ícones) por padrão e
  * expande enquanto o ponteiro está sobre ele. Continua no fluxo normal do
  * layout (flex item, não overlay), então o conteúdo à direita redimensiona
- * junto, em tempo real, como o resto da tela. */
+ * junto, em tempo real, como o resto da tela.
+ *
+ * Reorganização de menus (pedido do usuário): as seções (Projetos/
+ * Apontamentos/Configurações) são expansíveis/recolhíveis, independente do
+ * recolhimento do menu inteiro — com o menu recolhido (só ícones), os
+ * grupos somem e tudo aparece numa lista achatada só de ícones (não dá pra
+ * clicar num título de seção que não está sendo mostrado). */
 export default function Sidebar() {
   const { user } = useAuth()
   const { t } = useLanguage()
-  const items = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(user.role))
   const [expanded, setExpanded] = useState(false)
+  const [openGroups, setOpenGroups] = useState(loadOpenGroups)
+
+  const sections = buildVisibleSections(user.role)
+  const flatItems = sections.flatMap((section) => (section.type === 'group' ? section.items : [section]))
+
+  function isGroupOpen(key) {
+    return openGroups[key] ?? true
+  }
+
+  function toggleGroup(key) {
+    setOpenGroups((prev) => {
+      const next = { ...prev, [key]: !isGroupOpen(key) }
+      saveOpenGroups(next)
+      return next
+    })
+  }
 
   return (
     <aside
@@ -95,32 +207,49 @@ export default function Sidebar() {
               {t('Workspace')}
             </p>
           )}
-          <nav className="space-y-1">
-            {items.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  `nav-link flex min-h-[40px] items-center rounded-lg px-2.5 py-2 transition-colors ${!expanded ? 'justify-center' : ''} ${isActive ? 'nav-link--active' : ''}`
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <item.icon size={18} style={{ color: isActive ? 'var(--nav-fg-strong)' : 'var(--nav-fg)' }} />
-                    {expanded && (
+
+          {expanded ? (
+            <nav className="space-y-1">
+              {sections.map((section) =>
+                section.type === 'item' ? (
+                  <NavItem key={section.to} item={{ ...section, label: t(section.label) }} expanded />
+                ) : (
+                  <div key={section.key}>
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(section.key)}
+                      className="flex w-full items-center gap-1 rounded-lg px-2.5 py-1.5 text-left"
+                    >
+                      {isGroupOpen(section.key) ? (
+                        <ChevronDownIcon size={12} style={{ color: 'var(--nav-fg-muted)' }} />
+                      ) : (
+                        <ChevronRightIcon size={12} style={{ color: 'var(--nav-fg-muted)' }} />
+                      )}
                       <span
-                        className="ml-3 flex-1 text-[13px] font-semibold whitespace-nowrap"
-                        style={{ color: isActive ? 'var(--nav-fg-strong)' : 'var(--nav-fg)' }}
+                        className="flex-1 truncate text-[10px] font-extrabold uppercase tracking-wider"
+                        style={{ color: 'var(--nav-fg-muted)' }}
                       >
-                        {t(item.label)}
+                        {t(section.label)}
                       </span>
+                    </button>
+                    {isGroupOpen(section.key) && (
+                      <div className="space-y-1">
+                        {section.items.map((item) => (
+                          <NavItem key={item.to} item={{ ...item, label: t(item.label) }} expanded indent />
+                        ))}
+                      </div>
                     )}
-                  </>
-                )}
-              </NavLink>
-            ))}
-          </nav>
+                  </div>
+                ),
+              )}
+            </nav>
+          ) : (
+            <nav className="space-y-1">
+              {flatItems.map((item) => (
+                <NavItem key={item.to} item={item} expanded={false} />
+              ))}
+            </nav>
+          )}
         </div>
 
         <div className="mt-1 border-t pt-2.5" style={{ borderColor: 'var(--nav-border)' }}>

@@ -19,6 +19,7 @@ import TimesheetApprovalsPage from './pages/TimesheetApprovalsPage'
 import ServiceOrdersPage from './pages/ServiceOrdersPage'
 import ReportsIndexPage from './pages/ReportsIndexPage'
 import HoursBreakdownReportPage from './pages/HoursBreakdownReportPage'
+import NoAccessPage from './pages/NoAccessPage'
 import { ADMIN_LIKE_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECTS_VISIBLE_ROLES } from './utils/labels'
 
 export default function App() {
@@ -33,6 +34,12 @@ export default function App() {
               <Route element={<ProtectedRoute />}>
                 <Route element={<Layout />}>
                   <Route path="/" element={<HomeRoute />} />
+                  {/* Home do Usuário-chave (reorganização de menus: perfil
+                      ficou sem nenhum item de menu por enquanto, ver
+                      ROLE_HOME_PATH em utils/labels.js) — sem `roles`, de
+                      propósito: qualquer perfil logado pode abrir, mas só
+                      quem não tem mais nenhuma rota cai aqui. */}
+                  <Route path="/no-access" element={<NoAccessPage />} />
 
                   <Route element={<ProtectedRoute roles={PROJECTS_VISIBLE_ROLES} />}>
                     <Route path="/projects" element={<ProjectsPage />} />
@@ -40,7 +47,6 @@ export default function App() {
                   </Route>
 
                   <Route element={<ProtectedRoute roles={INTERNAL_ROLES} />}>
-                    <Route path="/schedules" element={<SchedulesPage />} />
                     <Route path="/timesheets" element={<TimesheetsPage />} />
                     <Route path="/service-orders" element={<ServiceOrdersPage />} />
                   </Route>
@@ -48,15 +54,21 @@ export default function App() {
                   <Route element={<ProtectedRoute roles={ADMIN_LIKE_ROLES} />}>
                     <Route path="/clients" element={<ClientsPage />} />
                     <Route path="/users" element={<UsersPage />} />
-                    <Route path="/reports" element={<ReportsIndexPage />} />
-                    <Route path="/reports/hours-breakdown" element={<HoursBreakdownReportPage />} />
                   </Route>
 
+                  {/* "Agenda de consultores" e "Relatórios" saíram de
+                      INTERNAL_ROLES/ADMIN_LIKE_ROLES pra MANAGEMENT_ROLES
+                      na reorganização de menus (pedido do usuário): Consultor
+                      perdeu a Agenda, Gerente de Projetos ganhou Relatórios
+                      — ver Sidebar.jsx e app/routers/reports.py. */}
                   <Route element={<ProtectedRoute roles={MANAGEMENT_ROLES} />}>
+                    <Route path="/schedules" element={<SchedulesPage />} />
                     <Route path="/timesheet-approvals" element={<TimesheetApprovalsPage />} />
                     <Route path="/calendars" element={<CalendarsPage />} />
                     <Route path="/task-groups" element={<TaskGroupsPage />} />
                     <Route path="/task-groups/:groupId" element={<TaskGroupDetailPage />} />
+                    <Route path="/reports" element={<ReportsIndexPage />} />
+                    <Route path="/reports/hours-breakdown" element={<HoursBreakdownReportPage />} />
                   </Route>
                 </Route>
               </Route>

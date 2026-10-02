@@ -61,24 +61,38 @@ export const INTERNAL_ROLES = ['ADMIN', 'INTERNAL_PM', 'CONSULTANT', 'SERVICE_MA
 // e Usuários — Gerente de Projetos perdeu esses dois itens do menu
 // (confirmado com o usuário).
 export const ADMIN_LIKE_ROLES = ['ADMIN', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR']
-// Dashboard: ADMIN_LIKE_ROLES e os perfis externos do cliente (perfil
-// externo não entrou nesta reorganização, mantido como já era) — Gerente
-// de Projetos e Consultor não têm esse item no menu.
-export const DASHBOARD_ROLES = ['ADMIN', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR', 'CLIENT_PM', 'CLIENT_USER']
-// Projetos (lista + detalhe do projeto): todo mundo, menos Consultor —
-// que perdeu esse item no menu (continua vendo Agenda de Consultores,
-// Apontamento de horas e Ordens de Serviço).
-export const PROJECTS_VISIBLE_ROLES = ['ADMIN', 'INTERNAL_PM', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR', 'CLIENT_PM', 'CLIENT_USER']
+// Dashboard ("Painel"): só ADMIN_LIKE_ROLES. Gerente de Projetos e
+// Consultor já não tinham esse item; na reorganização de menus (pedido do
+// usuário) PM do Cliente também perdeu o Painel, e Usuário-chave ficou sem
+// nenhum item de menu por enquanto (ver nota em ROLE_HOME_PATH abaixo) —
+// mesma restrição aplicada no backend (GET /dashboard, ver
+// app/routers/reports.py).
+export const DASHBOARD_ROLES = ['ADMIN', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR']
+// Projetos (lista + detalhe do projeto): todo mundo, menos Consultor (que
+// nunca teve esse item — continua vendo Agenda de Consultores, Apontamento
+// de horas e Ordens de Serviço) e Usuário-chave (reorganização de menus:
+// perfil ficou sem nenhum acesso por enquanto, pedido do usuário). PM do
+// Cliente mantém Projetos — único item do menu dele agora — mas sempre
+// somente leitura (ver require_project_access em app/deps.py).
+export const PROJECTS_VISIBLE_ROLES = ['ADMIN', 'INTERNAL_PM', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR', 'CLIENT_PM']
 
 // Primeira tela de cada perfil ao logar (ou ao cair em "/" depois de ser
 // barrado por ProtectedRoute em alguma rota) — precisa ser uma rota que o
 // próprio perfil tenha acesso, senão vira redirecionamento em loop.
+//
+// Reorganização de menus (pedido do usuário): Consultor perdeu Agenda de
+// Consultores do menu (agora MANAGEMENT_ROLES, ver Sidebar.jsx/App.jsx),
+// então sua home mudou pra Apontamento de horas. PM do Cliente perdeu o
+// Painel, então cai direto em Projetos (único item que ainda tem). Usuário-
+// chave ficou sem nenhum item de menu — "/no-access" é uma rota própria,
+// sem checagem de `roles` (ver App.jsx/NoAccessPage.jsx), pra não virar
+// loop de redirecionamento.
 export const ROLE_HOME_PATH = {
   ADMIN: '/',
   INTERNAL_PM: '/projects',
-  CONSULTANT: '/schedules',
-  CLIENT_PM: '/',
-  CLIENT_USER: '/',
+  CONSULTANT: '/timesheets',
+  CLIENT_PM: '/projects',
+  CLIENT_USER: '/no-access',
   SERVICE_MANAGER: '/',
   GENERAL_DIRECTOR: '/',
 }

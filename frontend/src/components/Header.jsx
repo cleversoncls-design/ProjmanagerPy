@@ -10,6 +10,10 @@ const HEADING_BY_PREFIX = [
   { prefix: '/clients', crumb: 'Cadastros', title: 'Clientes' },
   { prefix: '/users', crumb: 'Cadastros', title: 'Usuários e recursos' },
   { prefix: '/calendars', crumb: 'Cadastros', title: 'Calendários' },
+  // Home do Usuário-chave (reorganização de menus) — sem isso, cairia no
+  // prefixo "/" abaixo e mostraria "Dashboard" por engano pra um perfil que
+  // nem acessa o Dashboard.
+  { prefix: '/no-access', crumb: 'Visão geral', title: 'Sem acesso' },
   { prefix: '/', crumb: 'Visão geral', title: 'Dashboard' },
 ]
 
