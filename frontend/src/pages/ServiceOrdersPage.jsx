@@ -456,7 +456,11 @@ export default function ServiceOrdersPage() {
                                     </td>
                                     <td className="px-2 py-1.5 text-right text-[var(--text-secondary)]">{minutesToHM(activity.break_minutes)}</td>
                                     <td className="px-2 py-1.5 text-right font-medium text-[var(--text-primary)]">{formatHoursDuration(activity.hours)}</td>
-                                    <td className="px-2 py-1.5 text-[var(--text-secondary)]">
+                                    <td className="whitespace-pre-line px-2 py-1.5 text-[var(--text-secondary)]">
+                                      {/* Pedido do usuário: quebras de linha digitadas na
+                                          Descrição precisam aparecer aqui também —
+                                          `whitespace-pre-line` no <td> evita que o HTML
+                                          colapse todo \n numa linha só. */}
                                       {activity.description || '—'}
                                       {/* Pedido do usuário: o motivo do retrabalho precisa
                                           ficar visível, não só no tooltip do selo (difícil de

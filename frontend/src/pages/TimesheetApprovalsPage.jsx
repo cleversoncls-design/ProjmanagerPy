@@ -220,7 +220,10 @@ export default function TimesheetApprovalsPage() {
                       {(entry.rework_reasons || []).map((reason) => labels.REWORK_REASON_LABELS[reason] || reason).join(', ') || '—'}
                     </p>
                   )}
-                  {entry.description && <p className="mt-1 text-xs text-[var(--text-muted)]">{entry.description}</p>}
+                  {/* Pedido do usuário: quebras de linha digitadas na
+                      Descrição precisam aparecer aqui também — sem
+                      `whitespace-pre-line` o <p> colapsa todo \n numa linha só. */}
+                  {entry.description && <p className="mt-1 whitespace-pre-line text-xs text-[var(--text-muted)]">{entry.description}</p>}
                 </div>
               )
             })}

@@ -175,7 +175,11 @@ export default function ServiceOrderPrintSheet({ order, tasksById }) {
           )}
 
           <p className="mt-2">Detalles</p>
-          <p className="os-field mt-1 inline-block">{activity.description || '—'}</p>
+          {/* Pedido do usuário: quebras de linha digitadas na Descrição do
+              apontamento precisam aparecer também na OS impressa — sem
+              `whitespace-pre-line`, o HTML colapsa todo \n num parágrafo só
+              (comportamento padrão de <p>, nada a ver com o dado salvo). */}
+          <p className="os-field mt-1 inline-block whitespace-pre-line">{activity.description || '—'}</p>
         </div>
       ))}
 
