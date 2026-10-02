@@ -12,6 +12,7 @@ from ..database import get_db
 from ..deps import ADMIN_LIKE_ROLES, MANAGEMENT_ROLES, get_current_user, require_project_access, require_roles
 from ..i18n import t as translate
 from ..models import (
+    AbsenceType,
     AuditAction,
     Client,
     Project,
@@ -111,6 +112,22 @@ def _resolve_task_and_project(
         if not data.project_id:
             raise HTTPException(status_code=422, detail=translate("Traslado precisa de um projeto selecionado", user.language))
 
+    # "Ausência da empresa" (Férias/Licença Médica/Licença Maternidade/
+    # Ausência/Folga, pedido do usuário) — o espelho do Traslado acima:
+    # SEMPRE custo interno da empresa, nunca de um cliente/projeto (decisão
+    # confirmada com o usuário), então nunca aceita task_id nem project_id
+    # junto, nem Traslado ao mesmo tempo (os dois são mutuamente exclusivos
+    # — um apontamento não pode ser "ausência" e "deslocamento" ao mesmo
+    # tempo). Checado antes do ramo de task_id/project_id abaixo pelo mesmo
+    # motivo do Traslado.
+    if data.absence_type:
+        if data.is_transit:
+            raise HTTPException(status_code=422, detail=translate("Ausência não pode ser marcada como Traslado ao mesmo tempo", user.language))
+        if data.task_id:
+            raise HTTPException(status_code=422, detail=translate("Ausência não pode ter uma tarefa vinculada", user.language))
+        if data.project_id:
+            raise HTTPException(status_code=422, detail=translate("Ausência não pode ter um projeto vinculado — é sempre custo interno da empresa", user.language))
+
     if data.task_id:
         task = db.get(Task, data.task_id)
         if not task:
@@ -179,6 +196,8 @@ def _resolve_task_and_project(
             raise HTTPException(status_code=422, detail=translate("Só é possível apontar horas em projetos ativos", user.language))
     # else: hora administrativa interna (sem task nem projeto) — qualquer
     # recurso autenticado pode lançar, sem checagem de escopo de cliente.
+    # Ausência cai aqui também (task/project continuam None pela checagem
+    # acima, que já garantiu que nenhum dos dois veio preenchido).
     return task, project
 
 
@@ -260,6 +279,7 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
         hours_spent=hours_spent,
         unscheduled=unscheduled,
         is_transit=data.is_transit,
+        absence_type=data.absence_type,
         description=data.description,
     )
     db.add(entry)
@@ -299,6 +319,7 @@ def update_timesheet(
     entry.hours_spent = hours_spent
     entry.unscheduled = unscheduled
     entry.is_transit = data.is_transit
+    entry.absence_type = data.absence_type
     entry.description = data.description
     # Editar (inclusive um apontamento Aprovado ou Rejeitado, pra corrigir e
     # reenviar) sempre volta pro estado Pendente — precisa passar pela
@@ -345,6 +366,7 @@ def list_timesheets(
     status_filter: TimesheetStatus | None = None,
     start: date | None = None,
     end: date | None = None,
+    has_absence: bool | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[Timesheet]:
@@ -374,7 +396,14 @@ def list_timesheets(
     tudo, sem essa restrição — são os únicos perfis que podem aprovar
     apontamento "fora da agenda" (ver update_timesheet_status abaixo),
     então precisam enxergar a fila inteira mesmo em projeto que não
-    gerenciam."""
+    gerenciam.
+
+    `has_absence` (pedido do usuário: bloquear a Agenda de consultores em
+    dia de ausência) filtra só apontamentos com `absence_type` setado
+    (True) ou só sem (False) — usado pela tela de Agenda pra descobrir, num
+    período, quais recursos têm ausência registrada antes de permitir um
+    novo agendamento (ver ScheduleFormModal/MoveScheduleConfirmModal em
+    SchedulesPage.jsx)."""
     is_manager = user.role in _MANAGEMENT_ROLES
     if not is_manager:
         own_resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
@@ -394,7 +423,7 @@ def list_timesheets(
             raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
         require_project_access(project, user)
         stmt = stmt.where(or_(Task.project_id == project_id, Timesheet.project_id == project_id))
-    elif not (resource_id or client_id or status_filter or start or end):
+    elif not (resource_id or client_id or status_filter or start or end or has_absence is not None):
         raise HTTPException(
             status_code=422,
             detail=translate(
@@ -417,6 +446,10 @@ def list_timesheets(
         stmt = stmt.where(Timesheet.date >= start)
     if end:
         stmt = stmt.where(Timesheet.date <= end)
+    if has_absence is True:
+        stmt = stmt.where(Timesheet.absence_type.is_not(None))
+    elif has_absence is False:
+        stmt = stmt.where(Timesheet.absence_type.is_(None))
     return list(db.scalars(stmt.order_by(Timesheet.date.desc())).all())
 
 

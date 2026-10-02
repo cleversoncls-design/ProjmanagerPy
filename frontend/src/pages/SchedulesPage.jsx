@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as schedulesApi from '../api/schedules'
+import * as timesheetsApi from '../api/timesheets'
 import * as resourcesApi from '../api/resources'
 import * as usersApi from '../api/users'
 import * as clientsApi from '../api/clients'
@@ -24,6 +25,21 @@ const EMPTY_FILTERS = { resource_id: '', client_id: '', project_id: '', start: '
 
 function toIsoDate(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+/** Ausência da empresa (Timesheet.absence_type, pedido do usuário: "Sim, já
+ * incluir nesta etapa") do recurso numa data — consultada pelos dois
+ * modais abaixo (criar/editar agendamento e confirmar mover por
+ * arrastar-e-soltar) só pra AVISAR antes de salvar; quem de fato impede é
+ * sempre o backend (_check_absence em routers/schedules.py — nunca confiar
+ * só nesta checagem do lado do cliente). REJECTED não conta, mesmo
+ * critério usado lá. Por recurso (não por dia inteiro pra todo mundo,
+ * diferente do feriado do calendário padrão abaixo) — só bloqueia o
+ * consultor que está realmente ausente. */
+async function findResourceAbsence(resourceId, isoDate) {
+  if (!resourceId || !isoDate) return null
+  const rows = await timesheetsApi.listTimesheets({ resource_id: resourceId, start: isoDate, end: isoDate, has_absence: true })
+  return rows.find((row) => row.absence_type && row.status !== 'REJECTED') || null
 }
 
 /** Início da semana (domingo) que contém `date` — usado só pra montar a
@@ -443,9 +459,25 @@ export default function SchedulesPage() {
  * devolve 409 se já houver outro agendamento dele no mesmo horário — o erro
  * aparece aqui em vez de mover silenciosamente pra um horário conflitante. */
 function MoveScheduleConfirmModal({ schedule, newDate, resourceName, projectLabel, onClose, onMoved }) {
-  const { t } = useLanguage()
+  const { t, labels } = useLanguage()
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  // Aviso prévio de ausência (ver findResourceAbsence acima) — só avisa;
+  // quem de fato bloqueia é o backend (_check_absence), acionado no
+  // handleConfirm abaixo igual a qualquer outro erro de validação.
+  const [absenceWarning, setAbsenceWarning] = useState('')
+
+  useEffect(() => {
+    let active = true
+    findResourceAbsence(schedule.resource_id, newDate)
+      .then((absence) => {
+        if (active) setAbsenceWarning(absence ? labels.ABSENCE_TYPE_LABELS[absence.absence_type] || absence.absence_type : '')
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [schedule.resource_id, newDate, labels])
 
   async function handleConfirm() {
     setSaving(true)
@@ -474,13 +506,23 @@ function MoveScheduleConfirmModal({ schedule, newDate, resourceName, projectLabe
           {t('Mover de {from} para {to}?', { from: schedule.date, to: newDate })}
         </p>
 
+        {absenceWarning && (
+          <p className="rounded-lg border border-[var(--status-critical)]/30 bg-[var(--status-critical)]/5 px-3 py-2 text-xs text-[var(--status-critical)]">
+            {t('{resource} está ausente ({type}) em {date} — não é possível agendar nesta data.', {
+              resource: resourceName,
+              type: absenceWarning,
+              date: newDate,
+            })}
+          </p>
+        )}
+
         <ErrorBanner message={error} />
 
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="secondary" onClick={onClose}>
             {t('Cancelar')}
           </Button>
-          <Button type="button" disabled={saving} onClick={handleConfirm}>
+          <Button type="button" disabled={saving || Boolean(absenceWarning)} onClick={handleConfirm}>
             {saving ? t('Movendo…') : t('Confirmar')}
           </Button>
         </div>
@@ -501,7 +543,7 @@ function MoveScheduleConfirmModal({ schedule, newDate, resourceName, projectLabe
  * só "Fechar". Reforça na UI o que a API já impõe (_MANAGE_ROLES em
  * routers/schedules.py). */
 function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, canManage, onClose, onSaved }) {
-  const { t } = useLanguage()
+  const { t, labels } = useLanguage()
   const isEdit = Boolean(schedule)
   const readOnly = !canManage
   const [form, setForm] = useState({
@@ -516,6 +558,30 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, c
   const [saving, setSaving] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [absenceWarning, setAbsenceWarning] = useState('')
+  // A API (routers/schedules.py) só recusa por ausência quando a DATA está
+  // sendo atribuída de novo — criar, ou editar mudando a data (mesmo
+  // critério de _check_absence: editar só horário/descrição num
+  // agendamento que já existia não revalida isso). O aviso do lado do
+  // cliente segue o mesmo critério, pra não assustar o usuário com um erro
+  // que a API nem vai dar.
+  const dateChanged = !isEdit || form.date !== (schedule?.date || '')
+
+  useEffect(() => {
+    if (readOnly || !dateChanged || !form.resource_id || !form.date) {
+      setAbsenceWarning('')
+      return undefined
+    }
+    let active = true
+    findResourceAbsence(form.resource_id, form.date)
+      .then((absence) => {
+        if (active) setAbsenceWarning(absence ? labels.ABSENCE_TYPE_LABELS[absence.absence_type] || absence.absence_type : '')
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [form.resource_id, form.date, dateChanged, readOnly, labels])
 
   function updateField(field) {
     return (event) => setForm((prev) => ({ ...prev, [field]: event.target.value }))
@@ -599,6 +665,12 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, c
           <TextArea rows={2} disabled={readOnly} value={form.description} onChange={updateField('description')} />
         </FormField>
 
+        {absenceWarning && (
+          <p className="rounded-lg border border-[var(--status-critical)]/30 bg-[var(--status-critical)]/5 px-3 py-2 text-xs text-[var(--status-critical)]">
+            {t('Este consultor está ausente ({type}) nesta data — não é possível agendar.', { type: absenceWarning })}
+          </p>
+        )}
+
         <ErrorBanner message={error} />
 
         {readOnly ? (
@@ -632,7 +704,7 @@ function ScheduleFormModal({ schedule, defaultDate, resourceOptions, projects, c
                 <Button type="button" variant="secondary" onClick={onClose}>
                   {t('Cancelar')}
                 </Button>
-                <Button type="submit" disabled={saving}>
+                <Button type="submit" disabled={saving || Boolean(absenceWarning)}>
                   {saving ? t('Salvando…') : t('Salvar')}
                 </Button>
               </div>

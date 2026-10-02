@@ -20,7 +20,14 @@ import { FormField, TextInput, Select } from '../components/FormField'
 import { PencilIcon, TrashIcon } from '../components/icons'
 import { formatDate, formatTime, formatHoursDuration } from '../utils/format'
 import { TIMESHEET_STATUS_TONE } from '../utils/labels'
-import { emptyTimesheetForm, entryToTimesheetForm, previewTimesheetHours, timesheetFormToPayload, isTimesheetEditable } from '../utils/timesheetForm'
+import {
+  emptyTimesheetForm,
+  entryToTimesheetForm,
+  previewTimesheetHours,
+  timesheetFormToPayload,
+  isTimesheetEditable,
+  applyExclusiveTimesheetField,
+} from '../utils/timesheetForm'
 
 function todayIso() {
   const now = new Date()
@@ -116,12 +123,7 @@ export default function TimesheetsPage() {
   function updateField(field) {
     return (event) => {
       const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value
-      setForm((prev) => {
-        if (field === 'project_id') return { ...prev, project_id: value, task_id: '', is_transit: false }
-        if (field === 'task_id') return { ...prev, task_id: value, is_transit: value ? false : prev.is_transit }
-        if (field === 'is_transit') return { ...prev, is_transit: value, task_id: value ? '' : prev.task_id }
-        return { ...prev, [field]: value }
-      })
+      setForm((prev) => applyExclusiveTimesheetField(prev, field, value))
     }
   }
 
@@ -142,10 +144,18 @@ export default function TimesheetsPage() {
       }
       return { projectLabel: project ? `${project.code} — ${project.name}` : '—', taskLabel: t('Avulso'), typeLabel: labels.TASK_TYPE_LABELS.ADHOC }
     }
+    // Ausência da empresa (pedido do usuário) — sem projeto/tarefa, sempre
+    // custo interno; qualquer aprovador vê o tipo exato (decisão
+    // confirmada), por isso o rótulo aparece normal, igual a qualquer outro
+    // tipo de apontamento.
+    if (entry.absence_type) {
+      return { projectLabel: t('Interno'), taskLabel: '—', typeLabel: labels.ABSENCE_TYPE_LABELS[entry.absence_type] || entry.absence_type }
+    }
     return { projectLabel: t('Interno'), taskLabel: '—', typeLabel: t('Interno') }
   }
 
   function formTypeLabel() {
+    if (form.absence_type) return labels.ABSENCE_TYPE_LABELS[form.absence_type] || form.absence_type
     if (form.is_transit) return labels.TASK_TYPE_LABELS.TRASLADO
     if (form.task_id) {
       const task = tasksById[form.task_id]

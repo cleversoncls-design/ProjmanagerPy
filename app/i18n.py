@@ -24,6 +24,11 @@ _ES: dict[str, str] = {
         "Registro de horas fuera de la agenda — solo Administrador, Gerente de Servicios o Director General pueden aprobarlo"
     ),
     "Apontamento não encontrado": "Registro de horas no encontrado",
+    "Ausência não pode ser marcada como Traslado ao mesmo tempo": "La ausencia no puede marcarse como Traslado al mismo tiempo",
+    "Ausência não pode ter uma tarefa vinculada": "La ausencia no puede tener una tarea vinculada",
+    "Ausência não pode ter um projeto vinculado — é sempre custo interno da empresa": (
+        "La ausencia no puede tener un proyecto vinculado — siempre es un costo interno de la empresa"
+    ),
     "Calendário não encontrado": "Calendario no encontrado",
     "Cliente não encontrado": "Cliente no encontrado",
     "Cliente precisa informar project_id": "El cliente debe informar project_id",
@@ -76,6 +81,7 @@ _ES: dict[str, str] = {
     "Projeto já tem apontamento de horas avulso — não pode ser excluído": "El proyecto ya tiene horas sueltas registradas — no se puede eliminar",
     "Recurso já alocado nesta tarefa": "Recurso ya asignado a esta tarea",
     "Recurso já tem agendamento nesse horário": "El recurso ya tiene una agenda en ese horario",
+    "Recurso está ausente nesta data e não pode ser agendado": "El recurso está ausente en esta fecha y no puede ser agendado",
     "Recurso não encontrado": "Recurso no encontrado",
     "Recurso não está alocado nesta tarefa nem no projeto": "El recurso no está asignado a esta tarea ni al proyecto",
     "O recurso deste usuário está alocado em uma ou mais tarefas — remova as alocações antes de excluir": (

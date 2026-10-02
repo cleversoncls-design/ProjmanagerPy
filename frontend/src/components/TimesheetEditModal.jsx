@@ -5,7 +5,7 @@ import Modal from './Modal'
 import Button from './Button'
 import ErrorBanner from './ErrorBanner'
 import TimesheetFieldsForm from './TimesheetFieldsForm'
-import { entryToTimesheetForm, previewTimesheetHours, timesheetFormToPayload } from '../utils/timesheetForm'
+import { entryToTimesheetForm, previewTimesheetHours, timesheetFormToPayload, applyExclusiveTimesheetField } from '../utils/timesheetForm'
 
 /** Modal de edição de um apontamento — usado na coluna de ações da Ordem
  * de Serviço (ServiceOrdersPage), onde não existe (e não faria sentido
@@ -33,16 +33,12 @@ export default function TimesheetEditModal({ entry, projects, allTasks, tasksByI
   function updateField(field) {
     return (event) => {
       const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value
-      setForm((prev) => {
-        if (field === 'project_id') return { ...prev, project_id: value, task_id: '', is_transit: false }
-        if (field === 'task_id') return { ...prev, task_id: value, is_transit: value ? false : prev.is_transit }
-        if (field === 'is_transit') return { ...prev, is_transit: value, task_id: value ? '' : prev.task_id }
-        return { ...prev, [field]: value }
-      })
+      setForm((prev) => applyExclusiveTimesheetField(prev, field, value))
     }
   }
 
   function formTypeLabel() {
+    if (form.absence_type) return labels.ABSENCE_TYPE_LABELS[form.absence_type] || form.absence_type
     if (form.is_transit) return labels.TASK_TYPE_LABELS.TRASLADO
     if (form.task_id) {
       const task = tasksById[form.task_id]

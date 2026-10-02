@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from .color_palette import DEFAULT_PROJECT_COLOR
 from .models import (
+    AbsenceType,
     AuditAction,
     ChangeStatus,
     DependencyType,
@@ -542,6 +543,11 @@ class TimesheetCreate(BaseModel):
     # (sempre vinculado a um projeto) e não aceita task_id junto (ver
     # validação em _resolve_task_and_project, routers/timesheets.py).
     is_transit: bool = False
+    # "Ausência da empresa" (Férias/Licença Médica/Licença Maternidade/
+    # Ausência/Folga, pedido do usuário) — o espelho do Traslado acima: não
+    # aceita task_id nem project_id junto, nem is_transit=True ao mesmo
+    # tempo (ver validação em _resolve_task_and_project).
+    absence_type: AbsenceType | None = None
     description: str | None = None
 
 
@@ -562,6 +568,7 @@ class TimesheetRead(ORMModel):
     hours_spent: Decimal
     unscheduled: bool
     is_transit: bool
+    absence_type: AbsenceType | None
     description: str | None
     status: TimesheetStatus
 

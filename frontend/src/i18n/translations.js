@@ -722,6 +722,24 @@ export const es = {
   'tarefa-pai, selecione uma tarefa-filha': 'tarea padre, seleccione una tarea hija',
   'Traslado (deslocamento) — sem tarefa específica': 'Traslado — sin tarea específica',
   'Selecione um projeto para marcar Traslado.': 'Seleccione un proyecto para marcar Traslado.',
+  // Ausência da empresa (pedido do usuário: Férias/Licença Médica/Licença
+  // Maternidade/Ausência/Folga) — classificada igual ao Traslado acima, só
+  // que sempre custo interno (sem projeto/tarefa vinculado).
+  'Tipo de ausência': 'Tipo de ausencia',
+  'Nenhuma (trabalho normal)': 'Ninguna (trabajo normal)',
+  'Desabilitado — o registro é de ausência (custo interno).': 'Deshabilitado — el registro es de ausencia (costo interno).',
+  'Limpa Projeto/Tarefa — ausência é sempre custo interno da empresa.':
+    'Limpia Proyecto/Tarea — la ausencia siempre es costo interno de la empresa.',
+  'Férias, licença, folga etc. — nunca um custo de cliente.': 'Vacaciones, licencia, día libre, etc. — nunca un costo de cliente.',
+  'Férias': 'Vacaciones',
+  'Licença Médica': 'Licencia Médica',
+  'Licença Maternidade': 'Licencia de Maternidad',
+  'Ausência': 'Ausencia',
+  'Folga': 'Día libre',
+  'Este consultor está ausente ({type}) nesta data — não é possível agendar.':
+    'Este consultor está ausente ({type}) en esta fecha — no es posible agendar.',
+  '{resource} está ausente ({type}) em {date} — não é possível agendar nesta data.':
+    '{resource} está ausente ({type}) el {date} — no es posible agendar en esta fecha.',
   'Tipo de apontamento': 'Tipo de registro',
   'Segue automaticamente o tipo da tarefa (Gestão/Consultoria).': 'Sigue automáticamente el tipo de la tarea (Gestión/Consultoría).',
   'Intervalo': 'Intervalo',

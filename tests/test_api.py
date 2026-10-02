@@ -2013,6 +2013,135 @@ def test_timesheet_transit_has_its_own_bucket_in_financials_by_task_type(client,
     assert float(by_type["TRASLADO"]["hours"]) == 2.0
 
 
+def test_absence_timesheet_rejects_project_task_and_transit(client, setup):
+    """Pedido do usuário: ausência da empresa (Férias/Licença Médica/Licença
+    Maternidade/Ausência/Folga) é sempre custo interno — nunca pode vir com
+    task_id, project_id ou is_transit=True junto (decisão confirmada:
+    Traslado é custo do cliente, ausência é custo interno, mutuamente
+    exclusivos)."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(f"/projects/{project_id}/tasks", json={"name": "Tarefa", "wbs_code": "30"}, headers=admin_headers).json()
+    client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    )
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    with_task = client.post(
+        "/timesheets",
+        json={"task_id": task["id"], "absence_type": "VACATION", "date": "2026-08-25", "start_time": "09:00", "end_time": "17:00"},
+        headers=consultant_headers,
+    )
+    assert with_task.status_code == 422
+
+    with_project = client.post(
+        "/timesheets",
+        json={"project_id": project_id, "absence_type": "VACATION", "date": "2026-08-25", "start_time": "09:00", "end_time": "17:00"},
+        headers=consultant_headers,
+    )
+    assert with_project.status_code == 422
+
+    with_transit = client.post(
+        "/timesheets",
+        json={"is_transit": True, "absence_type": "VACATION", "date": "2026-08-25", "start_time": "09:00", "end_time": "17:00"},
+        headers=consultant_headers,
+    )
+    assert with_transit.status_code == 422
+
+    ok = client.post(
+        "/timesheets",
+        json={"absence_type": "MEDICAL_LEAVE", "date": "2026-08-25", "start_time": "09:00", "end_time": "17:00"},
+        headers=consultant_headers,
+    )
+    assert ok.status_code == 201
+    assert ok.json()["absence_type"] == "MEDICAL_LEAVE"
+    assert ok.json()["task_id"] is None
+    assert ok.json()["project_id"] is None
+
+
+def test_absence_timesheet_counts_toward_resource_utilization(client, setup):
+    """Pedido do usuário: uma semana de ausência não pode parecer recurso
+    ocioso — entra normalmente em `actual_hours` (resource_utilization),
+    mesmo critério já usado por hora administrativa interna/Traslado."""
+    admin_headers = setup["admin_headers"]
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    created = client.post(
+        "/timesheets",
+        json={"absence_type": "VACATION", "date": "2026-08-26", "start_time": "09:00", "end_time": "17:00"},
+        headers=consultant_headers,
+    )
+    assert created.status_code == 201
+
+    utilization = client.get(
+        "/resources/utilization",
+        params={"start": "2026-08-01", "end": "2026-08-31", "resource_id": resource["id"]},
+        headers=admin_headers,
+    )
+    assert utilization.status_code == 200
+    row = utilization.json()[0]
+    assert float(row["actual_hours"]) == 8.0
+
+
+def test_schedule_blocked_on_resource_absence_day(client, setup):
+    """Pedido do usuário ("Sim, já incluir nesta etapa"): a Agenda de
+    consultores não pode agendar um recurso num dia em que ele tem ausência
+    registrada — bloqueio por RECURSO, não o dia inteiro pra todo mundo."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    absence = client.post(
+        "/timesheets",
+        json={"absence_type": "DAY_OFF", "date": "2026-08-27", "start_time": "09:00", "end_time": "17:00"},
+        headers=consultant_headers,
+    )
+    assert absence.status_code == 201
+
+    blocked = client.post(
+        "/resource-schedules",
+        json={"resource_id": resource["id"], "project_id": project_id, "date": "2026-08-27", "start_time": "09:00", "end_time": "12:00"},
+        headers=admin_headers,
+    )
+    assert blocked.status_code == 409
+
+    # Noutro dia, sem ausência, o mesmo recurso agenda normalmente.
+    ok = client.post(
+        "/resource-schedules",
+        json={"resource_id": resource["id"], "project_id": project_id, "date": "2026-08-28", "start_time": "09:00", "end_time": "12:00"},
+        headers=admin_headers,
+    )
+    assert ok.status_code == 201
+
+    # Mover (PATCH date) esse agendamento pro dia da ausência também é
+    # bloqueado — mesma checagem de criação.
+    moved = client.patch(f"/resource-schedules/{ok.json()['id']}", json={"date": "2026-08-27"}, headers=admin_headers)
+    assert moved.status_code == 409
+
+    # Rejeitar a ausência libera o dia de novo — REJECTED não conta (mesmo
+    # critério de financials_by_task_type/project_burndown).
+    status_update = client.patch(f"/timesheets/{absence.json()['id']}/status", json={"status": "REJECTED"}, headers=admin_headers)
+    assert status_update.status_code == 200
+    now_ok = client.post(
+        "/resource-schedules",
+        json={"resource_id": resource["id"], "project_id": project_id, "date": "2026-08-27", "start_time": "13:00", "end_time": "15:00"},
+        headers=admin_headers,
+    )
+    assert now_ok.status_code == 201
+
+
 def test_cannot_timesheet_parent_task_only_child(client, setup):
     """Pedido do usuário: não permitir apontamento em tarefa "pai" (que tem
     tarefas-filhas) — só nas tarefas-filha."""

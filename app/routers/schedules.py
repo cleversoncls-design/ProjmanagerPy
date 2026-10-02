@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import INTERNAL_ROLES, MANAGEMENT_ROLES, require_roles
 from ..i18n import t as translate
-from ..models import Project, Resource, ResourceSchedule, User
+from ..models import Project, Resource, ResourceSchedule, Timesheet, TimesheetStatus, User
 from ..schemas import ResourceScheduleCreate, ResourceScheduleRead, ResourceScheduleUpdate
 
 router = APIRouter(prefix="/resource-schedules", tags=["resource-schedules"])
@@ -37,6 +37,32 @@ def _check_overlap(db: Session, resource_id: str, day: date, start_time, end_tim
     return db.scalar(stmt) is not None
 
 
+def _check_absence(db: Session, resource_id: str, day: date) -> bool:
+    """Bloqueia um novo agendamento do recurso num dia em que ele tem
+    ausência da empresa registrada (Timesheet.absence_type — pedido do
+    usuário: "Sim, já incluir nesta etapa"). Checagem por RECURSO (não por
+    dia inteiro pra todo mundo, diferente do feriado do calendário padrão
+    mostrado no frontend) — só o consultor ausente fica bloqueado, os
+    demais continuam agendáveis normalmente nesse mesmo dia. REJECTED não
+    conta (ausência rejeitada é como se não tivesse acontecido, mesmo
+    critério de financials_by_task_type/project_burndown em services.py).
+    Só entra na criação/na troca de data de um agendamento já existente —
+    uma ausência registrada DEPOIS de um agendamento já feito não desfaz
+    esse agendamento (mesmo espírito do feriado: "não impede visualizar os
+    agendamentos que já existiam ali")."""
+    return (
+        db.scalar(
+            select(Timesheet.id).where(
+                Timesheet.resource_id == resource_id,
+                Timesheet.date == day,
+                Timesheet.absence_type.is_not(None),
+                Timesheet.status != TimesheetStatus.REJECTED,
+            )
+        )
+        is not None
+    )
+
+
 @router.post("", response_model=ResourceScheduleRead, status_code=status.HTTP_201_CREATED)
 def create_schedule(
     data: ResourceScheduleCreate,
@@ -49,6 +75,8 @@ def create_schedule(
         raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
     if data.end_time <= data.start_time:
         raise HTTPException(status_code=422, detail=translate("Hora final precisa ser depois da hora inicial", user.language))
+    if _check_absence(db, data.resource_id, data.date):
+        raise HTTPException(status_code=409, detail=translate("Recurso está ausente nesta data e não pode ser agendado", user.language))
     if _check_overlap(db, data.resource_id, data.date, data.start_time, data.end_time):
         raise HTTPException(status_code=409, detail=translate("Recurso já tem agendamento nesse horário", user.language))
     schedule = ResourceSchedule(**data.model_dump())
@@ -104,6 +132,11 @@ def update_schedule(
     new_end = changes.get("end_time", schedule.end_time)
     if new_end <= new_start:
         raise HTTPException(status_code=422, detail=translate("Hora final precisa ser depois da hora inicial", user.language))
+    # Só checa ausência quando a DATA está mudando (ex.: arrastar-e-soltar
+    # pra outro dia) — editar só o horário/descrição de um agendamento que já
+    # existia não precisa revalidar isso (ver docstring de _check_absence).
+    if "date" in changes and _check_absence(db, schedule.resource_id, new_date):
+        raise HTTPException(status_code=409, detail=translate("Recurso está ausente nesta data e não pode ser agendado", user.language))
     if _check_overlap(db, schedule.resource_id, new_date, new_start, new_end, exclude_id=schedule.id):
         raise HTTPException(status_code=409, detail=translate("Recurso já tem agendamento nesse horário", user.language))
     for field, value in changes.items():

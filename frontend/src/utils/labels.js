@@ -215,6 +215,20 @@ export const TIMESHEET_STATUS_LABELS = {
   REJECTED: 'Rejeitado',
 }
 
+// Ausência da empresa (Timesheet.absence_type, pedido do usuário) —
+// classificada igual ao "Traslado" (ver TASK_TYPE_LABELS.TRASLADO acima),
+// só que sempre custo interno (sem projeto/tarefa vinculado). Decisão
+// confirmada com o usuário: qualquer aprovador vê o tipo exato, sem
+// mascarar por perfil — por isso um único dicionário de rótulos, sem
+// variante "resumida" pra ocultar o tipo de ninguém.
+export const ABSENCE_TYPE_LABELS = {
+  VACATION: 'Férias',
+  MEDICAL_LEAVE: 'Licença Médica',
+  MATERNITY_LEAVE: 'Licença Maternidade',
+  ABSENCE: 'Ausência',
+  DAY_OFF: 'Folga',
+}
+
 export const TIMESHEET_STATUS_TONE = {
   PENDING: 'warning',
   APPROVED: 'good',
@@ -286,6 +300,7 @@ export function getLabels(lang) {
     STATUS_DOT_LABELS: translateMap(STATUS_DOT_LABELS, lang),
     WEEKDAY_LABELS: WEEKDAY_LABELS.map((day) => translate(lang, day)),
     TIMESHEET_STATUS_LABELS: translateMap(TIMESHEET_STATUS_LABELS, lang),
+    ABSENCE_TYPE_LABELS: translateMap(ABSENCE_TYPE_LABELS, lang),
   }
 }
 

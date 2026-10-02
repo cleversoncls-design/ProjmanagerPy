@@ -111,6 +111,11 @@ export default function TimesheetApprovalsPage() {
       }
       return { projectLabel: project ? `${project.code} — ${project.name}` : '—', taskLabel: t('Avulso'), typeLabel: labels.TASK_TYPE_LABELS.ADHOC }
     }
+    // Ausência da empresa (pedido do usuário) — qualquer aprovador vê o
+    // tipo exato (decisão confirmada: sem mascarar por perfil).
+    if (entry.absence_type) {
+      return { projectLabel: t('Interno'), taskLabel: '—', typeLabel: labels.ABSENCE_TYPE_LABELS[entry.absence_type] || entry.absence_type }
+    }
     return { projectLabel: t('Interno'), taskLabel: '—', typeLabel: t('Interno') }
   }
 

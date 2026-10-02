@@ -147,6 +147,28 @@ class TimesheetStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+class AbsenceType(StrEnum):
+    """Ausência da empresa (pedido do usuário: Férias/Licença Médica/
+    Licença Maternidade/Ausência/Folga) — classificada igual ao "Traslado"
+    (Timesheet.is_transit), só que o oposto: Traslado é SEMPRE vinculado a
+    um projeto (custo do cliente); ausência é SEMPRE sem projeto nem tarefa
+    (task_id e project_id nulos, igual a hora administrativa interna — custo
+    interno da empresa, nunca atribuído a um cliente). Os dois são
+    mutuamente exclusivos (ver _resolve_task_and_project em
+    app/routers/timesheets.py). Decisões confirmadas com o usuário: qualquer
+    aprovador vê o tipo exato (sem mascarar por perfil), lançamento dia a
+    dia pelo mesmo formulário de apontamento normal, e mesmo fluxo de
+    aprovação de sempre (PENDING -> APPROVED/REJECTED, MANAGEMENT_ROLES).
+    Também bloqueia novo agendamento do recurso na Agenda de consultores
+    nesse dia (ver _check_absence em app/routers/schedules.py)."""
+
+    VACATION = "VACATION"  # Férias
+    MEDICAL_LEAVE = "MEDICAL_LEAVE"  # Licença Médica
+    MATERNITY_LEAVE = "MATERNITY_LEAVE"  # Licença Maternidade
+    ABSENCE = "ABSENCE"  # Ausência
+    DAY_OFF = "DAY_OFF"  # Folga
+
+
 class RiskLevel(StrEnum):
     LOW = "LOW"
     MED = "MED"
@@ -498,6 +520,19 @@ class Timesheet(Base):
     # de nenhuma tarefa (não tem task_id) mas soma normalmente no total de
     # horas do projeto, exatamente como um apontamento avulso já fazia.
     is_transit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # "Ausência da empresa" (pedido do usuário) — nulo na imensa maioria dos
+    # apontamentos (trabalho normal). Quando setado, é o espelho do
+    # "Traslado" acima: task_id e project_id ficam sempre nulos (custo
+    # interno da empresa, nunca de um cliente/projeto — decisão confirmada
+    # com o usuário), e a validação em _resolve_task_and_project garante que
+    # nunca vem junto com is_transit=True nem com task_id/project_id
+    # preenchidos. Mesmo assim entra normalmente em Resource.actual_hours
+    # (resource_utilization, services.py) — uma semana de férias não aparece
+    # como recurso ocioso — e fica automaticamente fora de
+    # financials_by_task_type/service_orders (os dois são escopados por
+    # project_id, que aqui é sempre nulo), sem precisar de nenhuma exclusão
+    # manual (diferente do ProjectStatus.MODELO, que precisa).
+    absence_type: Mapped[AbsenceType | None] = mapped_column(nullable=True)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[TimesheetStatus] = mapped_column(nullable=False, default=TimesheetStatus.PENDING)
     task: Mapped[Task | None] = relationship(back_populates="timesheets")
