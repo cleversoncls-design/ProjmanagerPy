@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import * as taskGroupsApi from '../api/taskGroups'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
-import Table from '../components/Table'
 import Button from '../components/Button'
 import IconButton from '../components/IconButton'
 import Modal from '../components/Modal'
@@ -10,7 +9,16 @@ import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
 import { FormField, TextInput, Select, TextArea } from '../components/FormField'
 import { PlusIcon, TrashIcon } from '../components/icons'
+import { formatNumber } from '../utils/format'
 import { useLanguage } from '../context/LanguageContext'
+
+/** Grade de colunas compartilhada pelo cabeçalho e por cada linha do editor
+ * de árvore (TaskGroupEditor/TaskGroupItemRow) — pedido do usuário: o
+ * layout anterior (flex-wrap) quebrava os campos em várias linhas por
+ * tarefa e desalinhava do cabeçalho. Com grid fixo os dois sempre alinham,
+ * não importa a largura da tela (o container rola na horizontal se
+ * precisar, ver overflow-x-auto). */
+const ITEM_GRID_COLS = '3.5rem minmax(160px,1fr) 7rem 5rem 5rem 7rem 3.5rem 1.75rem 1.75rem'
 
 /** "Grupos de Tarefas" (pedido do usuário): um agrupador reutilizável de
  * tarefas — não um projeto — que pode ser aplicado depois como
@@ -127,6 +135,65 @@ function computeWbsCodes(nodes, prefix = []) {
   return codes
 }
 
+/** Mesma lógica de `computeWbsCodes`, mas operando direto sobre os itens
+ * como a API devolve (`item.id`/`item.children`, já aninhados em
+ * TaskGroupRead) — usada pela prévia da árvore na lista "Grupos
+ * cadastrados" (pedido do usuário: ver a estrutura assim que a tarefa é
+ * adicionada, sem precisar abrir o editor). */
+function computeApiWbsCodes(nodes, prefix = []) {
+  const codes = new Map()
+  nodes.forEach((node, index) => {
+    const parts = [...prefix, index + 1]
+    codes.set(node.id, parts.join('.'))
+    for (const [id, code] of computeApiWbsCodes(node.children || [], parts)) {
+      codes.set(id, code)
+    }
+  })
+  return codes
+}
+
+/** Prévia somente-leitura da EAP de um grupo, exibida na lista à esquerda
+ * logo abaixo do nome/descrição — pedido do usuário: "uma vez que se
+ * adiciona a tarefa, mostrar na estrutura embaixo do agrupador ao lado
+ * esquerdo". Usa os dados já carregados em `group.items` (sem precisar
+ * buscar de novo nem montar a árvore editável usada no editor). */
+function TaskGroupTreePreview({ items }) {
+  const wbsCodes = useMemo(() => computeApiWbsCodes(items), [items])
+  return (
+    <div className="mt-2 space-y-0.5 border-l border-[var(--border)] pl-2">
+      {items.map((item) => (
+        <TaskGroupTreePreviewRow key={item.id} item={item} depth={0} wbsCodes={wbsCodes} />
+      ))}
+    </div>
+  )
+}
+
+function TaskGroupTreePreviewRow({ item, depth, wbsCodes }) {
+  const { t } = useLanguage()
+  const children = item.children || []
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 py-0.5 text-xs" style={{ paddingLeft: depth * 14 }}>
+        <span className="shrink-0 font-mono text-[10px] font-semibold text-[var(--text-muted)]">{wbsCodes.get(item.id)}</span>
+        <span className="truncate text-[var(--text-primary)]">{item.name}</span>
+        {item.is_milestone && (
+          <span className="shrink-0 rounded-full bg-[var(--series-1)]/10 px-1.5 text-[10px] font-medium text-[var(--series-1)]">{t('Marco')}</span>
+        )}
+        <span className="ml-auto shrink-0 whitespace-nowrap text-[10px] text-[var(--text-muted)]">
+          {formatNumber(item.duration_days)}d · {formatNumber(item.estimated_hours)}h
+        </span>
+      </div>
+      {children.length > 0 && (
+        <div>
+          {children.map((child) => (
+            <TaskGroupTreePreviewRow key={child.id} item={child} depth={depth + 1} wbsCodes={wbsCodes} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function TaskGroupsPage() {
   const { t } = useLanguage()
   const [groups, setGroups] = useState([])
@@ -175,40 +242,55 @@ export default function TaskGroupsPage() {
       <ErrorBanner message={error} />
 
       {!loading && !error && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[22rem_1fr] lg:items-start">
           <Card title={t('Grupos cadastrados')}>
-            <Table
-              columns={[
-                { key: 'name', header: t('Nome') },
-                { key: 'count', header: t('Tarefas'), render: (row) => countItems(row.items) },
-                {
-                  key: 'actions',
-                  header: '',
-                  align: 'right',
-                  render: (row) => (
-                    <div className="flex justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedGroupId(row.id)}
-                        className="text-xs font-medium text-[var(--series-1)] hover:underline"
-                      >
-                        {t('Editar')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeletingGroup(row)}
-                        className="text-xs font-medium text-[var(--status-critical)] hover:underline"
-                      >
-                        {t('Excluir')}
-                      </button>
+            {groups.length === 0 ? (
+              <p className="text-sm text-[var(--text-secondary)]">{t('Nenhum grupo de tarefas cadastrado ainda.')}</p>
+            ) : (
+              <div className="space-y-3">
+                {groups.map((group) => (
+                  <div
+                    key={group.id}
+                    className={`rounded-lg border p-3 ${
+                      group.id === selectedGroupId ? 'border-[var(--series-1)] bg-[var(--series-1)]/5' : 'border-[var(--border)]'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-[var(--text-primary)]">{group.name}</p>
+                        {group.description && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{group.description}</p>}
+                      </div>
+                      <div className="flex shrink-0 gap-3 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedGroupId(group.id)}
+                          className="text-xs font-medium text-[var(--series-1)] hover:underline"
+                        >
+                          {t('Editar')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeletingGroup(group)}
+                          className="text-xs font-medium text-[var(--status-critical)] hover:underline"
+                        >
+                          {t('Excluir')}
+                        </button>
+                      </div>
                     </div>
-                  ),
-                },
-              ]}
-              rows={groups}
-              getRowKey={(row) => row.id}
-              emptyMessage={t('Nenhum grupo de tarefas cadastrado ainda.')}
-            />
+                    {/* Estrutura da EAP do grupo, logo abaixo do nome (pedido
+                        do usuário: ver a árvore de tarefas aqui na lista,
+                        sem precisar abrir o editor) — mesma numeração de
+                        visualização de computeWbsCodes, calculada direto a
+                        partir do que já veio na listagem. */}
+                    {countItems(group.items) === 0 ? (
+                      <p className="mt-2 text-xs text-[var(--text-muted)]">{t('Nenhuma tarefa adicionada ainda.')}</p>
+                    ) : (
+                      <TaskGroupTreePreview items={group.items} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
 
           <Card title={selectedGroup ? `${t('Tarefas do grupo')} — ${selectedGroup.name}` : t('Tarefas do grupo')}>
@@ -381,27 +463,34 @@ function TaskGroupEditor({ group, onSaved }) {
         {items.length === 0 ? (
           <p className="text-xs text-[var(--text-muted)]">{t('Nenhuma tarefa adicionada ainda.')}</p>
         ) : (
-          <div className="space-y-1.5 rounded-lg border border-[var(--border)] p-2">
-            <div className="flex flex-wrap items-center gap-1.5 px-2 text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-              <span className="w-12 shrink-0">{t('WBS')}</span>
-              <span className="min-w-[160px] flex-1">{t('Nome da tarefa')}</span>
-              <span className="w-[6.5rem]">{t('Tipo')}</span>
-              <span className="w-20">{t('Duração (dias)')}</span>
-              <span className="w-20">{t('Horas')}</span>
-              <span className="w-[6.5rem]">{t('Modalidade')}</span>
-              <span className="w-14">{t('Marco')}</span>
+          <div className="overflow-x-auto rounded-lg border border-[var(--border)] p-2">
+            <div className="min-w-[46rem] space-y-1.5">
+              <div
+                className="grid items-center gap-1.5 px-2 text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]"
+                style={{ gridTemplateColumns: ITEM_GRID_COLS }}
+              >
+                <span>{t('WBS')}</span>
+                <span>{t('Nome da tarefa')}</span>
+                <span>{t('Tipo')}</span>
+                <span>{t('Duração (dias)')}</span>
+                <span>{t('Horas')}</span>
+                <span>{t('Modalidade')}</span>
+                <span className="text-center">{t('Marco')}</span>
+                <span />
+                <span />
+              </div>
+              {items.map((item) => (
+                <TaskGroupItemRow
+                  key={item._key}
+                  item={item}
+                  depth={0}
+                  wbsCodes={wbsCodes}
+                  onAddChild={handleAddChild}
+                  onUpdate={handleUpdate}
+                  onRemove={handleRemove}
+                />
+              ))}
             </div>
-            {items.map((item) => (
-              <TaskGroupItemRow
-                key={item._key}
-                item={item}
-                depth={0}
-                wbsCodes={wbsCodes}
-                onAddChild={handleAddChild}
-                onUpdate={handleUpdate}
-                onRemove={handleRemove}
-              />
-            ))}
           </div>
         )}
       </div>
@@ -429,54 +518,60 @@ function TaskGroupItemRow({ item, depth, wbsCodes, onAddChild, onUpdate, onRemov
   return (
     <div>
       <div
-        className={`flex flex-wrap items-center gap-1.5 rounded-lg border px-2 py-1.5 ${
+        className={`grid items-center gap-1.5 rounded-lg border px-2 py-1.5 ${
           hasChildren ? 'border-[var(--series-1)]/40 bg-[var(--series-1)]/5' : 'border-[var(--border)] bg-[var(--page)]'
         }`}
-        style={{ marginLeft: depth * 20 }}
+        style={{ gridTemplateColumns: ITEM_GRID_COLS }}
       >
-        <span className="w-12 shrink-0 font-mono text-xs font-semibold text-[var(--text-muted)]">{wbsCodes.get(item._key)}</span>
-        <TextInput
-          value={item.name}
-          onChange={(event) => onUpdate(item._key, { name: event.target.value })}
-          placeholder={t('Nome da tarefa')}
-          className="min-w-[160px] flex-1"
-        />
-        <Select value={item.task_type} onChange={(event) => onUpdate(item._key, { task_type: event.target.value })} className="w-[6.5rem]">
+        <span className="truncate font-mono text-xs font-semibold text-[var(--text-muted)]">{wbsCodes.get(item._key)}</span>
+        {/* Indentação só no conteúdo da célula de nome (pedido do usuário:
+            layout alinhado com o cabeçalho) — indentar a linha inteira
+            quebraria o alinhamento das colunas entre níveis diferentes. */}
+        <div style={{ paddingLeft: depth * 18 }}>
+          <TextInput
+            value={item.name}
+            onChange={(event) => onUpdate(item._key, { name: event.target.value })}
+            placeholder={t('Nome da tarefa')}
+          />
+        </div>
+        <Select value={item.task_type} onChange={(event) => onUpdate(item._key, { task_type: event.target.value })}>
           {Object.entries(labels.TASK_TYPE_LABELS).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
           ))}
         </Select>
+        {/* step="any" (antes "0.5" com min="0.01"): o step fixo criava uma
+            grade de valores válidos (0.01, 0.51, 1.01…) que não incluía
+            números inteiros — o navegador bloqueava "8" com "os valores
+            válidos mais próximos são 7,51 e 8,01". Com step="any" a
+            validação de formato fica só com o backend (Pydantic). */}
         <TextInput
           type="number"
-          step="0.5"
-          min="0.01"
+          step="any"
+          min="0"
           value={item.duration_days}
           onChange={(event) => onUpdate(item._key, { duration_days: event.target.value })}
           title={t('Duração (dias)')}
-          className="w-20"
         />
         <TextInput
           type="number"
-          step="0.5"
+          step="any"
           min="0"
           value={item.estimated_hours}
           onChange={(event) => onUpdate(item._key, { estimated_hours: event.target.value })}
           title={t('Trabalho (horas)')}
           placeholder={t('Horas')}
-          className="w-20"
         />
-        <Select value={item.modality} onChange={(event) => onUpdate(item._key, { modality: event.target.value })} className="w-[6.5rem]">
+        <Select value={item.modality} onChange={(event) => onUpdate(item._key, { modality: event.target.value })}>
           {Object.entries(labels.TASK_MODALITY_LABELS).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
           ))}
         </Select>
-        <label className="flex w-14 items-center gap-1 whitespace-nowrap text-xs text-[var(--text-secondary)]">
+        <label className="flex items-center justify-center" title={t('Marco')}>
           <input type="checkbox" checked={item.is_milestone} onChange={(event) => onUpdate(item._key, { is_milestone: event.target.checked })} />
-          {t('Marco')}
         </label>
         <IconButton icon={PlusIcon} label={t('Adicionar sub-tarefa')} size={14} onClick={() => onAddChild(item._key)} />
         <IconButton icon={TrashIcon} label={t('Remover tarefa')} variant="danger" size={14} onClick={() => onRemove(item._key)} />
