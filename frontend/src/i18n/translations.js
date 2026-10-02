@@ -272,6 +272,14 @@ export const es = {
   'Salvar grupo': 'Guardar grupo',
   'Adicionar sub-tarefa': 'Agregar subtarea',
   'Remover tarefa': 'Quitar tarea',
+  // Tela de detalhe do grupo (TaskGroupDetailPage) — pedido do usuário de
+  // reestruturar "Grupos de Tarefas" em 2 telas (lista + detalhe) com
+  // tarefa em janela flutuante, igual à aba Tarefas de um projeto.
+  'Editar grupo': 'Editar grupo',
+  'Tem certeza que quer remover a tarefa': '¿Está seguro de que quiere quitar la tarea',
+  'e todas as suas sub-tarefas': 'y todas sus subtareas',
+  'Removendo…': 'Quitando…',
+  'Informe o nome da tarefa.': 'Informe el nombre de la tarea.',
   'Aplicar grupo de tarefas': 'Aplicar grupo de tareas',
   'Clona as tarefas do grupo escolhido como tarefas-filhas desta tarefa. Sem datas, recursos alocados nem dependências — ajuste isso depois, se precisar.':
     'Clona las tareas del grupo elegido como tareas hijas de esta tarea. Sin fechas, recursos asignados ni dependencias — ajústelo después, si lo necesita.',

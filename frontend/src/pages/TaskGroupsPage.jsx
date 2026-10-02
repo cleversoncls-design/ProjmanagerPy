@@ -1,206 +1,43 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import * as taskGroupsApi from '../api/taskGroups'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
+import Table from '../components/Table'
 import Button from '../components/Button'
 import IconButton from '../components/IconButton'
 import Modal from '../components/Modal'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
-import { FormField, TextInput, Select, TextArea } from '../components/FormField'
-import { PlusIcon, TrashIcon } from '../components/icons'
-import { formatNumber } from '../utils/format'
+import { FormField, TextInput, TextArea } from '../components/FormField'
+import { TrashIcon } from '../components/icons'
 import { useLanguage } from '../context/LanguageContext'
-
-/** Grade de colunas compartilhada pelo cabeçalho e por cada linha do editor
- * de árvore (TaskGroupEditor/TaskGroupItemRow) — pedido do usuário: o
- * layout anterior (flex-wrap) quebrava os campos em várias linhas por
- * tarefa e desalinhava do cabeçalho. Com grid fixo os dois sempre alinham,
- * não importa a largura da tela (o container rola na horizontal se
- * precisar, ver overflow-x-auto). */
-const ITEM_GRID_COLS = '3.5rem minmax(160px,1fr) 7rem 5rem 5rem 7rem 3.5rem 1.75rem 1.75rem'
 
 /** "Grupos de Tarefas" (pedido do usuário): um agrupador reutilizável de
  * tarefas — não um projeto — que pode ser aplicado depois como
  * tarefas-filhas de qualquer tarefa de um projeto real (ver
  * ProjectDetailPage, botão "Aplicar grupo de tarefas"), pra acelerar a
- * criação de projetos parecidos. Página própria do menu lateral, mesmo
- * padrão mestre/detalhe de CalendarsPage (lista à esquerda, editor da
- * seleção à direita) — decisões confirmadas com o usuário: cadastro novo
- * e dedicado, hierarquia aninhada, página própria.
+ * criação de projetos parecidos.
  *
- * O editor de árvore (TaskGroupEditor/TaskGroupItemRow abaixo) mostra a
- * estrutura como uma EAP (código WBS "de visualização" + indentação por
- * nível, pedido do usuário) e cobre os campos mais usados (nome, tipo,
- * duração, horas, modalidade, marco); "Observações" e "Nível mínimo" do
- * item ficam com o default (vazio / 1) neste v1 — dá pra editá-los depois,
- * numa tarefa já aplicada num projeto, pelo modal de edição de tarefa
- * normal. */
-
-let _nextLocalKey = 0
-function nextLocalKey() {
-  _nextLocalKey += 1
-  return `new-${_nextLocalKey}`
-}
-
-function emptyItem() {
-  return {
-    _key: nextLocalKey(),
-    name: '',
-    task_type: 'CONSULTING',
-    duration_days: '1',
-    estimated_hours: '0',
-    is_milestone: false,
-    notes: null,
-    min_level: 1,
-    modality: 'BOTH',
-    children: [],
-  }
-}
-
-function itemFromApi(apiItem) {
-  return {
-    _key: apiItem.id,
-    name: apiItem.name,
-    task_type: apiItem.task_type,
-    duration_days: String(apiItem.duration_days),
-    estimated_hours: String(apiItem.estimated_hours),
-    is_milestone: apiItem.is_milestone,
-    notes: apiItem.notes || null,
-    min_level: apiItem.min_level,
-    modality: apiItem.modality,
-    children: (apiItem.children || []).map(itemFromApi),
-  }
-}
-
-function updateNode(nodes, key, patch) {
-  return nodes.map((node) => {
-    if (node._key === key) return { ...node, ...patch }
-    if (node.children.length) return { ...node, children: updateNode(node.children, key, patch) }
-    return node
-  })
-}
-
-function removeNode(nodes, key) {
-  return nodes.filter((node) => node._key !== key).map((node) => ({ ...node, children: removeNode(node.children, key) }))
-}
-
-function addChild(nodes, parentKey) {
-  if (parentKey === null) return [...nodes, emptyItem()]
-  return nodes.map((node) => {
-    if (node._key === parentKey) return { ...node, children: [...node.children, emptyItem()] }
-    if (node.children.length) return { ...node, children: addChild(node.children, parentKey) }
-    return node
-  })
-}
-
-function itemToPayload(node) {
-  return {
-    name: node.name,
-    task_type: node.task_type,
-    duration_days: node.duration_days || '1',
-    estimated_hours: node.estimated_hours || '0',
-    is_milestone: node.is_milestone,
-    notes: node.notes || null,
-    min_level: Number(node.min_level) || 1,
-    modality: node.modality,
-    children: node.children.map(itemToPayload),
-  }
-}
-
-function everyNodeNamed(nodes) {
-  return nodes.every((node) => node.name.trim().length > 0 && everyNodeNamed(node.children))
-}
+ * Tela dividida em duas partes, no mesmo padrão lista/detalhe de Projetos
+ * (pedido do usuário: "poderia ser em 2 telas? Parecido ao que temos com
+ * os projetos?"): esta página (lista) só cria o grupo e navega para o
+ * detalhe; a árvore de tarefas do grupo mora em TaskGroupDetailPage
+ * (/task-groups/:groupId), onde "Nova tarefa" abre numa janela flutuante —
+ * igual à aba Tarefas de um projeto.
+ */
 
 function countItems(nodes) {
-  return nodes.reduce((total, node) => total + 1 + countItems(node.children), 0)
-}
-
-/** Código WBS/EAP "de visualização" (pedido do usuário: ver a estrutura
- * pai/filho igual à EAP de um projeto) — calculado só pela posição de cada
- * item na árvore local (1, 1.1, 1.2, 2…), mesmo critério de
- * `recalculate_wbs` no backend (services.py). É só pra exibição dentro do
- * editor: o `wbs_code` de verdade só nasce quando o grupo é aplicado numa
- * tarefa de projeto (ver apply_task_group_to_task), porque até lá o grupo
- * nem tem projeto nenhum por trás pra numerar contra. */
-function computeWbsCodes(nodes, prefix = []) {
-  const codes = new Map()
-  nodes.forEach((node, index) => {
-    const parts = [...prefix, index + 1]
-    codes.set(node._key, parts.join('.'))
-    for (const [key, code] of computeWbsCodes(node.children, parts)) {
-      codes.set(key, code)
-    }
-  })
-  return codes
-}
-
-/** Mesma lógica de `computeWbsCodes`, mas operando direto sobre os itens
- * como a API devolve (`item.id`/`item.children`, já aninhados em
- * TaskGroupRead) — usada pela prévia da árvore na lista "Grupos
- * cadastrados" (pedido do usuário: ver a estrutura assim que a tarefa é
- * adicionada, sem precisar abrir o editor). */
-function computeApiWbsCodes(nodes, prefix = []) {
-  const codes = new Map()
-  nodes.forEach((node, index) => {
-    const parts = [...prefix, index + 1]
-    codes.set(node.id, parts.join('.'))
-    for (const [id, code] of computeApiWbsCodes(node.children || [], parts)) {
-      codes.set(id, code)
-    }
-  })
-  return codes
-}
-
-/** Prévia somente-leitura da EAP de um grupo, exibida na lista à esquerda
- * logo abaixo do nome/descrição — pedido do usuário: "uma vez que se
- * adiciona a tarefa, mostrar na estrutura embaixo do agrupador ao lado
- * esquerdo". Usa os dados já carregados em `group.items` (sem precisar
- * buscar de novo nem montar a árvore editável usada no editor). */
-function TaskGroupTreePreview({ items }) {
-  const wbsCodes = useMemo(() => computeApiWbsCodes(items), [items])
-  return (
-    <div className="mt-2 space-y-0.5 border-l border-[var(--border)] pl-2">
-      {items.map((item) => (
-        <TaskGroupTreePreviewRow key={item.id} item={item} depth={0} wbsCodes={wbsCodes} />
-      ))}
-    </div>
-  )
-}
-
-function TaskGroupTreePreviewRow({ item, depth, wbsCodes }) {
-  const { t } = useLanguage()
-  const children = item.children || []
-  return (
-    <div>
-      <div className="flex items-center gap-1.5 py-0.5 text-xs" style={{ paddingLeft: depth * 14 }}>
-        <span className="shrink-0 font-mono text-[10px] font-semibold text-[var(--text-muted)]">{wbsCodes.get(item.id)}</span>
-        <span className="truncate text-[var(--text-primary)]">{item.name}</span>
-        {item.is_milestone && (
-          <span className="shrink-0 rounded-full bg-[var(--series-1)]/10 px-1.5 text-[10px] font-medium text-[var(--series-1)]">{t('Marco')}</span>
-        )}
-        <span className="ml-auto shrink-0 whitespace-nowrap text-[10px] text-[var(--text-muted)]">
-          {formatNumber(item.duration_days)}d · {formatNumber(item.estimated_hours)}h
-        </span>
-      </div>
-      {children.length > 0 && (
-        <div>
-          {children.map((child) => (
-            <TaskGroupTreePreviewRow key={child.id} item={child} depth={depth + 1} wbsCodes={wbsCodes} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
+  return (nodes || []).reduce((total, node) => total + 1 + countItems(node.children), 0)
 }
 
 export default function TaskGroupsPage() {
   const { t } = useLanguage()
+  const navigate = useNavigate()
   const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [selectedGroupId, setSelectedGroupId] = useState(null)
   const [deletingGroup, setDeletingGroup] = useState(null)
 
   function loadGroups() {
@@ -214,16 +51,16 @@ export default function TaskGroupsPage() {
 
   useEffect(loadGroups, [])
 
-  const selectedGroup = useMemo(() => groups.find((g) => g.id === selectedGroupId) || null, [groups, selectedGroupId])
-
   function handleCreated(group) {
     setShowCreateModal(false)
-    setGroups((prev) => [...prev, group])
-    setSelectedGroupId(group.id)
+    // Grupo recém-criado ainda não tem nenhuma tarefa — vai direto pra tela
+    // de detalhe (mesmo padrão de "Novo projeto", que também abre o
+    // detalhe em seguida), já que criar um grupo sem nenhuma tarefa não
+    // serve pra nada.
+    navigate(`/task-groups/${group.id}`)
   }
 
   function handleDeleted() {
-    if (deletingGroup && deletingGroup.id === selectedGroupId) setSelectedGroupId(null)
     setDeletingGroup(null)
     loadGroups()
   }
@@ -242,65 +79,34 @@ export default function TaskGroupsPage() {
       <ErrorBanner message={error} />
 
       {!loading && !error && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[22rem_1fr] lg:items-start">
-          <Card title={t('Grupos cadastrados')}>
-            {groups.length === 0 ? (
-              <p className="text-sm text-[var(--text-secondary)]">{t('Nenhum grupo de tarefas cadastrado ainda.')}</p>
-            ) : (
-              <div className="space-y-3">
-                {groups.map((group) => (
-                  <div
-                    key={group.id}
-                    className={`rounded-lg border p-3 ${
-                      group.id === selectedGroupId ? 'border-[var(--series-1)] bg-[var(--series-1)]/5' : 'border-[var(--border)]'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-[var(--text-primary)]">{group.name}</p>
-                        {group.description && <p className="mt-0.5 text-xs text-[var(--text-muted)]">{group.description}</p>}
-                      </div>
-                      <div className="flex shrink-0 gap-3 pt-0.5">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedGroupId(group.id)}
-                          className="text-xs font-medium text-[var(--series-1)] hover:underline"
-                        >
-                          {t('Editar')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeletingGroup(group)}
-                          className="text-xs font-medium text-[var(--status-critical)] hover:underline"
-                        >
-                          {t('Excluir')}
-                        </button>
-                      </div>
-                    </div>
-                    {/* Estrutura da EAP do grupo, logo abaixo do nome (pedido
-                        do usuário: ver a árvore de tarefas aqui na lista,
-                        sem precisar abrir o editor) — mesma numeração de
-                        visualização de computeWbsCodes, calculada direto a
-                        partir do que já veio na listagem. */}
-                    {countItems(group.items) === 0 ? (
-                      <p className="mt-2 text-xs text-[var(--text-muted)]">{t('Nenhuma tarefa adicionada ainda.')}</p>
-                    ) : (
-                      <TaskGroupTreePreview items={group.items} />
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card title={selectedGroup ? `${t('Tarefas do grupo')} — ${selectedGroup.name}` : t('Tarefas do grupo')}>
-            {selectedGroup ? (
-              <TaskGroupEditor key={selectedGroup.id} group={selectedGroup} onSaved={loadGroups} />
-            ) : (
-              <p className="text-sm text-[var(--text-muted)]">{t('Selecione um grupo na lista ao lado para editar suas tarefas.')}</p>
-            )}
-          </Card>
-        </div>
+        <Card>
+          <Table
+            columns={[
+              {
+                key: 'name',
+                header: t('Nome'),
+                render: (row) => (
+                  <Link to={`/task-groups/${row.id}`} className="font-medium text-[var(--series-1)] hover:underline">
+                    {row.name}
+                  </Link>
+                ),
+              },
+              { key: 'description', header: t('Descrição'), render: (row) => row.description || '—' },
+              { key: 'items', header: t('Tarefas'), align: 'right', render: (row) => countItems(row.items) },
+              {
+                key: 'actions',
+                header: '',
+                align: 'right',
+                render: (row) => (
+                  <IconButton icon={TrashIcon} label={t('Excluir grupo de tarefas')} variant="danger" onClick={() => setDeletingGroup(row)} />
+                ),
+              },
+            ]}
+            rows={groups}
+            getRowKey={(row) => row.id}
+            emptyMessage={t('Nenhum grupo de tarefas cadastrado ainda.')}
+          />
+        </Card>
       )}
 
       {showCreateModal && <CreateTaskGroupModal onClose={() => setShowCreateModal(false)} onCreated={handleCreated} />}
@@ -389,208 +195,5 @@ function DeleteTaskGroupModal({ group, onClose, onDeleted }) {
         </div>
       </div>
     </Modal>
-  )
-}
-
-/** Editor da árvore de um grupo — estado local controla toda a árvore
- * (cada nó com uma `_key` estável, igual id real pra item já salvo ou uma
- * chave local pra item novo ainda não salvo) até o usuário clicar em
- * "Salvar grupo", que manda a árvore inteira num PUT só (substitui tudo,
- * ver update_task_group no backend — não existe PATCH incremental de
- * item). */
-function TaskGroupEditor({ group, onSaved }) {
-  const { t } = useLanguage()
-  const [name, setName] = useState(group.name)
-  const [description, setDescription] = useState(group.description || '')
-  const [items, setItems] = useState(() => group.items.map(itemFromApi))
-  const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const wbsCodes = useMemo(() => computeWbsCodes(items), [items])
-
-  function handleUpdate(key, patch) {
-    setItems((prev) => updateNode(prev, key, patch))
-  }
-
-  function handleRemove(key) {
-    setItems((prev) => removeNode(prev, key))
-  }
-
-  function handleAddChild(parentKey) {
-    setItems((prev) => addChild(prev, parentKey))
-  }
-
-  async function handleSave(event) {
-    event.preventDefault()
-    setError('')
-    if (!name.trim()) {
-      setError(t('Informe o nome do grupo.'))
-      return
-    }
-    if (!everyNodeNamed(items)) {
-      setError(t('Toda tarefa do grupo precisa de um nome.'))
-      return
-    }
-    setSaving(true)
-    try {
-      await taskGroupsApi.updateTaskGroup(group.id, {
-        name,
-        description: description || null,
-        items: items.map(itemToPayload),
-      })
-      onSaved()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <form onSubmit={handleSave} className="space-y-4">
-      <FormField label={t('Nome')} required>
-        <TextInput required value={name} onChange={(event) => setName(event.target.value)} />
-      </FormField>
-      <FormField label={t('Descrição')}>
-        <TextArea rows={2} value={description} onChange={(event) => setDescription(event.target.value)} />
-      </FormField>
-
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-[var(--text-secondary)]">{t('Tarefas do grupo')}</span>
-          <IconButton icon={PlusIcon} label={t('Adicionar tarefa')} onClick={() => handleAddChild(null)} />
-        </div>
-        {items.length === 0 ? (
-          <p className="text-xs text-[var(--text-muted)]">{t('Nenhuma tarefa adicionada ainda.')}</p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-[var(--border)] p-2">
-            <div className="min-w-[46rem] space-y-1.5">
-              <div
-                className="grid items-center gap-1.5 px-2 text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]"
-                style={{ gridTemplateColumns: ITEM_GRID_COLS }}
-              >
-                <span>{t('WBS')}</span>
-                <span>{t('Nome da tarefa')}</span>
-                <span>{t('Tipo')}</span>
-                <span>{t('Duração (dias)')}</span>
-                <span>{t('Horas')}</span>
-                <span>{t('Modalidade')}</span>
-                <span className="text-center">{t('Marco')}</span>
-                <span />
-                <span />
-              </div>
-              {items.map((item) => (
-                <TaskGroupItemRow
-                  key={item._key}
-                  item={item}
-                  depth={0}
-                  wbsCodes={wbsCodes}
-                  onAddChild={handleAddChild}
-                  onUpdate={handleUpdate}
-                  onRemove={handleRemove}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <ErrorBanner message={error} />
-
-      <div className="flex justify-end pt-1">
-        <Button type="submit" disabled={saving}>
-          {saving ? t('Salvando…') : t('Salvar grupo')}
-        </Button>
-      </div>
-    </form>
-  )
-}
-
-/** Uma linha da EAP do grupo — indentada por `depth` (igual à grade de
- * Tarefas de um projeto) e com o código WBS "de visualização" calculado em
- * `computeWbsCodes` à esquerda do nome. Linhas com sub-tarefas (tarefas-pai
- * na EAP) ganham um destaque sutil (borda/fundo na cor da marca) pra
- * diferenciar visualmente de uma tarefa-folha — mesma ideia da bolinha/
- * indicador de tarefa-pai na grade de Tarefas do projeto. */
-function TaskGroupItemRow({ item, depth, wbsCodes, onAddChild, onUpdate, onRemove }) {
-  const { labels, t } = useLanguage()
-  const hasChildren = item.children.length > 0
-  return (
-    <div>
-      <div
-        className={`grid items-center gap-1.5 rounded-lg border px-2 py-1.5 ${
-          hasChildren ? 'border-[var(--series-1)]/40 bg-[var(--series-1)]/5' : 'border-[var(--border)] bg-[var(--page)]'
-        }`}
-        style={{ gridTemplateColumns: ITEM_GRID_COLS }}
-      >
-        <span className="truncate font-mono text-xs font-semibold text-[var(--text-muted)]">{wbsCodes.get(item._key)}</span>
-        {/* Indentação só no conteúdo da célula de nome (pedido do usuário:
-            layout alinhado com o cabeçalho) — indentar a linha inteira
-            quebraria o alinhamento das colunas entre níveis diferentes. */}
-        <div style={{ paddingLeft: depth * 18 }}>
-          <TextInput
-            value={item.name}
-            onChange={(event) => onUpdate(item._key, { name: event.target.value })}
-            placeholder={t('Nome da tarefa')}
-          />
-        </div>
-        <Select value={item.task_type} onChange={(event) => onUpdate(item._key, { task_type: event.target.value })}>
-          {Object.entries(labels.TASK_TYPE_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </Select>
-        {/* step="any" (antes "0.5" com min="0.01"): o step fixo criava uma
-            grade de valores válidos (0.01, 0.51, 1.01…) que não incluía
-            números inteiros — o navegador bloqueava "8" com "os valores
-            válidos mais próximos são 7,51 e 8,01". Com step="any" a
-            validação de formato fica só com o backend (Pydantic). */}
-        <TextInput
-          type="number"
-          step="any"
-          min="0"
-          value={item.duration_days}
-          onChange={(event) => onUpdate(item._key, { duration_days: event.target.value })}
-          title={t('Duração (dias)')}
-        />
-        <TextInput
-          type="number"
-          step="any"
-          min="0"
-          value={item.estimated_hours}
-          onChange={(event) => onUpdate(item._key, { estimated_hours: event.target.value })}
-          title={t('Trabalho (horas)')}
-          placeholder={t('Horas')}
-        />
-        <Select value={item.modality} onChange={(event) => onUpdate(item._key, { modality: event.target.value })}>
-          {Object.entries(labels.TASK_MODALITY_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </Select>
-        <label className="flex items-center justify-center" title={t('Marco')}>
-          <input type="checkbox" checked={item.is_milestone} onChange={(event) => onUpdate(item._key, { is_milestone: event.target.checked })} />
-        </label>
-        <IconButton icon={PlusIcon} label={t('Adicionar sub-tarefa')} size={14} onClick={() => onAddChild(item._key)} />
-        <IconButton icon={TrashIcon} label={t('Remover tarefa')} variant="danger" size={14} onClick={() => onRemove(item._key)} />
-      </div>
-      {hasChildren && (
-        <div className="mt-1.5 space-y-1.5">
-          {item.children.map((child) => (
-            <TaskGroupItemRow
-              key={child._key}
-              item={child}
-              depth={depth + 1}
-              wbsCodes={wbsCodes}
-              onAddChild={onAddChild}
-              onUpdate={onUpdate}
-              onRemove={onRemove}
-            />
-          ))}
-        </div>
-      )}
-    </div>
   )
 }
