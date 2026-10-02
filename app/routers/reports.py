@@ -11,11 +11,12 @@ from ..database import get_db
 from ..deps import ADMIN_LIKE_ROLES, EXTERNAL_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, get_current_user, require_project_access, require_roles
 from ..exports import build_service_orders_workbook, build_tasks_workbook
 from ..i18n import t as translate
-from ..models import TASK_FINISHED_STATUSES, Project, ProjectStatus, Resource, Task, TaskDependency, TaskStatus, User, UserRole
+from ..models import TASK_FINISHED_STATUSES, Client, Project, ProjectStatus, Resource, Task, TaskDependency, TaskStatus, User, UserRole
 from ..schemas import (
     DashboardResponse,
     EvmMetrics,
     GanttResponse,
+    HoursBreakdownReport,
     ProjectPortfolioRow,
     ProjectReportResponse,
     ProjectScheduleResponse,
@@ -27,6 +28,7 @@ from ..schemas import (
 )
 from ..services import (
     financials_by_task_type,
+    hours_breakdown_report,
     portfolio_rows,
     project_burndown,
     project_evm,
@@ -247,6 +249,40 @@ def roi(
     # listagem "todos os projetos").
     projects = list(db.scalars(select(Project).where(Project.status != ProjectStatus.MODELO)).all())
     return [project_roi(db, project.id) for project in projects]
+
+
+@router.get("/reports/hours-breakdown", response_model=HoursBreakdownReport)
+def hours_breakdown(
+    start: date | None = None,
+    end: date | None = None,
+    resource_id: str | None = None,
+    client_id: str | None = None,
+    project_id: str | None = None,
+    user: User = Depends(require_roles(*ADMIN_LIKE_ROLES)),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Primeiro relatório do novo menu "Relatórios" (pedido do usuário):
+    acompanha, num só lugar, horas de Projeto (cliente), Traslado e cada
+    tipo de Ausência — totais da empresa + quebra por recurso (decisão
+    confirmada: "os dois níveis"). Restrito a ADMIN_LIKE_ROLES — diferente
+    de Aprovações pendentes (MANAGEMENT_ROLES, mas aí o INTERNAL_PM só vê
+    os projetos que gerencia), este relatório expõe ausência/horas de TODOS
+    os recursos da empresa, dado mais sensível. Sem `start`/`end`, usa o mês
+    corrente (mesmo padrão de GET /resources/utilization)."""
+    today = date.today()
+    period_start = start or today.replace(day=1)
+    if end:
+        period_end = end
+    else:
+        next_month = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        period_end = next_month - timedelta(days=1)
+    if period_start > period_end:
+        raise HTTPException(status_code=422, detail=translate("start precisa ser anterior ou igual a end", user.language))
+    if client_id and not db.get(Client, client_id):
+        raise HTTPException(status_code=404, detail=translate("Cliente não encontrado", user.language))
+    if project_id and not db.get(Project, project_id):
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
+    return hours_breakdown_report(db, start=period_start, end=period_end, resource_id=resource_id, client_id=client_id, project_id=project_id)
 
 
 def _resolve_service_orders_scope(

@@ -15,6 +15,8 @@ import SchedulesPage from './pages/SchedulesPage'
 import TimesheetsPage from './pages/TimesheetsPage'
 import TimesheetApprovalsPage from './pages/TimesheetApprovalsPage'
 import ServiceOrdersPage from './pages/ServiceOrdersPage'
+import ReportsIndexPage from './pages/ReportsIndexPage'
+import HoursBreakdownReportPage from './pages/HoursBreakdownReportPage'
 import { ADMIN_LIKE_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECTS_VISIBLE_ROLES } from './utils/labels'
 
 export default function App() {
@@ -44,6 +46,8 @@ export default function App() {
                   <Route element={<ProtectedRoute roles={ADMIN_LIKE_ROLES} />}>
                     <Route path="/clients" element={<ClientsPage />} />
                     <Route path="/users" element={<UsersPage />} />
+                    <Route path="/reports" element={<ReportsIndexPage />} />
+                    <Route path="/reports/hours-breakdown" element={<HoursBreakdownReportPage />} />
                   </Route>
 
                   <Route element={<ProtectedRoute roles={MANAGEMENT_ROLES} />}>

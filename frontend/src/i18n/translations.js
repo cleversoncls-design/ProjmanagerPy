@@ -784,6 +784,19 @@ export const es = {
   'Subtotal': 'Subtotal',
   'Total geral': 'Total general',
   'Período': 'Período',
+
+  // --- Relatórios (menu novo, pedido do usuário) ---
+  'Relatórios': 'Informes',
+  'Escolha um relatório para abrir.': 'Elija un informe para abrir.',
+  'Horas por tipo (Projeto, Traslado e Ausência)': 'Horas por tipo (Proyecto, Traslado y Ausencia)',
+  'Totais da empresa e por consultor — horas de projeto por cliente, Traslado e cada tipo de ausência, num período.':
+    'Totales de la empresa y por consultor — horas de proyecto por cliente, Traslado y cada tipo de ausencia, en un período.',
+  'Totais do período': 'Totales del período',
+  'Horas de projeto': 'Horas de proyecto',
+  'Por consultor': 'Por consultor',
+  'Por projeto': 'Por proyecto',
+  'Nenhum apontamento no período.': 'Ningún registro en el período.',
+  'Nenhuma hora de projeto no período.': 'Ninguna hora de proyecto en el período.',
 }
 
 export function translate(lang, text, vars) {

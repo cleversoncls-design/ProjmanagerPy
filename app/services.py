@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import (
+    AbsenceType,
     Baseline,
     Calendar,
     Client,
@@ -1069,6 +1070,145 @@ def financials_by_task_type(session: Session, project_id: str) -> dict[str, dict
         bucket["hours"] = _q(bucket["hours"])
         bucket["cost"] = _q(bucket["cost"])
     return buckets
+
+
+def _empty_hours_breakdown_bucket() -> dict:
+    return {
+        "project_hours": Decimal("0"),
+        "transit_hours": Decimal("0"),
+        "internal_hours": Decimal("0"),
+        "absence_hours": {absence_type.value: Decimal("0") for absence_type in AbsenceType},
+    }
+
+
+def _quantize_hours_breakdown_bucket(bucket: dict) -> dict:
+    bucket["project_hours"] = _q(bucket["project_hours"])
+    bucket["transit_hours"] = _q(bucket["transit_hours"])
+    bucket["internal_hours"] = _q(bucket["internal_hours"])
+    bucket["absence_hours"] = {key: _q(value) for key, value in bucket["absence_hours"].items()}
+    return bucket
+
+
+def hours_breakdown_report(
+    session: Session,
+    *,
+    start: date,
+    end: date,
+    resource_id: str | None = None,
+    client_id: str | None = None,
+    project_id: str | None = None,
+) -> dict:
+    """Relatório novo (pedido do usuário, menu "Relatórios"): acompanha, num
+    só lugar, horas de PROJETO (cliente), TRASLADO e cada tipo de AUSÊNCIA —
+    coisa que antes só dava pra ver espalhada (Financeiro é por projeto e
+    nunca mostra ausência; Aprovações/Meus apontamentos são lista crua, sem
+    totalizador). "Horas internas" (hora administrativa interna — sem
+    projeto, sem Traslado, sem ausência) entra como quarta categoria, pra o
+    total bater com a soma de todos os apontamentos do período.
+
+    Dois níveis (decisão confirmada com o usuário): totais da empresa
+    inteira + quebra por recurso. "Horas de projeto" tem ainda uma terceira
+    tabela (`by_project`) com o detalhe por cliente/projeto — sem isso a
+    categoria "projeto" ficaria um número opaco, diferente de Traslado/
+    Ausência que já são auto-explicativos.
+
+    Mesmos critérios de exclusão dos demais relatórios de horas
+    (financials_by_task_type/service_orders): REJECTED não conta."""
+    project_col = func.coalesce(Task.project_id, Timesheet.project_id)
+    stmt = (
+        select(
+            Timesheet.resource_id,
+            Timesheet.hours_spent,
+            Timesheet.is_transit,
+            Timesheet.absence_type,
+            project_col.label("project_id"),
+        )
+        .outerjoin(Task, Task.id == Timesheet.task_id)
+        .where(
+            Timesheet.date >= start,
+            Timesheet.date <= end,
+            Timesheet.status != TimesheetStatus.REJECTED,
+        )
+    )
+    if resource_id:
+        stmt = stmt.where(Timesheet.resource_id == resource_id)
+    if project_id:
+        stmt = stmt.where(project_col == project_id)
+    if client_id:
+        client_project_ids = select(Project.id).where(Project.client_id == client_id)
+        stmt = stmt.where(project_col.in_(client_project_ids))
+    rows = session.execute(stmt).all()
+
+    totals = _empty_hours_breakdown_bucket()
+    by_resource: dict[str, dict] = {}
+    by_project: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+
+    for row in rows:
+        bucket = by_resource.setdefault(row.resource_id, _empty_hours_breakdown_bucket())
+        hours = Decimal(row.hours_spent)
+        if row.absence_type:
+            totals["absence_hours"][row.absence_type.value] += hours
+            bucket["absence_hours"][row.absence_type.value] += hours
+        elif row.is_transit:
+            totals["transit_hours"] += hours
+            bucket["transit_hours"] += hours
+        elif row.project_id:
+            totals["project_hours"] += hours
+            bucket["project_hours"] += hours
+            by_project[row.project_id] += hours
+        else:
+            totals["internal_hours"] += hours
+            bucket["internal_hours"] += hours
+
+    _quantize_hours_breakdown_bucket(totals)
+    for bucket in by_resource.values():
+        _quantize_hours_breakdown_bucket(bucket)
+
+    resources = (
+        {r.id: r for r in session.scalars(select(Resource).where(Resource.id.in_(by_resource.keys()))).all()}
+        if by_resource
+        else {}
+    )
+    user_ids = {r.user_id for r in resources.values()}
+    users = {u.id: u for u in session.scalars(select(User).where(User.id.in_(user_ids))).all()} if user_ids else {}
+
+    by_resource_rows = []
+    for rid, bucket in by_resource.items():
+        resource = resources.get(rid)
+        user = users.get(resource.user_id) if resource else None
+        by_resource_rows.append({"resource_id": rid, "resource_name": user.name if user else rid, **bucket})
+    by_resource_rows.sort(key=lambda row: row["resource_name"])
+
+    projects = (
+        {p.id: p for p in session.scalars(select(Project).where(Project.id.in_(by_project.keys()))).all()}
+        if by_project
+        else {}
+    )
+    client_ids = {p.client_id for p in projects.values()}
+    clients = {c.id: c for c in session.scalars(select(Client).where(Client.id.in_(client_ids))).all()} if client_ids else {}
+
+    by_project_rows = []
+    for pid, hours in by_project.items():
+        project = projects.get(pid)
+        client = clients.get(project.client_id) if project else None
+        by_project_rows.append(
+            {
+                "project_id": pid,
+                "project_code": project.code if project else pid,
+                "project_name": project.name if project else "",
+                "client_name": client.legal_name if client else "",
+                "hours": _q(hours),
+            }
+        )
+    by_project_rows.sort(key=lambda row: (row["client_name"], row["project_code"]))
+
+    return {
+        "period_start": start,
+        "period_end": end,
+        "totals": totals,
+        "by_resource": by_resource_rows,
+        "by_project": by_project_rows,
+    }
 
 
 def project_burndown(session: Session, project_id: str) -> list[dict]:

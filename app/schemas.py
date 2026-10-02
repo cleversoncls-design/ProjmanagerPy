@@ -857,6 +857,45 @@ class ServiceOrderRow(BaseModel):
     activities: list[ServiceOrderActivity]
 
 
+class HoursBreakdownTotals(BaseModel):
+    """Quatro categorias de horas (pedido do usuário, menu "Relatórios"):
+    PROJETO (cliente), TRASLADO, INTERNO (hora administrativa, sem
+    ausência) e AUSÊNCIA — esta última desagregada por tipo
+    (`absence_hours`, chaves = valores de AbsenceType). Mesmo formato tanto
+    para o total da empresa quanto para cada linha de `by_resource` (ver
+    hours_breakdown_report em services.py)."""
+
+    project_hours: Decimal
+    transit_hours: Decimal
+    internal_hours: Decimal
+    absence_hours: dict[str, Decimal]
+
+
+class HoursBreakdownByResourceRow(HoursBreakdownTotals):
+    resource_id: str
+    resource_name: str
+
+
+class HoursBreakdownByProjectRow(BaseModel):
+    """Detalhe de `project_hours` por cliente/projeto — sem isso a
+    categoria "Projeto" seria só um número opaco, diferente de Traslado/
+    Ausência que já são auto-explicativos."""
+
+    project_id: str
+    project_code: str
+    project_name: str
+    client_name: str
+    hours: Decimal
+
+
+class HoursBreakdownReport(BaseModel):
+    period_start: date
+    period_end: date
+    totals: HoursBreakdownTotals
+    by_resource: list[HoursBreakdownByResourceRow]
+    by_project: list[HoursBreakdownByProjectRow]
+
+
 class GanttResponse(BaseModel):
     tasks: list[TaskRead]
     dependencies: list[TaskDependencyRead]

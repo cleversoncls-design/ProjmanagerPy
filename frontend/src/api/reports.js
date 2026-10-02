@@ -34,6 +34,13 @@ export function getServiceOrders(params) {
   return api.get('/reports/service-orders', params)
 }
 
+// Relatório "Horas por tipo" (pedido do usuário, menu Relatórios) — totais
+// da empresa + quebra por recurso de Projeto/Traslado/Ausência. Ver
+// app/routers/reports.py (GET /reports/hours-breakdown).
+export function getHoursBreakdown(params) {
+  return api.get('/reports/hours-breakdown', params)
+}
+
 /** Baixa a planilha de tarefas (.xlsx) direto do navegador — não passa
  * pelo `api.get` normal porque a resposta é binária, não JSON, e precisa
  * virar um download (link temporário) em vez de ser parseada. */

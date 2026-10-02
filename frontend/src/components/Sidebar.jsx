@@ -4,7 +4,18 @@ import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import { ADMIN_LIKE_ROLES, DASHBOARD_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECTS_VISIBLE_ROLES } from '../utils/labels'
 import logo from '../assets/resultar-logo.png'
-import { BadgeCheckIcon, BriefcaseIcon, BuildingIcon, CalendarIcon, ClipboardCheckIcon, ClockIcon, FileTextIcon, HomeIcon, UsersIcon } from './icons'
+import {
+  BadgeCheckIcon,
+  BarChartIcon,
+  BriefcaseIcon,
+  BuildingIcon,
+  CalendarIcon,
+  ClipboardCheckIcon,
+  ClockIcon,
+  FileTextIcon,
+  HomeIcon,
+  UsersIcon,
+} from './icons'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', end: true, icon: HomeIcon, roles: DASHBOARD_ROLES },
@@ -19,6 +30,12 @@ const NAV_ITEMS = [
   { to: '/clients', label: 'Clientes', roles: ADMIN_LIKE_ROLES, icon: BuildingIcon },
   { to: '/users', label: 'Usuários e recursos', roles: ADMIN_LIKE_ROLES, icon: UsersIcon },
   { to: '/calendars', label: 'Calendários', roles: MANAGEMENT_ROLES, icon: CalendarIcon },
+  // Menu novo (pedido do usuário) — hoje com um relatório (Horas por tipo:
+  // Projeto/Traslado/Ausência), pensado pra receber mais no futuro
+  // (ReportsIndexPage lista os cards). ADMIN_LIKE_ROLES: dado sensível —
+  // ausência/horas de TODOS os recursos da empresa, não só dos projetos
+  // que o INTERNAL_PM gerencia (ver hours_breakdown, routers/reports.py).
+  { to: '/reports', label: 'Relatórios', roles: ADMIN_LIKE_ROLES, icon: BarChartIcon },
 ]
 
 const WIDTH_EXPANDED = 252

@@ -277,3 +277,13 @@ export const CopyIcon = (props) => (
     <path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8a1.5 1.5 0 0 0 1.5 1.5h2.5" />
   </Icon>
 )
+
+// Menu "Relatórios" (pedido do usuário) — gráfico de barras simples.
+export const BarChartIcon = (props) => (
+  <Icon {...props}>
+    <path d="M3 21h18" />
+    <rect x="5" y="12" width="3.5" height="8" rx="0.8" />
+    <rect x="10.25" y="7" width="3.5" height="13" rx="0.8" />
+    <rect x="15.5" y="4" width="3.5" height="16" rx="0.8" />
+  </Icon>
+)

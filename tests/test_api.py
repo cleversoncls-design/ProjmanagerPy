@@ -2142,6 +2142,94 @@ def test_schedule_blocked_on_resource_absence_day(client, setup):
     assert now_ok.status_code == 201
 
 
+def test_hours_breakdown_report_aggregates_project_transit_and_absence_hours(client, setup):
+    """Pedido do usuário: um relatório que acompanhe, no mesmo lugar, horas
+    de projeto, Traslado e ausência — totais da empresa e por consultor
+    ("os dois níveis", decisão confirmada). Ver hours_breakdown_report em
+    app/services.py e GET /reports/hours-breakdown."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    # 2h de projeto (avulso, sem tarefa).
+    client.post(
+        "/timesheets",
+        json={"project_id": project_id, "date": "2026-08-20", "start_time": "09:00", "end_time": "11:00"},
+        headers=consultant_headers,
+    )
+    # 3h de Traslado (sempre vinculado a projeto).
+    client.post(
+        "/timesheets",
+        json={"project_id": project_id, "date": "2026-08-20", "start_time": "11:00", "end_time": "14:00", "is_transit": True},
+        headers=consultant_headers,
+    )
+    # 8h de ausência (Férias).
+    client.post(
+        "/timesheets",
+        json={"absence_type": "VACATION", "date": "2026-08-21", "start_time": "09:00", "end_time": "17:00"},
+        headers=consultant_headers,
+    )
+    # 1h administrativa interna (sem projeto/tarefa/traslado/ausência).
+    client.post(
+        "/timesheets",
+        json={"date": "2026-08-22", "start_time": "09:00", "end_time": "10:00"},
+        headers=consultant_headers,
+    )
+    # Fora do período filtrado abaixo — não deve entrar nos totais.
+    client.post(
+        "/timesheets",
+        json={"project_id": project_id, "date": "2026-09-05", "start_time": "09:00", "end_time": "11:00"},
+        headers=consultant_headers,
+    )
+
+    report = client.get(
+        "/reports/hours-breakdown",
+        params={"start": "2026-08-01", "end": "2026-08-31"},
+        headers=admin_headers,
+    )
+    assert report.status_code == 200
+    body = report.json()
+
+    totals = body["totals"]
+    assert float(totals["project_hours"]) == 2.0
+    assert float(totals["transit_hours"]) == 3.0
+    assert float(totals["internal_hours"]) == 1.0
+    assert float(totals["absence_hours"]["VACATION"]) == 8.0
+    assert float(totals["absence_hours"]["MEDICAL_LEAVE"]) == 0.0
+
+    assert len(body["by_resource"]) == 1
+    by_resource = body["by_resource"][0]
+    assert by_resource["resource_id"] == resource["id"]
+    assert float(by_resource["project_hours"]) == 2.0
+    assert float(by_resource["transit_hours"]) == 3.0
+    assert float(by_resource["internal_hours"]) == 1.0
+    assert float(by_resource["absence_hours"]["VACATION"]) == 8.0
+
+    assert len(body["by_project"]) == 1
+    by_project = body["by_project"][0]
+    assert by_project["project_id"] == project_id
+    assert float(by_project["hours"]) == 2.0
+
+
+def test_hours_breakdown_report_forbidden_for_internal_pm(client, setup):
+    """O relatório expõe dados sensíveis (ausência/horas de TODOS os
+    recursos da empresa) — restrito a ADMIN_LIKE_ROLES, mesmo grupo de
+    /clients e /users, não ao grupo mais amplo de Aprovações de horas
+    (MANAGEMENT_ROLES inclui INTERNAL_PM)."""
+    pm_headers = auth_headers(client, setup["pm"].email)
+    response = client.get(
+        "/reports/hours-breakdown",
+        params={"start": "2026-08-01", "end": "2026-08-31"},
+        headers=pm_headers,
+    )
+    assert response.status_code == 403
+
+
 def test_cannot_timesheet_parent_task_only_child(client, setup):
     """Pedido do usuário: não permitir apontamento em tarefa "pai" (que tem
     tarefas-filhas) — só nas tarefas-filha."""
