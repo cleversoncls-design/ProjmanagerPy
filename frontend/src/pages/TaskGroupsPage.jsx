@@ -21,11 +21,13 @@ import { useLanguage } from '../context/LanguageContext'
  * seleção à direita) — decisões confirmadas com o usuário: cadastro novo
  * e dedicado, hierarquia aninhada, página própria.
  *
- * O editor de árvore (TaskGroupEditor/TaskGroupItemRow abaixo) cobre os
- * campos de estrutura mais usados (nome, tipo, duração, modalidade,
- * marco); "Observações" e "Nível mínimo" do item ficam com o default
- * (vazio / 1) neste v1 — dá pra editá-los depois, numa tarefa já aplicada
- * num projeto, pelo modal de edição de tarefa normal. */
+ * O editor de árvore (TaskGroupEditor/TaskGroupItemRow abaixo) mostra a
+ * estrutura como uma EAP (código WBS "de visualização" + indentação por
+ * nível, pedido do usuário) e cobre os campos mais usados (nome, tipo,
+ * duração, horas, modalidade, marco); "Observações" e "Nível mínimo" do
+ * item ficam com o default (vazio / 1) neste v1 — dá pra editá-los depois,
+ * numa tarefa já aplicada num projeto, pelo modal de edição de tarefa
+ * normal. */
 
 let _nextLocalKey = 0
 function nextLocalKey() {
@@ -104,6 +106,25 @@ function everyNodeNamed(nodes) {
 
 function countItems(nodes) {
   return nodes.reduce((total, node) => total + 1 + countItems(node.children), 0)
+}
+
+/** Código WBS/EAP "de visualização" (pedido do usuário: ver a estrutura
+ * pai/filho igual à EAP de um projeto) — calculado só pela posição de cada
+ * item na árvore local (1, 1.1, 1.2, 2…), mesmo critério de
+ * `recalculate_wbs` no backend (services.py). É só pra exibição dentro do
+ * editor: o `wbs_code` de verdade só nasce quando o grupo é aplicado numa
+ * tarefa de projeto (ver apply_task_group_to_task), porque até lá o grupo
+ * nem tem projeto nenhum por trás pra numerar contra. */
+function computeWbsCodes(nodes, prefix = []) {
+  const codes = new Map()
+  nodes.forEach((node, index) => {
+    const parts = [...prefix, index + 1]
+    codes.set(node._key, parts.join('.'))
+    for (const [key, code] of computeWbsCodes(node.children, parts)) {
+      codes.set(key, code)
+    }
+  })
+  return codes
 }
 
 export default function TaskGroupsPage() {
@@ -303,6 +324,8 @@ function TaskGroupEditor({ group, onSaved }) {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const wbsCodes = useMemo(() => computeWbsCodes(items), [items])
+
   function handleUpdate(key, patch) {
     setItems((prev) => updateNode(prev, key, patch))
   }
@@ -359,8 +382,25 @@ function TaskGroupEditor({ group, onSaved }) {
           <p className="text-xs text-[var(--text-muted)]">{t('Nenhuma tarefa adicionada ainda.')}</p>
         ) : (
           <div className="space-y-1.5 rounded-lg border border-[var(--border)] p-2">
+            <div className="flex flex-wrap items-center gap-1.5 px-2 text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+              <span className="w-12 shrink-0">{t('WBS')}</span>
+              <span className="min-w-[160px] flex-1">{t('Nome da tarefa')}</span>
+              <span className="w-[6.5rem]">{t('Tipo')}</span>
+              <span className="w-20">{t('Duração (dias)')}</span>
+              <span className="w-20">{t('Horas')}</span>
+              <span className="w-[6.5rem]">{t('Modalidade')}</span>
+              <span className="w-14">{t('Marco')}</span>
+            </div>
             {items.map((item) => (
-              <TaskGroupItemRow key={item._key} item={item} depth={0} onAddChild={handleAddChild} onUpdate={handleUpdate} onRemove={handleRemove} />
+              <TaskGroupItemRow
+                key={item._key}
+                item={item}
+                depth={0}
+                wbsCodes={wbsCodes}
+                onAddChild={handleAddChild}
+                onUpdate={handleUpdate}
+                onRemove={handleRemove}
+              />
             ))}
           </div>
         )}
@@ -377,18 +417,31 @@ function TaskGroupEditor({ group, onSaved }) {
   )
 }
 
-function TaskGroupItemRow({ item, depth, onAddChild, onUpdate, onRemove }) {
+/** Uma linha da EAP do grupo — indentada por `depth` (igual à grade de
+ * Tarefas de um projeto) e com o código WBS "de visualização" calculado em
+ * `computeWbsCodes` à esquerda do nome. Linhas com sub-tarefas (tarefas-pai
+ * na EAP) ganham um destaque sutil (borda/fundo na cor da marca) pra
+ * diferenciar visualmente de uma tarefa-folha — mesma ideia da bolinha/
+ * indicador de tarefa-pai na grade de Tarefas do projeto. */
+function TaskGroupItemRow({ item, depth, wbsCodes, onAddChild, onUpdate, onRemove }) {
   const { labels, t } = useLanguage()
+  const hasChildren = item.children.length > 0
   return (
-    <div style={{ marginLeft: depth * 18 }}>
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--page)] px-2 py-1.5">
+    <div>
+      <div
+        className={`flex flex-wrap items-center gap-1.5 rounded-lg border px-2 py-1.5 ${
+          hasChildren ? 'border-[var(--series-1)]/40 bg-[var(--series-1)]/5' : 'border-[var(--border)] bg-[var(--page)]'
+        }`}
+        style={{ marginLeft: depth * 20 }}
+      >
+        <span className="w-12 shrink-0 font-mono text-xs font-semibold text-[var(--text-muted)]">{wbsCodes.get(item._key)}</span>
         <TextInput
           value={item.name}
           onChange={(event) => onUpdate(item._key, { name: event.target.value })}
           placeholder={t('Nome da tarefa')}
           className="min-w-[160px] flex-1"
         />
-        <Select value={item.task_type} onChange={(event) => onUpdate(item._key, { task_type: event.target.value })} className="w-auto">
+        <Select value={item.task_type} onChange={(event) => onUpdate(item._key, { task_type: event.target.value })} className="w-[6.5rem]">
           {Object.entries(labels.TASK_TYPE_LABELS).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
@@ -404,24 +457,42 @@ function TaskGroupItemRow({ item, depth, onAddChild, onUpdate, onRemove }) {
           title={t('Duração (dias)')}
           className="w-20"
         />
-        <Select value={item.modality} onChange={(event) => onUpdate(item._key, { modality: event.target.value })} className="w-auto">
+        <TextInput
+          type="number"
+          step="0.5"
+          min="0"
+          value={item.estimated_hours}
+          onChange={(event) => onUpdate(item._key, { estimated_hours: event.target.value })}
+          title={t('Trabalho (horas)')}
+          placeholder={t('Horas')}
+          className="w-20"
+        />
+        <Select value={item.modality} onChange={(event) => onUpdate(item._key, { modality: event.target.value })} className="w-[6.5rem]">
           {Object.entries(labels.TASK_MODALITY_LABELS).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
           ))}
         </Select>
-        <label className="flex items-center gap-1 whitespace-nowrap text-xs text-[var(--text-secondary)]">
+        <label className="flex w-14 items-center gap-1 whitespace-nowrap text-xs text-[var(--text-secondary)]">
           <input type="checkbox" checked={item.is_milestone} onChange={(event) => onUpdate(item._key, { is_milestone: event.target.checked })} />
           {t('Marco')}
         </label>
         <IconButton icon={PlusIcon} label={t('Adicionar sub-tarefa')} size={14} onClick={() => onAddChild(item._key)} />
         <IconButton icon={TrashIcon} label={t('Remover tarefa')} variant="danger" size={14} onClick={() => onRemove(item._key)} />
       </div>
-      {item.children.length > 0 && (
+      {hasChildren && (
         <div className="mt-1.5 space-y-1.5">
           {item.children.map((child) => (
-            <TaskGroupItemRow key={child._key} item={child} depth={depth + 1} onAddChild={onAddChild} onUpdate={onUpdate} onRemove={onRemove} />
+            <TaskGroupItemRow
+              key={child._key}
+              item={child}
+              depth={depth + 1}
+              wbsCodes={wbsCodes}
+              onAddChild={onAddChild}
+              onUpdate={onUpdate}
+              onRemove={onRemove}
+            />
           ))}
         </div>
       )}

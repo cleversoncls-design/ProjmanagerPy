@@ -2776,12 +2776,13 @@ def _sample_task_group_payload():
                 "name": "Levantamento",
                 "task_type": "CONSULTING",
                 "duration_days": "2",
+                "estimated_hours": "16",
                 "children": [
-                    {"name": "Entrevista com o cliente", "duration_days": "1"},
-                    {"name": "Documentar requisitos", "duration_days": "1"},
+                    {"name": "Entrevista com o cliente", "duration_days": "1", "estimated_hours": "8"},
+                    {"name": "Documentar requisitos", "duration_days": "1", "estimated_hours": "4"},
                 ],
             },
-            {"name": "Configuração inicial", "duration_days": "3", "is_milestone": True},
+            {"name": "Configuração inicial", "duration_days": "3", "estimated_hours": "24", "is_milestone": True},
         ],
     }
 
@@ -2870,6 +2871,12 @@ def test_apply_task_group_clones_tree_as_children_and_recalculates_wbs(client, s
     # Nenhuma tarefa clonada carrega data planejada nem alocação — o grupo
     # não traz nenhum dos dois (ver docstring de apply_task_group_to_task).
     assert tasks_by_name["Configuração inicial"]["planned_start_date"] is None
+
+    # Duração e Trabalho (horas) são copiados direto do item do grupo, sem
+    # passar pelo motor effort-driven (o usuário pediu pra informar a
+    # quantidade de horas de cada tarefa já no próprio molde).
+    assert float(tasks_by_name["Configuração inicial"]["estimated_hours"]) == 24
+    assert float(tasks_by_name["Entrevista com o cliente"]["estimated_hours"]) == 8
 
 
 def test_apply_task_group_rejects_unknown_group(client, setup):

@@ -425,13 +425,13 @@ def apply_task_group_to_task(session: Session, task_group_id: str, parent_task: 
     projeto renumerar com os nós novos (ver routers/tasks.py
     `apply_task_group`).
 
-    "Trabalho" (estimated_hours) é recalculado a partir da Duração do item
-    via `apply_effort_driven` (FTE genérica de 8h/dia, mesma regra de
-    `create_task` sem nenhum recurso alocado ainda) em vez de copiar
-    `TaskGroupItem.estimated_hours` direto: a tarefa clonada acabou de
-    nascer sem nenhuma alocação, igual qualquer tarefa nova criada à mão —
-    o valor guardado no molde é só o que foi informado na hora de montar o
-    grupo (sem capacidade de nenhum recurso real por trás).
+    Duração e Trabalho (estimated_hours) são copiados direto do item — ao
+    contrário de `create_task`/`copy_project_tasks`, aqui NÃO passam pelo
+    motor effort-driven (`apply_effort_driven`): o usuário pediu pra
+    informar a quantidade de horas de cada tarefa já no próprio molde (sem
+    nenhum recurso real por trás pra derivar uma capacidade), então esse
+    valor é o que deve valer na tarefa clonada — editável depois, como
+    qualquer tarefa, se uma alocação de recurso precisar recalcular.
 
     `wbs_code` recebe um placeholder único (`_tmp_<id>`, mesmo padrão de
     `recalculate_wbs`) — provisório até o `recalculate_wbs` que o chamador
@@ -464,17 +464,13 @@ def apply_task_group_to_task(session: Session, task_group_id: str, parent_task: 
             name=item.name,
             wbs_code=f"_tmp_{new_id}",
             task_type=item.task_type,
+            duration_days=item.duration_days,
+            estimated_hours=item.estimated_hours,
             sort_order=item.sort_order,
             is_milestone=item.is_milestone,
             notes=item.notes,
             min_level=item.min_level,
             modality=item.modality,
-        )
-        apply_effort_driven(
-            new_task,
-            duration_days=item.duration_days,
-            estimated_hours=None,
-            capacity_hours_per_day=DEFAULT_CAPACITY_HOURS_PER_DAY,
         )
         session.add(new_task)
         session.flush()
