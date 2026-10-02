@@ -107,6 +107,21 @@ _ES: dict[str, str] = {
         "Seleccione una tarea o marque Traslado — no es posible registrar directo en el proyecto"
     ),
     "Não é possível apontar horas em uma tarefa desativada": "No se pueden registrar horas en una tarea desactivada",
+    # % de Avanço da Tarefa + classificador Normal/Retrabalho (pedido do
+    # usuário) — ver _validate_rework, routers/timesheets.py.
+    "O classificador Normal/Retrabalho só é aceito em apontamento de tarefa do projeto": (
+        "El clasificador Normal/Retrabajo solo se acepta en un registro de horas de tarea del proyecto"
+    ),
+    "Motivo de retrabalho só é aceito em apontamento de tarefa do projeto": (
+        "El motivo de retrabajo solo se acepta en un registro de horas de tarea del proyecto"
+    ),
+    "% de Avanço da Tarefa só é aceito em apontamento de tarefa do projeto": (
+        "El % de Avance de la Tarea solo se acepta en un registro de horas de tarea del proyecto"
+    ),
+    "Selecione ao menos um motivo de retrabalho": "Seleccione al menos un motivo de retrabajo",
+    "Motivo de retrabalho só é aceito quando o apontamento é classificado como Retrabalho": (
+        "El motivo de retrabajo solo se acepta cuando el registro está clasificado como Retrabajo"
+    ),
     "Não é possível apontar horas em uma tarefa que tem tarefas-filhas — aponte na tarefa-filha": (
         "No es posible registrar horas en una tarea que tiene tareas hijas — regístrelas en la tarea hija"
     ),

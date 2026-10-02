@@ -23,6 +23,13 @@ export function emptyTimesheetForm(date) {
     task_id: '',
     is_transit: false,
     absence_type: '',
+    // % de Avanço da Tarefa + classificador Normal/Retrabalho (pedido do
+    // usuário) — só fazem sentido com task_id setado; ver
+    // applyExclusiveTimesheetField abaixo (zerados sempre que a tarefa
+    // muda ou é limpa).
+    task_progress_percentage: '',
+    work_classification: 'NORMAL',
+    rework_reasons: [],
     start_time: '',
     end_time: '',
     break_minutes: '00:00',
@@ -45,6 +52,9 @@ export function entryToTimesheetForm(entry, tasksById) {
     task_id: entry.task_id || '',
     is_transit: entry.is_transit || false,
     absence_type: entry.absence_type || '',
+    task_progress_percentage: entry.task_progress_percentage ?? '',
+    work_classification: entry.work_classification || 'NORMAL',
+    rework_reasons: entry.rework_reasons || [],
     start_time: entry.start_time ? entry.start_time.slice(0, 5) : '',
     end_time: entry.end_time ? entry.end_time.slice(0, 5) : '',
     break_minutes: minutesToHM(entry.break_minutes),
@@ -60,12 +70,52 @@ export function entryToTimesheetForm(entry, tasksById) {
  * _resolve_task_and_project no backend): marcar "Tipo de ausência" limpa
  * Projeto/Tarefa/Traslado; marcar qualquer um desses três limpa a
  * ausência. */
-export function applyExclusiveTimesheetField(prev, field, value) {
-  if (field === 'project_id') return { ...prev, project_id: value, task_id: '', is_transit: false, absence_type: value ? '' : prev.absence_type }
-  if (field === 'task_id') return { ...prev, task_id: value, is_transit: value ? false : prev.is_transit, absence_type: value ? '' : prev.absence_type }
-  if (field === 'is_transit') return { ...prev, is_transit: value, task_id: value ? '' : prev.task_id, absence_type: value ? '' : prev.absence_type }
-  if (field === 'absence_type') return { ...prev, absence_type: value, project_id: value ? '' : prev.project_id, task_id: value ? '' : prev.task_id, is_transit: value ? false : prev.is_transit }
+// % de Avanço da Tarefa + classificador Normal/Retrabalho (pedido do
+// usuário) só fazem sentido com uma tarefa selecionada — este objeto é
+// espalhado sempre que o campo Tarefa muda ou é limpo (direto ou via
+// Traslado/Ausência/Projeto), pra nunca carregar o avanço/classificação de
+// uma tarefa antiga para outro apontamento. `tasksById` (opcional,
+// terceiro argumento) permite pré-preencher o % com o avanço ATUAL da
+// tarefa escolhida — só uma sugestão inicial; o consultor pode ajustar
+// antes de salvar.
+const CLEAR_TASK_PROGRESS_FIELDS = { task_progress_percentage: '', work_classification: 'NORMAL', rework_reasons: [] }
+
+export function applyExclusiveTimesheetField(prev, field, value, tasksById) {
+  if (field === 'project_id') return { ...prev, project_id: value, task_id: '', is_transit: false, absence_type: value ? '' : prev.absence_type, ...CLEAR_TASK_PROGRESS_FIELDS }
+  if (field === 'task_id') {
+    const task = value && tasksById ? tasksById[value] : null
+    return {
+      ...prev,
+      task_id: value,
+      is_transit: value ? false : prev.is_transit,
+      absence_type: value ? '' : prev.absence_type,
+      ...CLEAR_TASK_PROGRESS_FIELDS,
+      task_progress_percentage: value ? (task?.progress_percentage ?? '') : '',
+    }
+  }
+  if (field === 'is_transit') return { ...prev, is_transit: value, task_id: value ? '' : prev.task_id, absence_type: value ? '' : prev.absence_type, ...(value ? CLEAR_TASK_PROGRESS_FIELDS : {}) }
+  if (field === 'absence_type') {
+    return {
+      ...prev,
+      absence_type: value,
+      project_id: value ? '' : prev.project_id,
+      task_id: value ? '' : prev.task_id,
+      is_transit: value ? false : prev.is_transit,
+      ...(value ? CLEAR_TASK_PROGRESS_FIELDS : {}),
+    }
+  }
+  if (field === 'work_classification') return { ...prev, work_classification: value, rework_reasons: value === 'REWORK' ? prev.rework_reasons : [] }
   return { ...prev, [field]: value }
+}
+
+/** Marca/desmarca um motivo de retrabalho (lista de múltipla escolha) —
+ * separado de `applyExclusiveTimesheetField` porque não é um campo de
+ * valor único; usado pelo checklist de "Motivo do retrabalho" em
+ * TimesheetFieldsForm.jsx. */
+export function toggleReworkReason(form, reason) {
+  const current = form.rework_reasons || []
+  const next = current.includes(reason) ? current.filter((r) => r !== reason) : [...current, reason]
+  return { ...form, rework_reasons: next }
 }
 
 /** Pedido do usuário: projeto selecionado sem tarefa e sem Traslado deixou
@@ -75,6 +125,14 @@ export function applyExclusiveTimesheetField(prev, field, value) {
  * desabilitar o botão Salvar e mostrar o aviso antes de tentar submeter. */
 export function timesheetFormNeedsTaskOrTransit(form) {
   return Boolean(form.project_id) && !form.task_id && !form.is_transit && !form.absence_type
+}
+
+/** Pedido do usuário: classificar como Retrabalho exige ao menos um motivo
+ * selecionado. Mesma regra validada (de verdade) em _validate_rework,
+ * routers/timesheets.py; usada aqui só pra desabilitar o botão Salvar e
+ * mostrar o aviso antes de tentar submeter. */
+export function timesheetFormNeedsReworkReason(form) {
+  return Boolean(form.task_id) && form.work_classification === 'REWORK' && (form.rework_reasons || []).length === 0
 }
 
 /** Monta o payload de POST/PUT /timesheets a partir do formulário. */
@@ -99,6 +157,12 @@ export function timesheetFormToPayload(form) {
     payload.project_id = form.project_id
   } else if (form.task_id) {
     payload.task_id = form.task_id
+    // % de Avanço da Tarefa + classificador Normal/Retrabalho (pedido do
+    // usuário) — só enviados junto de task_id; vazio/'' vira null (campo
+    // opcional, ver TimesheetCreate.task_progress_percentage).
+    payload.task_progress_percentage = form.task_progress_percentage === '' || form.task_progress_percentage == null ? null : form.task_progress_percentage
+    payload.work_classification = form.work_classification || 'NORMAL'
+    payload.rework_reasons = form.work_classification === 'REWORK' ? form.rework_reasons || [] : []
   } else if (form.project_id) {
     payload.project_id = form.project_id
   }

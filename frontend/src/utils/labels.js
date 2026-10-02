@@ -229,6 +229,27 @@ export const ABSENCE_TYPE_LABELS = {
   DAY_OFF: 'Folga',
 }
 
+// Classificador Normal/Retrabalho do apontamento em tarefa do projeto
+// (Timesheet.work_classification, pedido do usuário) — ver
+// WorkClassification em app/models.py.
+export const WORK_CLASSIFICATION_LABELS = {
+  NORMAL: 'Normal',
+  REWORK: 'Retrabalho',
+}
+
+// Motivo(s) do retrabalho (Timesheet.rework_reasons, pedido do usuário) —
+// lista fixa de múltipla escolha, ver ReworkReason em app/models.py.
+export const REWORK_REASON_LABELS = {
+  PRODUCT_ERROR: 'Erro de Produto',
+  INITIAL_CONFIG_ERROR: 'Erro de Configuração inicial',
+  DATA_LOAD_ERROR: 'Erro de dados carregados',
+  USER_DELAY_OR_ABSENCE: 'Atraso / Falta de Usuários',
+  ACCESS_ISSUE_SERVICE_SERVER: 'Problemas de Acesso (Serviços / Servidor)',
+  ACCESS_ISSUE_NETWORK: 'Problemas de Acesso (Rede)',
+  CONSULTANT_CHANGE: 'Troca de Consultor',
+  POWER_OUTAGE: 'Falta de Energia Elétrica',
+}
+
 export const TIMESHEET_STATUS_TONE = {
   PENDING: 'warning',
   APPROVED: 'good',
@@ -301,6 +322,8 @@ export function getLabels(lang) {
     WEEKDAY_LABELS: WEEKDAY_LABELS.map((day) => translate(lang, day)),
     TIMESHEET_STATUS_LABELS: translateMap(TIMESHEET_STATUS_LABELS, lang),
     ABSENCE_TYPE_LABELS: translateMap(ABSENCE_TYPE_LABELS, lang),
+    WORK_CLASSIFICATION_LABELS: translateMap(WORK_CLASSIFICATION_LABELS, lang),
+    REWORK_REASON_LABELS: translateMap(REWORK_REASON_LABELS, lang),
   }
 }
 

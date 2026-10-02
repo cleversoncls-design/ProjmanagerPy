@@ -10,7 +10,16 @@ import { timesheetFormNeedsTaskOrTransit } from '../utils/timesheetForm'
  * nem botões de ação — quem usa este componente é responsável pelo
  * `<form onSubmit>`/Salvar/Cancelar em volta (formatos diferentes: card
  * inline em TimesheetsPage, `<Modal>` em TimesheetEditModal). */
-export default function TimesheetFieldsForm({ form, updateField, projects, taskOptions, parentTaskIds, formTypeLabel, preview }) {
+export default function TimesheetFieldsForm({
+  form,
+  updateField,
+  projects,
+  taskOptions,
+  parentTaskIds,
+  formTypeLabel,
+  preview,
+  onToggleReworkReason,
+}) {
   const { t, labels } = useLanguage()
   // Só projetos ativos no dropdown pra lançar hora nova (pedido do
   // usuário — não faz sentido apontar num projeto ainda em planejamento ou
@@ -84,6 +93,59 @@ export default function TimesheetFieldsForm({ form, updateField, projects, taskO
           </div>
         </FormField>
       </div>
+      {form.task_id && (
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label={t('% de Avanço da Tarefa')} hint={t('Atualiza o % realizado desta tarefa ao salvar.')}>
+            <TextInput
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value={form.task_progress_percentage}
+              onChange={updateField('task_progress_percentage')}
+            />
+          </FormField>
+          <FormField label={t('Classificação do trabalho')}>
+            <div className="flex h-[38px] items-center gap-4 rounded-lg border border-[var(--border)] bg-[var(--page)] px-3 text-sm text-[var(--text-primary)]">
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="work_classification"
+                  value="NORMAL"
+                  checked={form.work_classification !== 'REWORK'}
+                  onChange={updateField('work_classification')}
+                />
+                {t('Normal')}
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="work_classification"
+                  value="REWORK"
+                  checked={form.work_classification === 'REWORK'}
+                  onChange={updateField('work_classification')}
+                />
+                {t('Retrabalho')}
+              </label>
+            </div>
+          </FormField>
+        </div>
+      )}
+      {form.task_id && form.work_classification === 'REWORK' && (
+        <FormField label={t('Motivo do retrabalho')} required>
+          <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 rounded-lg border border-[var(--border)] px-3 py-2 sm:grid-cols-2">
+            {Object.entries(labels.REWORK_REASON_LABELS).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-1.5 text-sm text-[var(--text-secondary)]">
+                <input type="checkbox" checked={(form.rework_reasons || []).includes(value)} onChange={() => onToggleReworkReason?.(value)} />
+                {label}
+              </label>
+            ))}
+          </div>
+          {(form.rework_reasons || []).length === 0 && (
+            <span className="mt-1 block text-xs text-[var(--status-critical)]">{t('Obrigatório — selecione ao menos um motivo de retrabalho.')}</span>
+          )}
+        </FormField>
+      )}
       <div className="grid grid-cols-2 gap-4 items-end">
         <label
           className={`flex items-center gap-2 text-sm ${form.project_id ? 'text-[var(--text-secondary)]' : 'text-[var(--text-muted)]'}`}

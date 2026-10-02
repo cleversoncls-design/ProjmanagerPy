@@ -189,6 +189,16 @@ export default function TimesheetApprovalsPage() {
                           {formatTime(entry.start_time)}–{formatTime(entry.end_time)} ({formatHoursDuration(entry.hours_spent)})
                         </span>
                       )}
+                      {entry.task_progress_percentage != null && (
+                        <span className="text-[var(--text-muted)]">{t('Avanço')}: {entry.task_progress_percentage}%</span>
+                      )}
+                      {entry.work_classification === 'REWORK' && (
+                        <StatusPill
+                          label={t('Retrabalho')}
+                          tone="warning"
+                          title={(entry.rework_reasons || []).map((reason) => labels.REWORK_REASON_LABELS[reason] || reason).join(', ')}
+                        />
+                      )}
                       {entry.unscheduled && <StatusPill label={t('Fora da agenda')} tone="serious" />}
                     </div>
                     <div className="flex items-center gap-2">

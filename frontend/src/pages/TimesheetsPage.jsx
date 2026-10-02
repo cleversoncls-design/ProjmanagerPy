@@ -28,6 +28,8 @@ import {
   isTimesheetEditable,
   applyExclusiveTimesheetField,
   timesheetFormNeedsTaskOrTransit,
+  timesheetFormNeedsReworkReason,
+  toggleReworkReason,
 } from '../utils/timesheetForm'
 
 function todayIso() {
@@ -124,8 +126,12 @@ export default function TimesheetsPage() {
   function updateField(field) {
     return (event) => {
       const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value
-      setForm((prev) => applyExclusiveTimesheetField(prev, field, value))
+      setForm((prev) => applyExclusiveTimesheetField(prev, field, value, tasksById))
     }
+  }
+
+  function handleToggleReworkReason(reason) {
+    setForm((prev) => toggleReworkReason(prev, reason))
   }
 
   function entryDescription(entry) {
@@ -222,6 +228,7 @@ export default function TimesheetsPage() {
               parentTaskIds={parentTaskIds}
               formTypeLabel={formTypeLabel}
               preview={preview}
+              onToggleReworkReason={handleToggleReworkReason}
             />
 
             <ErrorBanner message={formError} />
@@ -232,7 +239,7 @@ export default function TimesheetsPage() {
                   {t('Cancelar')}
                 </Button>
               )}
-              <Button type="submit" disabled={saving || timesheetFormNeedsTaskOrTransit(form)}>
+              <Button type="submit" disabled={saving || timesheetFormNeedsTaskOrTransit(form) || timesheetFormNeedsReworkReason(form)}>
                 {saving ? t('Salvando…') : t('Salvar')}
               </Button>
             </div>
@@ -289,6 +296,13 @@ export default function TimesheetsPage() {
                   <div className="flex items-center gap-1.5">
                     <StatusPill label={labels.TIMESHEET_STATUS_LABELS[row.status] || row.status} tone={TIMESHEET_STATUS_TONE[row.status]} />
                     {row.unscheduled && <StatusPill label={t('Fora da agenda')} tone="serious" />}
+                    {row.work_classification === 'REWORK' && (
+                      <StatusPill
+                        label={t('Retrabalho')}
+                        tone="warning"
+                        title={(row.rework_reasons || []).map((reason) => labels.REWORK_REASON_LABELS[reason] || reason).join(', ')}
+                      />
+                    )}
                   </div>
                 ),
               },

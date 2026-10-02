@@ -2131,6 +2131,139 @@ def test_absence_timesheet_counts_toward_resource_utilization(client, setup):
     assert float(row["actual_hours"]) == 8.0
 
 
+def _assigned_task_timesheet_setup(client, setup):
+    """Monta projeto + tarefa + recurso alocado, pronto pra apontar horas —
+    extraído pra reusar nos testes de % de Avanço/Retrabalho abaixo."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    task = client.post(f"/projects/{project_id}/tasks", json={"name": "Configurar Módulo", "wbs_code": "40"}, headers=admin_headers).json()
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    client.post(f"/tasks/{task['id']}/assignments", json={"resource_id": resource["id"], "allocated_hours": "20"}, headers=admin_headers)
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    return task, resource, consultant_headers
+
+
+def test_timesheet_task_progress_percentage_mirrors_into_task(client, setup):
+    """Pedido do usuário: "% de Avanço da Tarefa" na tela de apontamento —
+    ao salvar, espelha o valor em Task.progress_percentage (o apontamento é
+    o momento em que o consultor reporta o avanço)."""
+    admin_headers = setup["admin_headers"]
+    task, _resource, consultant_headers = _assigned_task_timesheet_setup(client, setup)
+
+    created = client.post(
+        "/timesheets",
+        json={
+            "task_id": task["id"],
+            "date": "2026-08-27",
+            "start_time": "09:00",
+            "end_time": "13:00",
+            "task_progress_percentage": "45",
+        },
+        headers=consultant_headers,
+    )
+    assert created.status_code == 201
+    assert float(created.json()["task_progress_percentage"]) == 45.0
+    assert created.json()["work_classification"] == "NORMAL"
+    assert created.json()["rework_reasons"] in (None, [])
+
+    refreshed_task = client.get(f"/tasks/{task['id']}", headers=admin_headers).json()
+    assert float(refreshed_task["progress_percentage"]) == 45.0
+
+    # Sem informar o % num apontamento seguinte, o progresso já registrado
+    # na tarefa não é mexido.
+    second = client.post(
+        "/timesheets",
+        json={"task_id": task["id"], "date": "2026-08-28", "start_time": "09:00", "end_time": "10:00"},
+        headers=consultant_headers,
+    )
+    assert second.status_code == 201
+    assert second.json()["task_progress_percentage"] is None
+    still_task = client.get(f"/tasks/{task['id']}", headers=admin_headers).json()
+    assert float(still_task["progress_percentage"]) == 45.0
+
+
+def test_timesheet_rework_requires_at_least_one_reason(client, setup):
+    """Pedido do usuário: classificar o apontamento como Retrabalho exige
+    ao menos um motivo de uma lista fixa."""
+    task, _resource, consultant_headers = _assigned_task_timesheet_setup(client, setup)
+
+    no_reason = client.post(
+        "/timesheets",
+        json={"task_id": task["id"], "date": "2026-08-27", "start_time": "09:00", "end_time": "10:00", "work_classification": "REWORK"},
+        headers=consultant_headers,
+    )
+    assert no_reason.status_code == 422
+
+    with_reason = client.post(
+        "/timesheets",
+        json={
+            "task_id": task["id"],
+            "date": "2026-08-27",
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "work_classification": "REWORK",
+            "rework_reasons": ["PRODUCT_ERROR", "CONSULTANT_CHANGE"],
+        },
+        headers=consultant_headers,
+    )
+    assert with_reason.status_code == 201
+    assert with_reason.json()["work_classification"] == "REWORK"
+    assert sorted(with_reason.json()["rework_reasons"]) == ["CONSULTANT_CHANGE", "PRODUCT_ERROR"]
+
+    # Normal (padrão quando omitido) não aceita motivo nenhum.
+    normal_with_reason = client.post(
+        "/timesheets",
+        json={
+            "task_id": task["id"],
+            "date": "2026-08-27",
+            "start_time": "10:00",
+            "end_time": "11:00",
+            "rework_reasons": ["PRODUCT_ERROR"],
+        },
+        headers=consultant_headers,
+    )
+    assert normal_with_reason.status_code == 422
+
+
+def test_timesheet_rework_and_progress_only_accepted_with_task_id(client, setup):
+    """Pedido do usuário: % de Avanço e o classificador Normal/Retrabalho
+    só fazem sentido num apontamento de tarefa do projeto — Traslado não
+    aceita nenhum dos dois."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    )
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    with_progress = client.post(
+        "/timesheets",
+        json={"project_id": project_id, "is_transit": True, "date": "2026-08-27", "start_time": "09:00", "end_time": "10:00", "task_progress_percentage": "50"},
+        headers=consultant_headers,
+    )
+    assert with_progress.status_code == 422
+
+    with_classification = client.post(
+        "/timesheets",
+        json={"project_id": project_id, "is_transit": True, "date": "2026-08-27", "start_time": "09:00", "end_time": "10:00", "work_classification": "NORMAL"},
+        headers=consultant_headers,
+    )
+    assert with_classification.status_code == 422
+
+    with_reasons = client.post(
+        "/timesheets",
+        json={"project_id": project_id, "is_transit": True, "date": "2026-08-27", "start_time": "09:00", "end_time": "10:00", "rework_reasons": ["PRODUCT_ERROR"]},
+        headers=consultant_headers,
+    )
+    assert with_reasons.status_code == 422
+
+
 def test_schedule_blocked_on_resource_absence_day(client, setup):
     """Pedido do usuário ("Sim, já incluir nesta etapa"): a Agenda de
     consultores não pode agendar um recurso num dia em que ele tem ausência

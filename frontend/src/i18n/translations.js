@@ -752,6 +752,26 @@ export const es = {
     '{resource} está ausente ({type}) el {date} — no es posible agendar en esta fecha.',
   'Tipo de apontamento': 'Tipo de registro',
   'Segue automaticamente o tipo da tarefa (Gestão/Consultoria).': 'Sigue automáticamente el tipo de la tarea (Gestión/Consultoría).',
+  // % de Avanço da Tarefa + classificador Normal/Retrabalho (pedido do
+  // usuário) — só aparecem com uma tarefa do projeto selecionada, ver
+  // TimesheetFieldsForm.jsx e Timesheet.task_progress_percentage/
+  // work_classification/rework_reasons em app/models.py.
+  '% de Avanço da Tarefa': '% de Avance de la Tarea',
+  'Atualiza o % realizado desta tarefa ao salvar.': 'Actualiza el % realizado de esta tarea al guardar.',
+  'Classificação do trabalho': 'Clasificación del trabajo',
+  'Normal': 'Normal',
+  'Retrabalho': 'Retrabajo',
+  'Motivo do retrabalho': 'Motivo del retrabajo',
+  'Obrigatório — selecione ao menos um motivo de retrabalho.': 'Obligatorio — seleccione al menos un motivo de retrabajo.',
+  'Avanço': 'Avance',
+  'Erro de Produto': 'Error de Producto',
+  'Erro de Configuração inicial': 'Error de Configuración inicial',
+  'Erro de dados carregados': 'Error de datos cargados',
+  'Atraso / Falta de Usuários': 'Retraso / Falta de Usuarios',
+  'Problemas de Acesso (Serviços / Servidor)': 'Problemas de Acceso (Servicios / Servidor)',
+  'Problemas de Acesso (Rede)': 'Problemas de Acceso (Red)',
+  'Troca de Consultor': 'Cambio de Consultor',
+  'Falta de Energia Elétrica': 'Falta de Energía Eléctrica',
   'Intervalo': 'Intervalo',
   'Total calculado': 'Total calculado',
   'Meus apontamentos': 'Mis registros',

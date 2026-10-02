@@ -16,6 +16,7 @@ from .models import (
     Language,
     ProjectStatus,
     ResourceFunction,
+    ReworkReason,
     RiskLevel,
     RiskStatus,
     TaskApprovalStatus,
@@ -25,6 +26,7 @@ from .models import (
     TimesheetStatus,
     UserRole,
     UserStatus,
+    WorkClassification,
 )
 
 
@@ -561,6 +563,16 @@ class TimesheetCreate(BaseModel):
     # aceita task_id nem project_id junto, nem is_transit=True ao mesmo
     # tempo (ver validação em _resolve_task_and_project).
     absence_type: AbsenceType | None = None
+    # "% de Avanço da Tarefa" (pedido do usuário) — só aceito junto de
+    # task_id; ao salvar, espelha o valor em Task.progress_percentage (ver
+    # _validate_rework/_apply_task_progress, routers/timesheets.py).
+    task_progress_percentage: Decimal | None = Field(default=None, ge=0, le=100)
+    # Classificador Normal/Retrabalho (pedido do usuário) — só aceito junto
+    # de task_id; omitido num apontamento de tarefa é tratado como NORMAL.
+    work_classification: WorkClassification | None = None
+    # Motivo(s) do retrabalho — obrigatório (>= 1) quando
+    # work_classification == REWORK, deve vir vazio caso contrário.
+    rework_reasons: list[ReworkReason] = []
     description: str | None = None
 
 
@@ -582,6 +594,9 @@ class TimesheetRead(ORMModel):
     unscheduled: bool
     is_transit: bool
     absence_type: AbsenceType | None
+    task_progress_percentage: Decimal | None
+    work_classification: WorkClassification | None
+    rework_reasons: list[str] | None
     description: str | None
     status: TimesheetStatus
 

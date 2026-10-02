@@ -11,6 +11,8 @@ import {
   timesheetFormToPayload,
   applyExclusiveTimesheetField,
   timesheetFormNeedsTaskOrTransit,
+  timesheetFormNeedsReworkReason,
+  toggleReworkReason,
 } from '../utils/timesheetForm'
 
 /** Modal de edição de um apontamento — usado na coluna de ações da Ordem
@@ -39,8 +41,12 @@ export default function TimesheetEditModal({ entry, projects, allTasks, tasksByI
   function updateField(field) {
     return (event) => {
       const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value
-      setForm((prev) => applyExclusiveTimesheetField(prev, field, value))
+      setForm((prev) => applyExclusiveTimesheetField(prev, field, value, tasksById))
     }
+  }
+
+  function handleToggleReworkReason(reason) {
+    setForm((prev) => toggleReworkReason(prev, reason))
   }
 
   function formTypeLabel() {
@@ -80,13 +86,14 @@ export default function TimesheetEditModal({ entry, projects, allTasks, tasksByI
           parentTaskIds={parentTaskIds}
           formTypeLabel={formTypeLabel}
           preview={previewTimesheetHours(form)}
+          onToggleReworkReason={handleToggleReworkReason}
         />
         <ErrorBanner message={error} />
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
             {t('Cancelar')}
           </Button>
-          <Button type="submit" disabled={saving || timesheetFormNeedsTaskOrTransit(form)}>
+          <Button type="submit" disabled={saving || timesheetFormNeedsTaskOrTransit(form) || timesheetFormNeedsReworkReason(form)}>
             {saving ? t('Salvando…') : t('Salvar')}
           </Button>
         </div>

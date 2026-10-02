@@ -27,6 +27,7 @@ from ..models import (
     TimesheetStatus,
     User,
     UserRole,
+    WorkClassification,
 )
 from ..schemas import TimesheetCreate, TimesheetRead, TimesheetStatusUpdate
 
@@ -214,6 +215,53 @@ def _resolve_task_and_project(
     return task, project
 
 
+def _validate_rework(data: TimesheetCreate, task: Task | None, user: User) -> None:
+    """"% de Avanço da Tarefa" e o classificador Normal/Retrabalho (pedido
+    do usuário) só fazem sentido num apontamento vinculado a uma tarefa do
+    projeto (task_id setado) — Traslado/Ausência/hora interna não tem
+    tarefa pra avançar nem pra "retrabalhar". Quando Retrabalho, exige pelo
+    menos um motivo da lista fixa (ReworkReason); quando Normal (ou
+    omitido — tratado como Normal por padrão), não aceita motivo nenhum.
+    Chamada depois de `_resolve_task_and_project`, que já resolveu `task`
+    com todas as outras validações de escopo/projeto ativo/alocação."""
+    if not task:
+        if data.work_classification is not None:
+            raise HTTPException(
+                status_code=422,
+                detail=translate("O classificador Normal/Retrabalho só é aceito em apontamento de tarefa do projeto", user.language),
+            )
+        if data.rework_reasons:
+            raise HTTPException(
+                status_code=422,
+                detail=translate("Motivo de retrabalho só é aceito em apontamento de tarefa do projeto", user.language),
+            )
+        if data.task_progress_percentage is not None:
+            raise HTTPException(
+                status_code=422,
+                detail=translate("% de Avanço da Tarefa só é aceito em apontamento de tarefa do projeto", user.language),
+            )
+        return
+
+    classification = data.work_classification or WorkClassification.NORMAL
+    if classification == WorkClassification.REWORK:
+        if not data.rework_reasons:
+            raise HTTPException(status_code=422, detail=translate("Selecione ao menos um motivo de retrabalho", user.language))
+    elif data.rework_reasons:
+        raise HTTPException(
+            status_code=422,
+            detail=translate("Motivo de retrabalho só é aceito quando o apontamento é classificado como Retrabalho", user.language),
+        )
+
+
+def _apply_task_progress(entry: Timesheet, task: Task | None) -> None:
+    """Espelha `Timesheet.task_progress_percentage` (quando informado) em
+    `Task.progress_percentage` — o apontamento é justamente o momento em
+    que o consultor reporta o avanço da tarefa (pedido do usuário). Sem
+    valor informado, não mexe no progresso já registrado na tarefa."""
+    if task and entry.task_progress_percentage is not None:
+        task.progress_percentage = entry.task_progress_percentage
+
+
 def _resolve_schedule(
     data: TimesheetCreate, resource: Resource, project: Project | None, user: User, db: Session
 ) -> tuple[ResourceSchedule | None, bool]:
@@ -277,6 +325,7 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
         raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
 
     task, project = _resolve_task_and_project(data, resource, user, db)
+    _validate_rework(data, task, user)
     hours_spent = _compute_hours(data, user.language)
     schedule, unscheduled = _resolve_schedule(data, resource, project, user, db)
 
@@ -293,9 +342,13 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
         unscheduled=unscheduled,
         is_transit=data.is_transit,
         absence_type=data.absence_type,
+        task_progress_percentage=data.task_progress_percentage if task else None,
+        work_classification=(data.work_classification or WorkClassification.NORMAL) if task else None,
+        rework_reasons=[reason.value for reason in data.rework_reasons] if (task and data.rework_reasons) else None,
         description=data.description,
     )
     db.add(entry)
+    _apply_task_progress(entry, task)
     db.flush()
     record_audit(db, entity_type="timesheet", entity_id=entry.id, action=AuditAction.CREATE, user_id=user.id)
     db.commit()
@@ -319,6 +372,7 @@ def update_timesheet(
     old_task_id = entry.task_id
 
     task, project = _resolve_task_and_project(data, resource, user, db)
+    _validate_rework(data, task, user)
     hours_spent = _compute_hours(data, user.language)
     schedule, unscheduled = _resolve_schedule(data, resource, project, user, db)
 
@@ -333,7 +387,11 @@ def update_timesheet(
     entry.unscheduled = unscheduled
     entry.is_transit = data.is_transit
     entry.absence_type = data.absence_type
+    entry.task_progress_percentage = data.task_progress_percentage if task else None
+    entry.work_classification = (data.work_classification or WorkClassification.NORMAL) if task else None
+    entry.rework_reasons = [reason.value for reason in data.rework_reasons] if (task and data.rework_reasons) else None
     entry.description = data.description
+    _apply_task_progress(entry, task)
     # Editar (inclusive um apontamento Aprovado ou Rejeitado, pra corrigir e
     # reenviar) sempre volta pro estado Pendente — precisa passar pela
     # aprovação de novo, nunca herda um status antigo que não reflete mais o

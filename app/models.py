@@ -169,6 +169,37 @@ class AbsenceType(StrEnum):
     DAY_OFF = "DAY_OFF"  # Folga
 
 
+class WorkClassification(StrEnum):
+    """Classificador Normal/Retrabalho de um apontamento vinculado a uma
+    tarefa do projeto (pedido do usuário) — só faz sentido quando
+    Timesheet.task_id está setado (Traslado/Ausência/hora interna não tem o
+    que "retrabalhar"); omitido num apontamento de tarefa é tratado como
+    NORMAL (ver _validate_rework em routers/timesheets.py). Quando REWORK,
+    `Timesheet.rework_reasons` exige pelo menos um motivo da lista fixa
+    (ReworkReason, logo abaixo)."""
+
+    NORMAL = "NORMAL"
+    REWORK = "REWORK"
+
+
+class ReworkReason(StrEnum):
+    """Motivo do retrabalho (pedido do usuário) — lista fixa e de múltipla
+    escolha; `Timesheet.rework_reasons` guarda como lista JSON de valores
+    deste enum (mesmo padrão de `ResourceSchedule.working_days`, uma coluna
+    JSON em vez de uma tabela de ligação, já que a lista é fixa e não tem
+    CRUD próprio). Pelo menos um motivo é obrigatório quando
+    Timesheet.work_classification == REWORK."""
+
+    PRODUCT_ERROR = "PRODUCT_ERROR"  # Erro de Produto
+    INITIAL_CONFIG_ERROR = "INITIAL_CONFIG_ERROR"  # Erro de Configuração inicial
+    DATA_LOAD_ERROR = "DATA_LOAD_ERROR"  # Erro de dados carregados
+    USER_DELAY_OR_ABSENCE = "USER_DELAY_OR_ABSENCE"  # Atraso / Falta de Usuários
+    ACCESS_ISSUE_SERVICE_SERVER = "ACCESS_ISSUE_SERVICE_SERVER"  # Problemas de Acesso (Serviços / Servidor)
+    ACCESS_ISSUE_NETWORK = "ACCESS_ISSUE_NETWORK"  # Problemas de Acesso (Rede)
+    CONSULTANT_CHANGE = "CONSULTANT_CHANGE"  # Troca de Consultor
+    POWER_OUTAGE = "POWER_OUTAGE"  # Falta de Energia Elétrica
+
+
 class RiskLevel(StrEnum):
     LOW = "LOW"
     MED = "MED"
@@ -568,6 +599,20 @@ class Timesheet(Base):
     # project_id, que aqui é sempre nulo), sem precisar de nenhuma exclusão
     # manual (diferente do ProjectStatus.MODELO, que precisa).
     absence_type: Mapped[AbsenceType | None] = mapped_column(nullable=True)
+    # "% de Avanço da Tarefa" (pedido do usuário) — só relevante quando
+    # task_id está setado; é um retrato do avanço reportado NESTE
+    # apontamento (histórico), e ao salvar também espelha o valor em
+    # Task.progress_percentage (ver _apply_task_progress em
+    # routers/timesheets.py) — mesma faixa 0-100 de Task.progress_percentage.
+    task_progress_percentage: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    # Classificador Normal/Retrabalho (pedido do usuário) — só relevante
+    # quando task_id está setado; ver WorkClassification acima e
+    # _validate_rework em routers/timesheets.py.
+    work_classification: Mapped[WorkClassification | None] = mapped_column(nullable=True)
+    # Motivo(s) do retrabalho — lista JSON de valores de ReworkReason;
+    # obrigatório (>= 1) quando work_classification == REWORK, deve ficar
+    # vazio/nulo caso contrário (ver _validate_rework).
+    rework_reasons: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[TimesheetStatus] = mapped_column(nullable=False, default=TimesheetStatus.PENDING)
     task: Mapped[Task | None] = relationship(back_populates="timesheets")
