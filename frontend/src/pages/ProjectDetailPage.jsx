@@ -992,6 +992,67 @@ function filterCollapsedTasks(orderedTasks, collapsedTaskIds) {
   return visible
 }
 
+/** % concluído de uma tarefa-pai, ponderado pelas estimated_hours das
+ * folhas descendentes (cai pra média simples quando nenhuma folha tem
+ * horas estimadas) — mesmo critério de `_progress_from_tasks`
+ * (app/services.py), só que por subárvore em vez do projeto inteiro.
+ * Tarefa-folha usa a própria progress_percentage, sem ponderação (nada a
+ * agregar). Necessário porque Task.progress_percentage de uma tarefa-pai
+ * NUNCA é preenchida de forma útil pelo motor de agendamento — mesmo
+ * motivo de `_task_rollups` (backend) não usar as colunas próprias de
+ * início/fim/horas de uma tarefa-pai, só que esse rollup (de datas) já
+ * vem pronto do backend (rollup_start_date/rollup_end_date, ver
+ * ganttStart/ganttEnd) e o de progresso não — computado aqui, no
+ * frontend, a partir da árvore completa (`data.tasks`, sem filtro de
+ * nível/recolhido), pro "Imprimir resumo (até o 2º nível)" conseguir
+ * mostrar uma barra de progresso que reflete de verdade o andamento das
+ * tarefas-filhas escondidas no resumo (pedido do usuário: "quando uma
+ * atividade estiver concluída, que mude de cor"). */
+function buildProgressRollups(tasks) {
+  const childrenByParent = new Map()
+  const byId = new Map()
+  for (const task of tasks) {
+    byId.set(task.id, task)
+    const key = task.parent_task_id || null
+    if (!childrenByParent.has(key)) childrenByParent.set(key, [])
+    childrenByParent.get(key).push(task)
+  }
+  const memo = new Map()
+  function resolve(taskId) {
+    if (memo.has(taskId)) return memo.get(taskId)
+    const children = childrenByParent.get(taskId) || []
+    let result
+    if (children.length === 0) {
+      const task = byId.get(taskId)
+      const hours = Number(task?.estimated_hours) || 0
+      const progress = Number(task?.progress_percentage) || 0
+      result = { hours, weighted: hours * progress, simpleSum: progress, count: 1 }
+    } else {
+      let hours = 0
+      let weighted = 0
+      let simpleSum = 0
+      let count = 0
+      for (const child of children) {
+        const r = resolve(child.id)
+        hours += r.hours
+        weighted += r.weighted
+        simpleSum += r.simpleSum
+        count += r.count
+      }
+      result = { hours, weighted, simpleSum, count }
+    }
+    memo.set(taskId, result)
+    return result
+  }
+  const percentById = new Map()
+  for (const task of tasks) {
+    const agg = resolve(task.id)
+    const percent = agg.hours > 0 ? agg.weighted / agg.hours : agg.count > 0 ? agg.simpleSum / agg.count : 0
+    percentById.set(task.id, percent)
+  }
+  return percentById
+}
+
 // Colunas "do meio" da grade de Tarefas (entre o nome da tarefa e as ações
 // da linha) que o usuário pode reordenar/esconder — da mesma forma que o
 // pedido descreveu: "de duração até aprovação do cliente". WBS/nome (fixas
@@ -2600,6 +2661,17 @@ function GanttTab({ projectId, project }) {
   const [collapsedTaskIds, setCollapsedTaskIds] = useState(() => new Set())
   const orderedTasks = useMemo(() => buildOrderedTasks(data?.tasks || []), [data])
   const visibleTasks = useMemo(() => filterCollapsedTasks(orderedTasks, collapsedTaskIds), [orderedTasks, collapsedTaskIds])
+  // "Imprimir resumo (até o 2º nível)" (pedido do usuário: "imprima uma
+  // imagem do GANTT considerando as informações até o segundo nível de
+  // tarefas pai e filhas, em forma recolhida") — sempre nível 1+2
+  // (depth 0/1), fixo, independente do que estiver expandido/recolhido na
+  // tela no momento (confirmado com o usuário: "sempre nível 2,
+  // automático"). progressRollupByTaskId é calculado sobre a árvore
+  // COMPLETA (data.tasks, não visibleTasks/orderedTasks filtrado) porque a
+  // ponderação por horas precisa enxergar as folhas de verdade, mesmo as
+  // que ficam escondidas (depth >= 2) nesse resumo.
+  const level2Tasks = useMemo(() => orderedTasks.filter((task) => task.depth <= 1), [orderedTasks])
+  const progressRollupByTaskId = useMemo(() => buildProgressRollups(data?.tasks || []), [data])
 
   function toggleTaskCollapsed(taskId) {
     setCollapsedTaskIds((prev) => {
@@ -2653,10 +2725,14 @@ function GanttTab({ projectId, project }) {
   // visíveis (expandir/recolher muda a lista, não só o texto).
   const labelColPx = computeGanttLabelColPx(visibleTasks, predecessorCount, parentTaskIds, t)
 
-  // Export em PNG: desenha a mesma régua/barras num <canvas> (não é uma
-  // foto do DOM) reaproveitando o layout já calculado acima, então fica
-  // consistente com o que está na tela em qualquer zoom (dia/semana).
-  function handleExportPng() {
+  // Desenha a mesma régua/barras num <canvas> (não é uma foto do DOM)
+  // reaproveitando o layout já calculado acima (régua de datas igual pros
+  // dois exports — só a lista de tarefas/coluna de rótulo/fonte de
+  // progresso muda), então fica consistente com o que está na tela em
+  // qualquer zoom (dia/semana). Reaproveitado por handleExportPng
+  // (detalhado, respeita expandir/recolher da tela) e
+  // handleExportPngLevel2 (resumo fixo em nível 1+2 — ver level2Tasks).
+  function renderGanttPng({ tasks, labelColPx: colPx, progressPercentOf, titleSuffix, filenameSuffix }) {
     const titleH = project ? 20 : 0
     const monthRowH = 18
     const unitRowH = 20
@@ -2665,8 +2741,8 @@ function GanttTab({ projectId, project }) {
     const legendH = 30
     const padX = 16
     const padY = 12
-    const width = labelColPx + layout.totalWidthPx + padX * 2
-    const height = headerH + visibleTasks.length * rowH + legendH + padY * 2
+    const width = colPx + layout.totalWidthPx + padX * 2
+    const height = headerH + tasks.length * rowH + legendH + padY * 2
 
     const scale = 2 // resolução maior pra ficar nítido ao ampliar/imprimir
     const canvas = document.createElement('canvas')
@@ -2693,7 +2769,7 @@ function GanttTab({ projectId, project }) {
       ctx.textBaseline = 'middle'
       ctx.textAlign = 'left'
       ctx.fillText(
-        `${project.code} — ${project.name} · Gantt (${formatDate(effectiveStartStr)} – ${formatDate(effectiveEndStr)})`,
+        `${project.code} — ${project.name} · Gantt${titleSuffix} (${formatDate(effectiveStartStr)} – ${formatDate(effectiveEndStr)})`,
         0,
         titleH / 2,
       )
@@ -2704,7 +2780,7 @@ function GanttTab({ projectId, project }) {
     ctx.font = '600 11px sans-serif'
     ctx.fillStyle = textSecondary
     layout.monthSpans.forEach((m) => {
-      ctx.fillText(m.label, labelColPx + m.leftPx + 4, titleH + monthRowH / 2)
+      ctx.fillText(m.label, colPx + m.leftPx + 4, titleH + monthRowH / 2)
     })
 
     ctx.strokeStyle = border
@@ -2715,7 +2791,7 @@ function GanttTab({ projectId, project }) {
 
     ctx.font = '10px sans-serif'
     layout.units.forEach((u) => {
-      const x = labelColPx + u.leftPx
+      const x = colPx + u.leftPx
       if (u.shaded) {
         ctx.fillStyle = grid
         ctx.fillRect(x, titleH + monthRowH, u.widthPx, unitRowH)
@@ -2737,17 +2813,17 @@ function GanttTab({ projectId, project }) {
     ctx.stroke()
 
     ctx.font = '11px sans-serif'
-    visibleTasks.forEach((task, idx) => {
+    tasks.forEach((task, idx) => {
       const y = headerH + idx * rowH
       const start = ganttStart(task)
       const end = ganttEnd(task)
       const color = resolveGanttColor(TASK_TYPE_COLORS[task.task_type] || 'var(--text-muted)')
-      const progress = Math.min(100, Math.max(0, Number(task.progress_percentage) || 0))
+      const progress = Math.min(100, Math.max(0, progressPercentOf(task)))
       const progressColor = progress >= 100 ? progressGood : progress > 0 ? progressWarning : null
 
       ctx.strokeStyle = border
       layout.units.forEach((u) => {
-        const x = labelColPx + u.leftPx
+        const x = colPx + u.leftPx
         ctx.beginPath()
         ctx.moveTo(x, y)
         ctx.lineTo(x, y + rowH)
@@ -2760,11 +2836,11 @@ function GanttTab({ projectId, project }) {
       // aparece na tela (ver isParentTask/parentTaskIds no JSX abaixo).
       ctx.font = parentTaskIds.has(task.id) ? 'bold 11px sans-serif' : '11px sans-serif'
       const label = `${task.wbs_code} - ${task.name}`
-      ctx.fillText(ganttTruncateForCanvas(ctx, label, labelColPx - 8 - task.depth * 10), task.depth * 10, y + rowH / 2)
+      ctx.fillText(ganttTruncateForCanvas(ctx, label, colPx - 8 - task.depth * 10), task.depth * 10, y + rowH / 2)
       ctx.font = '11px sans-serif'
 
       if (start && end) {
-        const left = labelColPx + layout.pxFromDate(start)
+        const left = colPx + layout.pxFromDate(start)
         ctx.fillStyle = color
         if (task.is_milestone) {
           const cy = y + rowH / 2
@@ -2781,7 +2857,11 @@ function GanttTab({ projectId, project }) {
           ctx.fill()
           // % de progresso em outra cor (laranja parcial, verde concluído —
           // pedido do usuário), clipado ao mesmo contorno arredondado da
-          // barra pra não "vazar" quadrado pelos cantos.
+          // barra pra não "vazar" quadrado pelos cantos. progressPercentOf
+          // já entrega o valor certo pra cada export (progress_percentage
+          // da própria tarefa no detalhado; rollup ponderado por horas das
+          // folhas descendentes no resumo de nível 2 — ver
+          // buildProgressRollups).
           if (progressColor) {
             ctx.save()
             ganttRoundRect(ctx, left, barY, w, 12, 3)
@@ -2794,7 +2874,7 @@ function GanttTab({ projectId, project }) {
       }
     })
 
-    const legendY = headerH + visibleTasks.length * rowH + legendH / 2
+    const legendY = headerH + tasks.length * rowH + legendH / 2
     ctx.font = '10px sans-serif'
     ctx.textAlign = 'left'
     let lx = 0
@@ -2818,12 +2898,44 @@ function GanttTab({ projectId, project }) {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${project?.code || projectId}_gantt.png`
+      a.download = `${project?.code || projectId}_gantt${filenameSuffix}.png`
       document.body.appendChild(a)
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
     }, 'image/png')
+  }
+
+  function handleExportPng() {
+    renderGanttPng({
+      tasks: visibleTasks,
+      labelColPx,
+      progressPercentOf: (task) => Number(task.progress_percentage) || 0,
+      titleSuffix: '',
+      filenameSuffix: '',
+    })
+  }
+
+  // "Imprimir resumo (até o 2º nível)" — pedido do usuário, depois de
+  // mandar print da tela com a EAP recolhida manualmente até o 2º nível:
+  // "imprima uma imagem do GANTT considerando as informações até o
+  // segundo nível de tarefas pai e filhas, em forma recolhida", sempre
+  // fixo em nível 1+2 (confirmado: "sempre nível 2, automático"),
+  // independente do que estiver expandido/recolhido na tela. Usa
+  // level2Tasks (depth <= 1, nunca os filhos de 3º nível em diante) e
+  // progressRollupByTaskId (ponderado por horas das folhas escondidas, já
+  // que Task.progress_percentage de uma tarefa de 2º nível que também é
+  // pai nunca reflete o andamento real das filhas — ver
+  // buildProgressRollups) em vez de visibleTasks/progress_percentage cru.
+  function handleExportPngLevel2() {
+    const level2LabelColPx = computeGanttLabelColPx(level2Tasks, predecessorCount, parentTaskIds, t)
+    renderGanttPng({
+      tasks: level2Tasks,
+      labelColPx: level2LabelColPx,
+      progressPercentOf: (task) => progressRollupByTaskId.get(task.id) || 0,
+      titleSuffix: ` — ${t('resumo até o 2º nível')}`,
+      filenameSuffix: '_nivel2',
+    })
   }
 
   return (
@@ -2862,6 +2974,7 @@ function GanttTab({ projectId, project }) {
             </>
           )}
           <IconButton icon={DownloadIcon} label={t('Exportar PNG')} onClick={handleExportPng} />
+          <IconButton icon={LayersIcon} label={t('Imprimir resumo (até o 2º nível)')} onClick={handleExportPngLevel2} />
         </div>
       </div>
 
