@@ -957,6 +957,12 @@ export const es = {
   'Nenhuma tarefa com data para exibir no cronograma.': 'Ninguna tarea con fecha para mostrar en el cronograma.',
   'tarefa(s) a mais não exibida(s) no gráfico — veja as tabelas abaixo.': 'tarea(s) adicional(es) no mostrada(s) en el gráfico — vea las tablas abajo.',
 
+  // Imprimir versão cliente (pedido do usuário: "não vejo opção de
+  // imprimir a versão para envio ao cliente" — o gerente interno precisa
+  // conseguir gerar a versão sem dado financeiro pra mandar por fora,
+  // sem precisar logar como o cliente).
+  'Imprimir versão para o cliente': 'Imprimir versión para el cliente',
+
   // --- Configuração de E-mail (pedido do usuário: "processo de envio de
   // emails") — Configurações > E-mail, EmailSettingsPage.jsx ---
   'Configuração de E-mail': 'Configuración de correo electrónico',

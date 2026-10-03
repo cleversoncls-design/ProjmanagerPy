@@ -20,10 +20,11 @@ import StatusReportPrintSheet from '../components/StatusReportPrintSheet'
 import StatusReportComparisonBar from '../components/StatusReportComparisonBar'
 import StatusReportBurndownChart from '../components/StatusReportBurndownChart'
 import StatusReportGanttMini from '../components/StatusReportGanttMini'
-import { PencilIcon, PrinterIcon, TrashIcon } from '../components/icons'
+import { PencilIcon, PrinterIcon, TrashIcon, UsersIcon } from '../components/icons'
 import { FormField, Select, TextArea, TextInput } from '../components/FormField'
 import { formatCurrency, formatDate, formatHoursDuration, formatPercent, daysBetween } from '../utils/format'
 import { MANAGEMENT_ROLES, RAG_STATUS_TONE, RAG_STATUS_CSS_COLOR, RISK_LEVEL_TONE, RISK_STATUS_TONE } from '../utils/labels'
+import { maskStatusReportForClient } from '../utils/statusReportMask'
 import resultarLogo from '../assets/resultar-logo-color.png'
 
 const RAG_FIELDS = [
@@ -327,6 +328,7 @@ export default function StatusReportsPage() {
               onEdit={() => openEditForm(selected)}
               onDelete={() => setDeletingReport(selected)}
               onPrint={() => setPrintTarget(selected)}
+              onPrintClientVersion={() => setPrintTarget(maskStatusReportForClient(selected))}
               t={t}
               labels={labels}
             />
@@ -443,7 +445,7 @@ export default function StatusReportsPage() {
  * sendo o mesmo sinal de sempre pra saber se é a audiência Interna (o
  * backend manda os campos financeiros como null pra EXTERNAL_ROLES — ver
  * app/routers/status_reports.py), nunca uma checagem de role aqui. */
-function StatusReportDetail({ report, project, client, preparedByName, managerName, canWrite, onEdit, onDelete, onPrint, t, labels }) {
+function StatusReportDetail({ report, project, client, preparedByName, managerName, canWrite, onEdit, onDelete, onPrint, onPrintClientVersion, t, labels }) {
   const hasFinancials = report.hours_consumed !== null || report.cost_actual !== null || report.cost_planned !== null
   const daysToEnd = project?.end_date ? daysBetween(new Date().toISOString().slice(0, 10), project.end_date) : null
 
@@ -451,10 +453,15 @@ function StatusReportDetail({ report, project, client, preparedByName, managerNa
     <div className="space-y-4">
       <Card
         action={
-          <div className="flex gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
             <Button type="button" variant="secondary" onClick={onPrint}>
               <PrinterIcon size={14} /> {t('Imprimir')}
             </Button>
+            {canWrite && hasFinancials && (
+              <Button type="button" variant="secondary" onClick={onPrintClientVersion}>
+                <UsersIcon size={14} /> {t('Imprimir versão para o cliente')}
+              </Button>
+            )}
             {canWrite && (
               <>
                 <Button type="button" variant="secondary" onClick={onEdit}>
