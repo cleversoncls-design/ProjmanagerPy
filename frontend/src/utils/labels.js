@@ -315,8 +315,12 @@ export const STATUS_DOT_LABELS = {
 // Semáforo RAG do Status Report (ver RagStatus em app/models.py) — os 5
 // indicadores (Prazo/Custo/Margem/Escopo/Risco) dos mockups "Interno" e
 // "Cliente" validados no canvas de design.
+// "No prazo" (versão anterior) só fazia sentido pro indicador Prazo —
+// "Custo: No prazo"/"Margem: No prazo" não tinham sentido nenhum (bug
+// visível na tela real, reportado pelo usuário). "Em dia" é neutro e
+// funciona igual nos 5 indicadores (Prazo/Custo/Margem/Escopo/Risco).
 export const RAG_STATUS_LABELS = {
-  GOOD: 'No prazo',
+  GOOD: 'Em dia',
   WARNING: 'Atenção',
   CRITICAL: 'Crítico',
 }

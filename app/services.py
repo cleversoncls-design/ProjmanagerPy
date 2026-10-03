@@ -15,12 +15,15 @@ from .models import (
     AbsenceType,
     Baseline,
     Calendar,
+    ChangeRequest,
+    ChangeStatus,
     Client,
     DependencyType,
     Holiday,
     Project,
     Resource,
     ProjectExpense,
+    RagStatus,
     Risk,
     RiskLevel,
     RiskStatus,
@@ -1490,6 +1493,104 @@ def build_status_report_snapshot(session: Session, project_id: str, *, period_st
         "tasks_next": tasks_next,
         "risks_snapshot": risks_snapshot,
         "burndown": burndown,
+    }
+
+
+def suggest_status_report_rag(session: Session, project_id: str) -> dict:
+    """Sugestão automática dos 5 indicadores RAG do Status Report — pedido
+    do usuário: "os indicadores [...] venham calculados pelo sistema,
+    indicando de forma automática se tudo está dentro do prazo, mas que o
+    gerente possa modificar". Usada só pra PRÉ-PREENCHER o formulário
+    (`GET /projects/{id}/status-reports/suggested-rag`, chamado pelo
+    frontend ao abrir "Novo Status Report") — nunca grava nada sozinha, e
+    o gerente pode trocar qualquer um antes de salvar (ou depois, via
+    `PATCH`). Critérios (limiares arbitrários, mas documentados aqui —
+    ajustar se o usuário pedir outro corte):
+
+    - **Prazo**: diferença entre % concluído real e % previsto (mesma
+      base de `project_evm`, em pontos percentuais). >= -5: GOOD;
+      >= -15: WARNING; menor: CRITICAL.
+    - **Custo**: CPI (`project_evm`, EV/AC em horas). >= 0.95: GOOD;
+      >= 0.85: WARNING; menor: CRITICAL. Sem horas realizadas lançadas
+      ainda (CPI `None`): GOOD — nada pra julgar ainda, não é motivo pra
+      alarme.
+    - **Margem**: diferença entre margem realizada (`project_financials`)
+      e margem planejada (`Project.margin_percentage`), em pontos
+      percentuais. >= -3: GOOD; >= -8: WARNING; menor: CRITICAL. Sem
+      margem planejada cadastrada: GOOD.
+    - **Escopo**: quantidade de Solicitações de Mudança (`ChangeRequest`)
+      ainda `PENDING` (aguardando decisão) no projeto — 0: GOOD; 1-2:
+      WARNING; 3 ou mais: CRITICAL. Não é sobre ESCOPO ter mudado (mudança
+      aprovada é só o processo funcionando), é sobre decisão em aberto.
+    - **Risco**: pior risco ainda não fechado (`Risk.status != CLOSED`)
+      do projeto — algum HIGH/HIGH (mesmo critério de "alta prioridade" de
+      `risk_matrix`): CRITICAL; algum HIGH em probabilidade OU impacto
+      (sem ser os dois): WARNING; nenhum: GOOD.
+    """
+    evm = project_evm(session, project_id)
+    financials = project_financials(session, project_id)
+    project = session.get(Project, project_id)
+    if not project:
+        raise ValueError("Projeto não encontrado")
+
+    schedule_diff = evm["percent_complete"] - evm["planned_percent_complete"]
+    if schedule_diff >= -5:
+        rag_schedule = RagStatus.GOOD
+    elif schedule_diff >= -15:
+        rag_schedule = RagStatus.WARNING
+    else:
+        rag_schedule = RagStatus.CRITICAL
+
+    cpi = evm["cpi"]
+    if cpi is None or cpi >= Decimal("0.95"):
+        rag_cost = RagStatus.GOOD
+    elif cpi >= Decimal("0.85"):
+        rag_cost = RagStatus.WARNING
+    else:
+        rag_cost = RagStatus.CRITICAL
+
+    margin_planned = project.margin_percentage
+    margin_actual = financials["real_margin_percentage"]
+    if margin_planned is None or margin_actual is None:
+        rag_margin = RagStatus.GOOD
+    else:
+        margin_diff = Decimal(margin_actual) - Decimal(margin_planned)
+        if margin_diff >= -3:
+            rag_margin = RagStatus.GOOD
+        elif margin_diff >= -8:
+            rag_margin = RagStatus.WARNING
+        else:
+            rag_margin = RagStatus.CRITICAL
+
+    pending_changes = (
+        session.scalar(
+            select(func.count())
+            .select_from(ChangeRequest)
+            .where(ChangeRequest.project_id == project_id, ChangeRequest.status == ChangeStatus.PENDING)
+        )
+        or 0
+    )
+    if pending_changes == 0:
+        rag_scope = RagStatus.GOOD
+    elif pending_changes <= 2:
+        rag_scope = RagStatus.WARNING
+    else:
+        rag_scope = RagStatus.CRITICAL
+
+    open_risks = list(session.scalars(select(Risk).where(Risk.project_id == project_id, Risk.status != RiskStatus.CLOSED)).all())
+    if any(r.probability == RiskLevel.HIGH and r.impact == RiskLevel.HIGH for r in open_risks):
+        rag_risk = RagStatus.CRITICAL
+    elif any(r.probability == RiskLevel.HIGH or r.impact == RiskLevel.HIGH for r in open_risks):
+        rag_risk = RagStatus.WARNING
+    else:
+        rag_risk = RagStatus.GOOD
+
+    return {
+        "rag_schedule": rag_schedule,
+        "rag_cost": rag_cost,
+        "rag_margin": rag_margin,
+        "rag_scope": rag_scope,
+        "rag_risk": rag_risk,
     }
 
 

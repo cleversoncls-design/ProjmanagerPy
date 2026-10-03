@@ -18,3 +18,19 @@ export function getStatusReport(projectId, reportId) {
 export function createStatusReport(projectId, data) {
   return api.post(`/projects/${projectId}/status-reports`, data)
 }
+
+// Pedido do usuário: "ter opção de modificar"/"ter opção de excluir".
+export function updateStatusReport(projectId, reportId, data) {
+  return api.patch(`/projects/${projectId}/status-reports/${reportId}`, data)
+}
+
+export function deleteStatusReport(projectId, reportId) {
+  return api.del(`/projects/${projectId}/status-reports/${reportId}`)
+}
+
+// Pedido do usuário: "os indicadores [...] venham calculados pelo sistema
+// [...] mas que o gerente possa modificar" — sugestão pra pré-preencher o
+// formulário de criação; nunca grava nada.
+export function getSuggestedRag(projectId) {
+  return api.get(`/projects/${projectId}/status-reports/suggested-rag`)
+}

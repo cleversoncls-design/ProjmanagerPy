@@ -923,8 +923,20 @@ export const es = {
   'Aberto': 'Abierto',
   'Mitigado': 'Mitigado',
   'Fechado': 'Cerrado',
+  'Em dia': 'Al día',
   'Atenção': 'Atención',
   'Crítico': 'Crítico',
+
+  // Editar/excluir/imprimir (pedido do usuário, depois de testar em
+  // produção: "ter opção de modificar"/"ter opção de excluir"/"onde
+  // imprimir o status?") e sugestão automática dos indicadores RAG.
+  'Editar Status Report': 'Editar informe de estado',
+  'Excluir Status Report': 'Eliminar informe de estado',
+  'Tem certeza que quer excluir o Status Report do período': '¿Está seguro de que quiere eliminar el informe de estado del período',
+  'não pode ser alterado depois de criado.': 'no se puede modificar después de creado.',
+  'Calculando sugestão dos indicadores…': 'Calculando sugerencia de los indicadores…',
+  'Sugestão calculada automaticamente a partir dos dados do projeto — ajuste livremente antes de salvar.':
+    'Sugerencia calculada automáticamente a partir de los datos del proyecto — ajuste libremente antes de guardar.',
 
   // --- Configuração de E-mail (pedido do usuário: "processo de envio de
   // emails") — Configurações > E-mail, EmailSettingsPage.jsx ---

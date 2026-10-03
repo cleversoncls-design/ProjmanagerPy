@@ -1483,6 +1483,96 @@ def test_status_report_detail_404_for_wrong_project(client, setup):
     assert wrong_project.status_code == 404
 
 
+def test_status_report_suggested_rag_defaults_to_good_and_reacts_to_high_risk(client, setup):
+    """Pedido do usuário: "os indicadores [...] venham calculados pelo
+    sistema, indicando de forma automática se tudo está dentro do prazo,
+    mas que o gerente possa modificar" — num projeto limpo (sem tarefa,
+    sem custo lançado, sem risco, sem solicitação de mudança pendente) os
+    5 indicadores sugeridos são GOOD; um risco HIGH/HIGH aberto muda só
+    `rag_risk` pra CRITICAL, sem afetar os outros 4."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+
+    baseline = client.get(f"/projects/{project_id}/status-reports/suggested-rag", headers=admin_headers)
+    assert baseline.status_code == 200
+    body = baseline.json()
+    assert body == {"rag_schedule": "GOOD", "rag_cost": "GOOD", "rag_margin": "GOOD", "rag_scope": "GOOD", "rag_risk": "GOOD"}
+
+    client.post(
+        f"/projects/{project_id}/risks",
+        json={"description": "Atraso de fornecedor", "probability": "HIGH", "impact": "HIGH"},
+        headers=admin_headers,
+    )
+    with_risk = client.get(f"/projects/{project_id}/status-reports/suggested-rag", headers=admin_headers)
+    assert with_risk.status_code == 200
+    with_risk_body = with_risk.json()
+    assert with_risk_body["rag_risk"] == "CRITICAL"
+    assert with_risk_body["rag_schedule"] == "GOOD"
+    assert with_risk_body["rag_cost"] == "GOOD"
+    assert with_risk_body["rag_margin"] == "GOOD"
+    assert with_risk_body["rag_scope"] == "GOOD"
+
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    denied = client.get(f"/projects/{project_id}/status-reports/suggested-rag", headers=external_headers)
+    assert denied.status_code == 403
+
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    denied_consultant = client.get(f"/projects/{project_id}/status-reports/suggested-rag", headers=consultant_headers)
+    assert denied_consultant.status_code == 403
+
+
+def test_status_report_update_restricted_to_management_roles_and_keeps_frozen_fields(client, setup):
+    """Pedido do usuário: "ter opção de modificar" — só os campos
+    editoriais/semáforo mudam; `period_start`/`period_end` e os dados
+    "congelados" (schedule_actual_pct etc.) continuam intocados."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    created = client.post(f"/projects/{project_id}/status-reports", json=_status_report_payload(), headers=admin_headers)
+    report_id = created.json()["id"]
+    original_schedule_actual = created.json()["schedule_actual_pct"]
+
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    denied = client.patch(
+        f"/projects/{project_id}/status-reports/{report_id}", json={"rag_cost": "CRITICAL"}, headers=external_headers
+    )
+    assert denied.status_code == 403
+
+    updated = client.patch(
+        f"/projects/{project_id}/status-reports/{report_id}",
+        json={"rag_cost": "CRITICAL", "executive_summary": "Custo estourou no fim do período."},
+        headers=admin_headers,
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["rag_cost"] == "CRITICAL"
+    assert body["executive_summary"] == "Custo estourou no fim do período."
+    # Campos não enviados no PATCH continuam como estavam.
+    assert body["rag_schedule"] == "GOOD"
+    assert body["period_start"] == "2026-08-01"
+    assert body["schedule_actual_pct"] == original_schedule_actual
+
+
+def test_status_report_delete_restricted_to_management_roles(client, setup):
+    """Pedido do usuário: "ter opção de excluir"."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    created = client.post(f"/projects/{project_id}/status-reports", json=_status_report_payload(), headers=admin_headers)
+    report_id = created.json()["id"]
+
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    denied = client.delete(f"/projects/{project_id}/status-reports/{report_id}", headers=consultant_headers)
+    assert denied.status_code == 403
+
+    deleted = client.delete(f"/projects/{project_id}/status-reports/{report_id}", headers=admin_headers)
+    assert deleted.status_code == 204
+
+    remaining = client.get(f"/projects/{project_id}/status-reports", headers=admin_headers)
+    assert remaining.json() == []
+
+    missing = client.delete(f"/projects/{project_id}/status-reports/{report_id}", headers=admin_headers)
+    assert missing.status_code == 404
+
+
 def test_velocity_endpoint_requires_project_id_for_external_role(client, setup):
     external_headers = auth_headers(client, setup["client_pm_a"].email)
     missing_project = client.get("/reports/velocity", headers=external_headers)

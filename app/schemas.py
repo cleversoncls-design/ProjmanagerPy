@@ -930,6 +930,38 @@ class StatusReportCreate(BaseModel):
     next_steps_internal: str | None = None
 
 
+class StatusReportUpdate(BaseModel):
+    """Edição de um Status Report já salvo (pedido do usuário: "ter opção
+    de modificar") — só os campos editoriais/semáforo. `period_start`/
+    `period_end` e tudo que é "fechamento" congelado (EVM, financeiro,
+    burndown, tarefas, riscos — ver docstring de ProjectStatusReport em
+    app/models.py) continuam IMUTÁVEIS depois de criado; mudar o período
+    exigiria recalcular tudo de novo, o que descaracterizaria a ideia de
+    "fechamento" (ver claude/status-report-por-periodo.md). Todos os
+    campos são opcionais (`exclude_unset` no router) — PATCH parcial."""
+
+    rag_schedule: RagStatus | None = None
+    rag_cost: RagStatus | None = None
+    rag_margin: RagStatus | None = None
+    rag_scope: RagStatus | None = None
+    rag_risk: RagStatus | None = None
+    executive_summary: str | None = Field(default=None, min_length=1)
+    next_steps_client: str | None = Field(default=None, min_length=1)
+    next_steps_internal: str | None = None
+
+
+class StatusReportRagSuggestion(BaseModel):
+    """Resposta de GET /projects/{id}/status-reports/suggested-rag — ver
+    services.suggest_status_report_rag. Só uma sugestão pra pré-preencher
+    o formulário; o gerente sempre pode trocar antes de salvar."""
+
+    rag_schedule: RagStatus
+    rag_cost: RagStatus
+    rag_margin: RagStatus
+    rag_scope: RagStatus
+    rag_risk: RagStatus
+
+
 class StatusReportRead(ORMModel):
     """Resposta de um Status Report. Os campos financeiros/burndown são
     `None` (nunca um valor zerado fajuto) quando o perfil de quem pediu é

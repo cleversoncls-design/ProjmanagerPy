@@ -8,8 +8,8 @@ from ..database import get_db
 from ..deps import EXTERNAL_ROLES, MANAGEMENT_ROLES, get_current_user, require_project_access, require_roles
 from ..i18n import t as translate
 from ..models import Project, ProjectStatusReport, User
-from ..schemas import StatusReportCreate, StatusReportRead
-from ..services import build_status_report_snapshot
+from ..schemas import StatusReportCreate, StatusReportRagSuggestion, StatusReportRead, StatusReportUpdate
+from ..services import build_status_report_snapshot, suggest_status_report_rag
 
 router = APIRouter(tags=["status-reports"])
 
@@ -19,6 +19,13 @@ def _get_project_or_404(db: Session, project_id: str, lang: str) -> Project:
     if not project:
         raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", lang))
     return project
+
+
+def _get_report_or_404(db: Session, project_id: str, report_id: str, lang: str) -> ProjectStatusReport:
+    report = db.get(ProjectStatusReport, report_id)
+    if not report or report.project_id != project_id:
+        raise HTTPException(status_code=404, detail=translate("Status report não encontrado", lang))
+    return report
 
 
 def _serialize(report: ProjectStatusReport, user: User) -> StatusReportRead:
@@ -95,6 +102,23 @@ def create_status_report(
     return _serialize(report, user)
 
 
+@router.get("/projects/{project_id}/status-reports/suggested-rag", response_model=StatusReportRagSuggestion)
+def suggest_status_report_rag_endpoint(
+    project_id: str, user: User = Depends(require_roles(*MANAGEMENT_ROLES)), db: Session = Depends(get_db)
+) -> dict:
+    """Pedido do usuário: "os indicadores [...] venham calculados pelo
+    sistema, indicando de forma automática se tudo está dentro do prazo,
+    mas que o gerente possa modificar" — sugestão pra pré-preencher o
+    formulário de "Novo Status Report" no frontend (ver
+    services.suggest_status_report_rag); nunca grava nada. Rota estática
+    ("suggested-rag") precisa vir ANTES de GET /status-reports/{report_id}
+    no arquivo — senão o FastAPI tentaria casar "suggested-rag" como um
+    `report_id`."""
+    project = _get_project_or_404(db, project_id, user.language)
+    require_project_access(project, user)
+    return suggest_status_report_rag(db, project_id)
+
+
 @router.get("/projects/{project_id}/status-reports", response_model=list[StatusReportRead])
 def list_status_reports(project_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[StatusReportRead]:
     """Histórico de status reports do projeto — mais recente primeiro.
@@ -118,7 +142,43 @@ def get_status_report(
 ) -> StatusReportRead:
     project = _get_project_or_404(db, project_id, user.language)
     require_project_access(project, user)
-    report = db.get(ProjectStatusReport, report_id)
-    if not report or report.project_id != project_id:
-        raise HTTPException(status_code=404, detail=translate("Status report não encontrado", user.language))
+    report = _get_report_or_404(db, project_id, report_id, user.language)
     return _serialize(report, user)
+
+
+@router.patch("/projects/{project_id}/status-reports/{report_id}", response_model=StatusReportRead)
+def update_status_report(
+    project_id: str,
+    report_id: str,
+    data: StatusReportUpdate,
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
+    db: Session = Depends(get_db),
+) -> StatusReportRead:
+    """Pedido do usuário: "ter opção de modificar". Só os campos
+    editoriais/semáforo (ver docstring de StatusReportUpdate) — os dados
+    "congelados" no momento da criação (EVM, financeiro, burndown,
+    tarefas, riscos, e o próprio período) nunca são recalculados aqui,
+    senão deixaria de ser um "fechamento"."""
+    project = _get_project_or_404(db, project_id, user.language)
+    require_project_access(project, user, write=True, allow_consultant_write=False)
+    report = _get_report_or_404(db, project_id, report_id, user.language)
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(report, field, value)
+    db.commit()
+    db.refresh(report)
+    return _serialize(report, user)
+
+
+@router.delete("/projects/{project_id}/status-reports/{report_id}", status_code=204)
+def delete_status_report(
+    project_id: str,
+    report_id: str,
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
+    db: Session = Depends(get_db),
+) -> None:
+    """Pedido do usuário: "ter opção de excluir"."""
+    project = _get_project_or_404(db, project_id, user.language)
+    require_project_access(project, user, write=True, allow_consultant_write=False)
+    report = _get_report_or_404(db, project_id, report_id, user.language)
+    db.delete(report)
+    db.commit()
