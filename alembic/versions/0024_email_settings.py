@@ -40,6 +40,16 @@ email_security_enum = sa.Enum("NONE", "STARTTLS", "SSL", name="email_security")
 def upgrade() -> None:
     bind = op.get_bind()
     email_security_enum.create(bind, checkfirst=True)
+    # has_table checkfirst de propósito: o init_db() do próprio app
+    # (app/database.py) cria qualquer tabela que falte no startup da API
+    # a partir do metadata do SQLAlchemy — se a API já tiver subido com
+    # este código antes de alguém rodar "alembic upgrade head" a mão, a
+    # tabela já existe e um create_table incondicional quebra com
+    # "relation already exists" (foi exatamente o que aconteceu em
+    # produção). Sem isso, corrigir essa situação exige "alembic stamp
+    # head" manual (ver claude/processo-envio-emails.md).
+    if sa.inspect(bind).has_table("email_settings"):
+        return
     op.create_table(
         "email_settings",
         sa.Column("id", sa.String(36), primary_key=True),

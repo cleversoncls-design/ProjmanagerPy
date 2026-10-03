@@ -90,7 +90,9 @@ def notify_resource_schedule(schedule_id: str, *, created: bool) -> None:
         if not user or not user.email:
             return
         subject, html_body, text_body = _schedule_email_content(schedule, user, created=created)
-        send_email(session, to_email=user.email, to_name=user.name, subject=subject, html_body=html_body, text_body=text_body)
+        send_email(
+            session, to_email=user.email, to_name=user.name, subject=subject, html_body=html_body, text_body=text_body, kind="agendamento"
+        )
     finally:
         session.close()
 
@@ -193,5 +195,13 @@ def send_pending_approval_digests(db: Session, *, dry_run: bool = False) -> list
         )
         if not dry_run:
             subject, html_body, text_body = _digest_email_content(manager.name, manager.language, rows, total_hours)
-            send_email(db, to_email=manager.email, to_name=manager.name, subject=subject, html_body=html_body, text_body=text_body)
+            send_email(
+                db,
+                to_email=manager.email,
+                to_name=manager.name,
+                subject=subject,
+                html_body=html_body,
+                text_body=text_body,
+                kind="resumo_aprovacoes",
+            )
     return summaries

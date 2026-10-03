@@ -1099,3 +1099,22 @@ class EmailSettingsRead(BaseModel):
 
 class EmailTestRequest(BaseModel):
     to_email: EmailStr
+
+
+class EmailLogRead(BaseModel):
+    """Uma linha da tela "Log de e-mails enviados" (ver EmailLog em
+    app/models.py). `kind` é texto livre — a tela mapeia os valores
+    conhecidos ("teste", "agendamento", "resumo_aprovacoes") para um
+    rótulo amigável e mostra o valor cru para qualquer tipo novo que
+    vier a ser adicionado depois."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+    kind: str
+    to_email: str
+    to_name: str | None
+    subject: str
+    success: bool
+    error_message: str | None

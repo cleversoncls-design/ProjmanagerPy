@@ -908,6 +908,20 @@ export const es = {
   'Salve a configuração antes de testar.': 'Guarde la configuración antes de probar.',
   'Último teste: sucesso': 'Última prueba: éxito',
   'Último teste: falhou': 'Última prueba: falló',
+  'Log de e-mails enviados': 'Registro de correos enviados',
+  'Nenhum e-mail registrado ainda.': 'Ningún correo registrado todavía.',
+  'Data/Hora': 'Fecha/Hora',
+  'Para': 'Para',
+  'Assunto': 'Asunto',
+  'Erro': 'Error',
+  'Enviado': 'Enviado',
+  'Falhou': 'Falló',
+  'Teste': 'Prueba',
+  'Agendamento': 'Agenda',
+  'Resumo de aprovações': 'Resumen de aprobaciones',
+  'Limpar log': 'Limpiar registro',
+  'Limpando…': 'Limpiando…',
+  'Tem certeza? Essa ação não pode ser desfeita.': '¿Está seguro? Esta acción no se puede deshacer.',
 }
 
 export function translate(lang, text, vars) {

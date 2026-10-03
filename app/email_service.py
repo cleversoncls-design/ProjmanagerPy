@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .crypto import decrypt_secret
-from .models import EmailSecurity, EmailSettings
+from .models import EmailLog, EmailSecurity, EmailSettings
 
 logger = logging.getLogger("app.email")
 
@@ -33,6 +33,7 @@ def get_email_settings(db: Session) -> EmailSettings | None:
 
 
 def send_raw_email(
+    db: Session,
     settings: EmailSettings,
     *,
     to_email: str,
@@ -40,13 +41,21 @@ def send_raw_email(
     subject: str,
     html_body: str,
     text_body: str | None = None,
+    kind: str = "outro",
 ) -> tuple[bool, str | None]:
     """Conecta no SMTP configurado e manda o e-mail, SEM checar
     `settings.enabled` — usado pelo botão "Enviar e-mail de teste" (ver
     app/routers/email_settings.py), que precisa poder validar as
     credenciais mesmo antes de o admin marcar a configuração como Ativa.
     Todo disparo "de negócio" (agendamento, aprovação) passa por
-    `send_email` abaixo, que checa `enabled` primeiro."""
+    `send_email` abaixo, que checa `enabled` primeiro.
+
+    Toda TENTATIVA (sucesso ou falha) grava uma linha em `EmailLog` —
+    pedido do usuário: tela com o log dos e-mails enviados (ver
+    app/models.py). `db.commit()` aqui é deliberado e separado do commit
+    de quem chamou: mesmo que a chamada original dê rollback por outro
+    motivo depois, o registro do envio (que já aconteceu de verdade, não
+    tem como "desfazer" um e-mail que já saiu) não se perde."""
     try:
         password = decrypt_secret(settings.smtp_password_encrypted) if settings.smtp_password_encrypted else None
 
@@ -70,10 +79,23 @@ def send_raw_email(
             server.sendmail(settings.from_email, [to_email], message.as_string())
         finally:
             server.quit()
-        return True, None
+        ok, error = True, None
     except Exception as exc:  # pragma: no cover - depende de um servidor SMTP real
         logger.exception("Falha ao enviar e-mail para %s", to_email)
-        return False, str(exc)
+        ok, error = False, str(exc)
+
+    db.add(
+        EmailLog(
+            kind=kind,
+            to_email=to_email,
+            to_name=to_name,
+            subject=subject,
+            success=ok,
+            error_message=error,
+        )
+    )
+    db.commit()
+    return ok, error
 
 
 def send_email(
@@ -84,14 +106,20 @@ def send_email(
     subject: str,
     html_body: str,
     text_body: str | None = None,
+    kind: str = "outro",
 ) -> tuple[bool, str | None]:
     """Manda um e-mail "de negócio" usando a configuração salva em
     `EmailSettings`. Retorna `(ok, erro)` — nunca levanta exceção (ver
     docstring do módulo). `(False, None)` significa "não há o que fazer"
     (envio desligado ou nunca configurado), bem diferente de `(False,
     "<erro>")` (configurado, mas a tentativa de envio falhou de verdade —
-    problema de rede/credencial/servidor)."""
+    problema de rede/credencial/servidor). Esse caso "desligado" não entra
+    no log de e-mails (ver EmailLog): não houve tentativa nenhuma de
+    envio, só o registro de uma tentativa real (sucesso ou falha) é
+    gravado, dentro de `send_raw_email`."""
     settings = get_email_settings(db)
     if not settings or not settings.enabled:
         return False, None
-    return send_raw_email(settings, to_email=to_email, to_name=to_name, subject=subject, html_body=html_body, text_body=text_body)
+    return send_raw_email(
+        db, settings, to_email=to_email, to_name=to_name, subject=subject, html_body=html_body, text_body=text_body, kind=kind
+    )

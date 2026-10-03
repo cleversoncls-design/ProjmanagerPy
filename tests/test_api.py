@@ -3224,6 +3224,68 @@ def test_email_settings_test_email_requires_saved_config(client, setup):
     assert response.status_code == 422
 
 
+def test_email_log_records_entry_on_success_and_failure(client, setup, monkeypatch):
+    """Pedido do usuário: "poderia criar um botão para abrir uma tela com o
+    log dos emails enviados? esse log precisa ser gravado [...] na base de
+    dados". Cada tentativa de `send_raw_email` (aqui disparada pelo botão
+    "Enviar e-mail de teste") grava uma linha em EmailLog, sucesso ou
+    falha — é o mesmo `send_raw_email` usado por todo o resto do processo
+    de envio, então cobrir aqui cobre o choke point de verdade."""
+    admin_headers = setup["admin_headers"]
+    client.put(
+        "/email-settings",
+        json={"enabled": False, "smtp_host": "smtp.exemplo.com", "smtp_port": 587, "from_email": "no-reply@exemplo.com"},
+        headers=admin_headers,
+    )
+
+    _FakeSmtpConnection.instances = []
+    monkeypatch.setattr("app.email_service.smtplib.SMTP", _FakeSmtpConnection)
+    ok = client.post("/email-settings/test-email", json={"to_email": "sucesso@exemplo.com"}, headers=admin_headers)
+    assert ok.status_code == 200
+
+    def boom(*args, **kwargs):
+        raise OSError("Connection refused")
+
+    monkeypatch.setattr("app.email_service.smtplib.SMTP", boom)
+    failed = client.post("/email-settings/test-email", json={"to_email": "falha@exemplo.com"}, headers=admin_headers)
+    assert failed.status_code == 200
+
+    log = client.get("/email-settings/log", headers=admin_headers)
+    assert log.status_code == 200
+    rows = log.json()
+    assert len(rows) == 2
+    # Mais recentes primeiro.
+    assert rows[0]["to_email"] == "falha@exemplo.com"
+    assert rows[0]["success"] is False
+    assert "Connection refused" in rows[0]["error_message"]
+    assert rows[0]["kind"] == "teste"
+    assert rows[1]["to_email"] == "sucesso@exemplo.com"
+    assert rows[1]["success"] is True
+    assert rows[1]["error_message"] is None
+
+
+def test_email_log_list_and_clear_restricted_to_admin_like_roles(client, setup, monkeypatch):
+    admin_headers = setup["admin_headers"]
+    pm_headers = auth_headers(client, setup["pm"].email)
+    client.put(
+        "/email-settings",
+        json={"enabled": False, "smtp_host": "smtp.exemplo.com", "smtp_port": 587, "from_email": "no-reply@exemplo.com"},
+        headers=admin_headers,
+    )
+    monkeypatch.setattr("app.email_service.smtplib.SMTP", _FakeSmtpConnection)
+    client.post("/email-settings/test-email", json={"to_email": "destino@exemplo.com"}, headers=admin_headers)
+
+    assert client.get("/email-settings/log", headers=pm_headers).status_code == 403
+    assert client.delete("/email-settings/log", headers=pm_headers).status_code == 403
+
+    assert len(client.get("/email-settings/log", headers=admin_headers).json()) == 1
+
+    # "opção de limpar o log" (pedido do usuário) — apaga tudo.
+    cleared = client.delete("/email-settings/log", headers=admin_headers)
+    assert cleared.status_code == 204
+    assert client.get("/email-settings/log", headers=admin_headers).json() == []
+
+
 def test_schedule_creation_and_update_trigger_email_notification(client, setup, monkeypatch):
     """Pedido do usuário (caso 1 do "processo de envio de emails": "Agendas
     definidas para consultores"). Monkeypatcha `app.notifications.
@@ -3232,7 +3294,11 @@ def test_schedule_creation_and_update_trigger_email_notification(client, setup, 
     coberta pelos testes de email_settings acima."""
     sent = []
 
-    def fake_send_email(db, *, to_email, to_name, subject, html_body, text_body=None):
+    # kind=None de propósito: este teste isola "o agendamento dispara o
+    # aviso certo", não quem chama com qual `kind` — ver
+    # test_send_raw_email_records_log_entry_on_success_and_failure, que
+    # cobre o `kind` repassado de verdade.
+    def fake_send_email(db, *, to_email, to_name, subject, html_body, text_body=None, kind=None):
         sent.append({"to_email": to_email, "to_name": to_name, "subject": subject})
         return True, None
 
@@ -3360,7 +3426,7 @@ def test_send_pending_approval_digests_groups_by_project_manager(client, setup, 
 
     sent = []
 
-    def fake_send_email(db, *, to_email, to_name, subject, html_body, text_body=None):
+    def fake_send_email(db, *, to_email, to_name, subject, html_body, text_body=None, kind=None):
         sent.append({"to_email": to_email, "to_name": to_name})
         return True, None
 

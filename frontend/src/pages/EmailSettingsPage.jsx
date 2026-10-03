@@ -5,8 +5,21 @@ import Card from '../components/Card'
 import Button from '../components/Button'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
+import Modal from '../components/Modal'
+import Table from '../components/Table'
 import { FormField, TextInput, Select } from '../components/FormField'
+import { ClockIcon } from '../components/icons'
 import { useLanguage } from '../context/LanguageContext'
+
+// Mapeia o `kind` (texto livre, ver EmailLog em app/models.py) pro rótulo
+// amigável da tela; um `kind` novo que ainda não esteja aqui (a lista "vão
+// ser incrementados", pedido original do usuário) simplesmente aparece cru
+// em vez de quebrar a tela.
+const EMAIL_LOG_KIND_LABELS = {
+  teste: 'Teste',
+  agendamento: 'Agendamento',
+  resumo_aprovacoes: 'Resumo de aprovações',
+}
 
 const EMPTY_FORM = {
   enabled: false,
@@ -46,6 +59,7 @@ export default function EmailSettingsPage() {
   const [saveError, setSaveError] = useState('')
   const [saving, setSaving] = useState(false)
   const [savedMessage, setSavedMessage] = useState('')
+  const [showLogModal, setShowLogModal] = useState(false)
 
   function load() {
     setLoading(true)
@@ -103,6 +117,11 @@ export default function EmailSettingsPage() {
       <PageHeader
         title={t('Configuração de E-mail')}
         subtitle={t('Dados de SMTP usados para os avisos automáticos do sistema (agendamentos, aprovações pendentes e outros).')}
+        action={
+          <Button variant="secondary" onClick={() => setShowLogModal(true)}>
+            <ClockIcon size={16} /> {t('Log de e-mails enviados')}
+          </Button>
+        }
       />
 
       {loading && <Spinner />}
@@ -188,6 +207,8 @@ export default function EmailSettingsPage() {
           <TestEmailCard settings={settings} disabled={!settings?.id} onTested={setSettings} />
         </div>
       )}
+
+      {showLogModal && <EmailLogModal onClose={() => setShowLogModal(false)} />}
     </div>
   )
 }
@@ -254,5 +275,126 @@ function TestEmailCard({ settings, disabled, onTested }) {
         )}
       </div>
     </Card>
+  )
+}
+
+/** Tela "Log de e-mails enviados" (pedido do usuário: "poderia criar um
+ * botão para abrir uma tela com o log dos emails enviados? [...] e que
+ * tenha a opção de limpar o log"). Confirmação de "Limpar log" inline, no
+ * próprio modal (mesmo padrão de ClientDeleteModal/UserDeleteModal — nunca
+ * window.confirm), já que apaga TUDO de uma vez e sem volta. */
+function EmailLogModal({ onClose }) {
+  const { t } = useLanguage()
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [confirmingClear, setConfirmingClear] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const [clearError, setClearError] = useState('')
+
+  function load() {
+    setLoading(true)
+    setLoadError('')
+    emailSettingsApi
+      .getEmailLog()
+      .then(setRows)
+      .catch((err) => setLoadError(err.message))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(load, [])
+
+  async function handleClear() {
+    setClearing(true)
+    setClearError('')
+    try {
+      await emailSettingsApi.clearEmailLog()
+      setRows([])
+      setConfirmingClear(false)
+    } catch (err) {
+      setClearError(err.message)
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  const columns = [
+    {
+      key: 'created_at',
+      header: t('Data/Hora'),
+      nowrap: true,
+      render: (row) => new Date(row.created_at).toLocaleString(),
+    },
+    {
+      key: 'kind',
+      header: t('Tipo'),
+      render: (row) => t(EMAIL_LOG_KIND_LABELS[row.kind] || row.kind),
+    },
+    {
+      key: 'to_email',
+      header: t('Para'),
+      render: (row) => (row.to_name ? `${row.to_name} <${row.to_email}>` : row.to_email),
+    },
+    { key: 'subject', header: t('Assunto') },
+    {
+      key: 'success',
+      header: t('Status'),
+      render: (row) => (
+        <span
+          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+            row.success
+              ? 'bg-[var(--status-good)]/10 text-[var(--status-good)]'
+              : 'bg-[var(--status-critical)]/10 text-[var(--status-critical)]'
+          }`}
+        >
+          {row.success ? t('Enviado') : t('Falhou')}
+        </span>
+      ),
+    },
+    {
+      key: 'error_message',
+      header: t('Erro'),
+      render: (row) => row.error_message || '—',
+    },
+  ]
+
+  return (
+    <Modal title={t('Log de e-mails enviados')} onClose={onClose} wide>
+      <div className="space-y-4">
+        {loading && <Spinner />}
+        <ErrorBanner message={loadError} />
+
+        {!loading && !loadError && (
+          <Table columns={columns} rows={rows} getRowKey={(row) => row.id} emptyMessage={t('Nenhum e-mail registrado ainda.')} dense />
+        )}
+
+        <ErrorBanner message={clearError} />
+
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--border)] pt-3">
+          {confirmingClear ? (
+            <div className="flex w-full items-center justify-between gap-2">
+              <p className="text-sm text-[var(--text-secondary)]">{t('Tem certeza? Essa ação não pode ser desfeita.')}</p>
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" onClick={() => setConfirmingClear(false)} disabled={clearing}>
+                  {t('Cancelar')}
+                </Button>
+                <Button type="button" variant="danger" onClick={handleClear} disabled={clearing}>
+                  {clearing ? t('Limpando…') : t('Confirmar')}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Button type="button" variant="secondary" onClick={onClose}>
+                {t('Fechar')}
+              </Button>
+              <Button type="button" variant="danger" disabled={loading || rows.length === 0} onClick={() => setConfirmingClear(true)}>
+                {t('Limpar log')}
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    </Modal>
   )
 }

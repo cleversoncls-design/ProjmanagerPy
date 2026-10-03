@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..crypto import encrypt_secret
@@ -10,8 +11,8 @@ from ..database import get_db
 from ..deps import ADMIN_LIKE_ROLES, require_roles
 from ..email_service import get_email_settings, send_raw_email
 from ..i18n import t as translate
-from ..models import EmailSecurity, EmailSettings, User
-from ..schemas import EmailSettingsRead, EmailSettingsUpdate, EmailTestRequest
+from ..models import EmailLog, EmailSecurity, EmailSettings, User
+from ..schemas import EmailLogRead, EmailSettingsRead, EmailSettingsUpdate, EmailTestRequest
 
 # Pedido do usuário: "será necessário criar um configurador de dados para
 # envio de email? para indicar servidor, usuario, senha, tipos de
@@ -109,11 +110,13 @@ def send_test_email(
     if not settings:
         raise HTTPException(status_code=422, detail=translate("Configuração de e-mail ainda não foi salva", user.language))
     ok, error = send_raw_email(
+        db,
         settings,
         to_email=data.to_email,
         to_name=None,
         subject=translate("E-mail de teste — ProjmanagerPy", user.language),
         html_body=f"<p>{translate('Este é um e-mail de teste da configuração de SMTP do ProjmanagerPy.', user.language)}</p>",
+        kind="teste",
     )
     settings.last_test_at = datetime.now(timezone.utc)
     settings.last_test_ok = ok
@@ -121,3 +124,28 @@ def send_test_email(
     db.commit()
     db.refresh(settings)
     return _settings_to_read(settings)
+
+
+@router.get("/log", response_model=list[EmailLogRead])
+def list_email_log(
+    limit: int = Query(200, ge=1, le=1000),
+    _: User = Depends(require_roles(*ADMIN_LIKE_ROLES)),
+    db: Session = Depends(get_db),
+) -> list[EmailLog]:
+    """Tela "Log de e-mails enviados" (pedido do usuário). Mais recentes
+    primeiro; `limit` evita devolver anos de histórico de uma vez só —
+    quem precisar de mais usa `scripts/send_pending_approval_digest.py`
+    direto no banco, ou a gente aumenta isso depois se vier a ser pedido."""
+    return list(db.scalars(select(EmailLog).order_by(EmailLog.created_at.desc()).limit(limit)))
+
+
+@router.delete("/log", status_code=204)
+def clear_email_log(
+    _: User = Depends(require_roles(*ADMIN_LIKE_ROLES)),
+    db: Session = Depends(get_db),
+) -> None:
+    """"opção de limpar o log" (pedido do usuário) — apaga TUDO, sem
+    filtro nem confirmação no backend (a confirmação é responsabilidade
+    da tela, ver EmailLogModal em EmailSettingsPage.jsx)."""
+    db.execute(delete(EmailLog))
+    db.commit()

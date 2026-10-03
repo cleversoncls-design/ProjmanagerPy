@@ -825,6 +825,36 @@ class EmailSettings(Base):
     updated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
 
+class EmailLog(Base):
+    """Registro de toda TENTATIVA de envio de e-mail (sucesso ou falha) —
+    pedido do usuário: "poderia criar um botão para abrir uma tela com o
+    log dos emails enviados? esse log precisa ser gravado [...] na base
+    de dados e que tenha a opção de limpar o log". Escrito de dentro de
+    `send_raw_email` (app/email_service.py), então cobre tanto o botão
+    "Enviar e-mail de teste" quanto todo aviso "de negócio" (agendamento,
+    resumo de aprovações, e os que vierem depois).
+
+    `kind` é string livre (não enum) DE PROPÓSITO: a lista de tipos de
+    aviso ainda vai crescer ("estes são alguns casos, que vão ser
+    incrementados", pedido original do usuário) e um enum do Postgres
+    exige nova migração a cada tipo novo — foi exatamente esse tipo de
+    migração (o enum `email_security` da tabela email_settings) que
+    quebrou em produção por causa de um create_table tentando recriar o
+    tipo; aqui, string simples evita repetir esse problema. Não tem
+    `updated_at`/edição — é só um log de apêndice, apagado por inteiro
+    pelo endpoint DELETE quando o usuário pedir "limpar o log"."""
+
+    __tablename__ = "email_logs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    kind: Mapped[str] = mapped_column(String(50), nullable=False, default="outro")
+    to_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    to_name: Mapped[str | None] = mapped_column(String(255))
+    subject: Mapped[str] = mapped_column(String(500), nullable=False)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+
 class AuditAction(StrEnum):
     CREATE = "CREATE"
     UPDATE = "UPDATE"
