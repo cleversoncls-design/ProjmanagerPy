@@ -1,4 +1,5 @@
 import { formatDate, formatHoursDuration } from '../utils/format'
+import { STATUS_REPORT_CHART_COLORS_SCREEN } from '../utils/labels'
 
 const WIDTH = 600
 const HEIGHT = 170
@@ -22,10 +23,15 @@ function todayUtc() {
  * ponto como tooltip (mesma convenção de DonutChart) — sem lib de gráfico
  * nova neste projeto. `points` vazio (projeto sem datas/horas estimadas o
  * bastante pra ter uma linha de base, ou perfil externo — ver
- * app/routers/status_reports.py) mostra uma mensagem no lugar do SVG. */
-export default function StatusReportBurndownChart({ points, emptyMessage, legendPlanned, legendActual, todayLabel }) {
+ * app/routers/status_reports.py) mostra uma mensagem no lugar do SVG.
+ *
+ * `colors` default usa `var(--...)` (tema da tela); StatusReportPrintSheet
+ * passa hex fixo (`STATUS_REPORT_CHART_COLORS_PRINT`) — reportado pelo
+ * usuário que `var(--...)` não resolve no pipeline de impressão do
+ * navegador (linha/eixos saíam sem cor). */
+export default function StatusReportBurndownChart({ points, emptyMessage, legendPlanned, legendActual, todayLabel, colors = STATUS_REPORT_CHART_COLORS_SCREEN }) {
   if (!points || points.length === 0) {
-    return <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: 0 }}>{emptyMessage}</p>
+    return <p style={{ color: colors.textMuted, fontSize: '12px', margin: 0 }}>{emptyMessage}</p>
   }
 
   const dates = points.map((pt) => new Date(`${pt.date}T00:00:00Z`))
@@ -45,39 +51,39 @@ export default function StatusReportBurndownChart({ points, emptyMessage, legend
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: '14px', marginBottom: '4px', fontSize: '10px', color: 'var(--text-secondary)' }}>
-        <LegendSwatch color="var(--text-muted)" dashed label={legendPlanned} />
-        <LegendSwatch color="var(--series-1)" label={legendActual} />
+      <div style={{ display: 'flex', gap: '14px', marginBottom: '4px', fontSize: '10px', color: colors.textSecondary }}>
+        <LegendSwatch color={colors.textMuted} dashed label={legendPlanned} />
+        <LegendSwatch color={colors.series1} label={legendActual} />
       </div>
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%" style={{ display: 'block', overflow: 'visible' }} preserveAspectRatio="none">
-        <line x1={PAD_LEFT} y1={PAD_TOP + PLOT_H} x2={WIDTH - PAD_RIGHT} y2={PAD_TOP + PLOT_H} stroke="var(--grid)" strokeWidth="1" />
-        <text x={PAD_LEFT - 6} y={PAD_TOP + PLOT_H} textAnchor="end" fontSize="9" fill="var(--text-muted)" dy="3">
+        <line x1={PAD_LEFT} y1={PAD_TOP + PLOT_H} x2={WIDTH - PAD_RIGHT} y2={PAD_TOP + PLOT_H} stroke={colors.grid} strokeWidth="1" />
+        <text x={PAD_LEFT - 6} y={PAD_TOP + PLOT_H} textAnchor="end" fontSize="9" fill={colors.textMuted} dy="3">
           0h
         </text>
-        <text x={PAD_LEFT - 6} y={PAD_TOP} textAnchor="end" fontSize="9" fill="var(--text-muted)" dy="3">
+        <text x={PAD_LEFT - 6} y={PAD_TOP} textAnchor="end" fontSize="9" fill={colors.textMuted} dy="3">
           {Math.round(maxHours)}h
         </text>
         {showToday && (
           <>
-            <line x1={todayX} y1={PAD_TOP} x2={todayX} y2={PAD_TOP + PLOT_H} stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="2 2" />
-            <text x={todayX} y={PAD_TOP - 4} textAnchor="middle" fontSize="9" fill="var(--text-muted)">
+            <line x1={todayX} y1={PAD_TOP} x2={todayX} y2={PAD_TOP + PLOT_H} stroke={colors.textMuted} strokeWidth="1" strokeDasharray="2 2" />
+            <text x={todayX} y={PAD_TOP - 4} textAnchor="middle" fontSize="9" fill={colors.textMuted}>
               {todayLabel}
             </text>
           </>
         )}
-        <path d={plannedPath} fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeDasharray="4 3" strokeLinecap="round" />
-        <path d={actualPath} fill="none" stroke="var(--series-1)" strokeWidth="2" strokeLinecap="round" />
+        <path d={plannedPath} fill="none" stroke={colors.textMuted} strokeWidth="2" strokeDasharray="4 3" strokeLinecap="round" />
+        <path d={actualPath} fill="none" stroke={colors.series1} strokeWidth="2" strokeLinecap="round" />
         {points.map((pt, i) => (
-          <circle key={pt.date} cx={xScale(dates[i])} cy={yScale(Number(pt.actual_remaining_hours))} r="2.5" fill="var(--series-1)">
+          <circle key={pt.date} cx={xScale(dates[i])} cy={yScale(Number(pt.actual_remaining_hours))} r="2.5" fill={colors.series1}>
             <title>
               {formatDate(pt.date)}: {formatHoursDuration(pt.actual_remaining_hours)}
             </title>
           </circle>
         ))}
-        <text x={PAD_LEFT} y={HEIGHT - 6} textAnchor="start" fontSize="9" fill="var(--text-muted)">
+        <text x={PAD_LEFT} y={HEIGHT - 6} textAnchor="start" fontSize="9" fill={colors.textMuted}>
           {formatDate(points[0].date)}
         </text>
-        <text x={WIDTH - PAD_RIGHT} y={HEIGHT - 6} textAnchor="end" fontSize="9" fill="var(--text-muted)">
+        <text x={WIDTH - PAD_RIGHT} y={HEIGHT - 6} textAnchor="end" fontSize="9" fill={colors.textMuted}>
           {formatDate(points[points.length - 1].date)}
         </text>
       </svg>

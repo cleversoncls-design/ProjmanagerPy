@@ -1,3 +1,5 @@
+import { STATUS_REPORT_CHART_COLORS_SCREEN } from '../utils/labels'
+
 /** Barra "bullet" comparando previsto x realizado de uma métrica financeira
  * do Status Report (Custo/Margem) — pedido do usuário: "os indicadores da
  * foto" (o mockup validado no canvas de design mostrava uma barra de
@@ -13,13 +15,27 @@
  * Estilo 100% inline (sem classe Tailwind) de propósito: o mesmo
  * componente é usado tanto na tela (StatusReportsPage) quanto na folha
  * impressa (StatusReportPrintSheet, renderizada via portal no mesmo
- * documento) — inline style garante a mesma renderização nos dois
- * lugares, igual ao padrão já usado em PrintStat/PrintSection ali.
+ * documento). `color` (preenchimento/valor) sempre vem explícito de quem
+ * chama; as demais cores (`colors` — trilho, traço do previsto, textos)
+ * usam `var(--...)` por padrão (tema claro/escuro da tela), mas aceitam
+ * override: reportado pelo usuário, com print da folha impressa, que
+ * `var(--...)` NÃO resolve no pipeline de impressão do navegador (saía
+ * tudo sem cor, só contorno preto) — StatusReportPrintSheet passa
+ * `STATUS_REPORT_CHART_COLORS_PRINT` (hex fixo) pra essa prop.
  *
  * `planned`/`actual` nulos (projeto sem valor vendido/margem planejada —
  * ver build_status_report_snapshot) fazem o componente não renderizar
  * nada: não há previsto pra comparar. */
-export default function StatusReportComparisonBar({ label, planned, actual, formatValue, color, previstoLabel, realizadoLabel }) {
+export default function StatusReportComparisonBar({
+  label,
+  planned,
+  actual,
+  formatValue,
+  color,
+  previstoLabel,
+  realizadoLabel,
+  colors = STATUS_REPORT_CHART_COLORS_SCREEN,
+}) {
   if (planned === null || planned === undefined || actual === null || actual === undefined) return null
   const p = Number(planned)
   const a = Number(actual)
@@ -31,14 +47,14 @@ export default function StatusReportComparisonBar({ label, planned, actual, form
   return (
     <div style={{ marginBottom: '12px' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: '6px', marginBottom: '4px' }}>
-        <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em', color: colors.textMuted }}>
           {label}
         </span>
-        <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+        <span style={{ fontSize: '11px', color: colors.textSecondary }}>
           {previstoLabel} {formatValue(p)} · {realizadoLabel}{' '}
           <strong style={{ color }}>{formatValue(a)}</strong>
           {deltaPct !== null && (
-            <span style={{ color: 'var(--text-muted)' }}>
+            <span style={{ color: colors.textMuted }}>
               {' '}
               ({deltaPct >= 0 ? '+' : ''}
               {deltaPct.toFixed(1)}%)
@@ -46,7 +62,7 @@ export default function StatusReportComparisonBar({ label, planned, actual, form
           )}
         </span>
       </div>
-      <div style={{ position: 'relative', height: '10px', width: '100%', borderRadius: '999px', backgroundColor: 'var(--grid)' }}>
+      <div style={{ position: 'relative', height: '10px', width: '100%', borderRadius: '999px', backgroundColor: colors.grid }}>
         <div
           style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${actualPct}%`, borderRadius: '999px', backgroundColor: color }}
         />
@@ -58,7 +74,7 @@ export default function StatusReportComparisonBar({ label, planned, actual, form
             left: `calc(${plannedPct}% - 1px)`,
             width: '2px',
             height: '16px',
-            backgroundColor: 'var(--text-primary)',
+            backgroundColor: colors.textPrimary,
           }}
         />
       </div>

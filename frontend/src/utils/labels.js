@@ -335,15 +335,57 @@ export const RAG_STATUS_TONE = {
 // cru — usado onde o selo não serve (traço de uma barra SVG, texto de um
 // número) e cor sólida (não o fundo suave de StatusPill) é o que faz
 // sentido. Pedido do usuário: "os indicadores da foto" (mockup tinha barras
-// de Custo/Margem coloridas pelo mesmo semáforo do badge). Mesmas 3
-// variáveis de app/index.css (--status-good/warning/critical) — nunca um
-// hex solto aqui, pra tema claro/escuro continuarem batendo com o resto do
-// app, tela ou impressão (a impressão usa o mesmo documento via portal,
-// então var(--...) resolve igual).
+// de Custo/Margem coloridas pelo mesmo semáforo do badge). SÓ pra tela —
+// ver RAG_STATUS_PRINT_COLOR abaixo pro equivalente da impressão.
 export const RAG_STATUS_CSS_COLOR = {
   GOOD: 'var(--status-good)',
   WARNING: 'var(--status-warning)',
   CRITICAL: 'var(--status-critical)',
+}
+
+// Paleta dos gráficos do Status Report (StatusReportComparisonBar/
+// BurndownChart/GanttMini — ver frontend/src/components/) em duas
+// variantes. SCREEN usa `var(--...)`, acompanhando o tema claro/escuro do
+// app — é o padrão de todo o resto do app (StatusPill, RAG_STATUS_CSS_COLOR
+// acima etc.). PRINT usa hex fixo: a suposição original era que a folha
+// impressa, por ser renderizada via portal no MESMO documento
+// (`window.print()` em StatusReportsPage.jsx), herdaria as mesmas variáveis
+// — só que isso se mostrou falso na prática (reportado pelo usuário com
+// print da folha: todo badge/barra/linha saía sem cor nenhuma, só contorno
+// preto) — aparentemente o pipeline de impressão do Chrome não resolve
+// `var(--...)` (nem `color-mix()`) no documento impresso, por motivo não
+// totalmente claro. Pra impressão, que é sempre fundo branco (não tem "modo
+// escuro" de papel), usa-se direto os valores do tema claro de
+// app/index.css — nunca dependa de `var(--...)` dentro de conteúdo que vai
+// pra StatusReportPrintSheet.jsx.
+export const STATUS_REPORT_CHART_COLORS_SCREEN = {
+  textPrimary: 'var(--text-primary)',
+  textSecondary: 'var(--text-secondary)',
+  textMuted: 'var(--text-muted)',
+  grid: 'var(--grid)',
+  good: 'var(--status-good)',
+  warning: 'var(--status-warning)',
+  critical: 'var(--status-critical)',
+  series1: 'var(--series-1)',
+  series7: 'var(--series-7)',
+}
+
+export const STATUS_REPORT_CHART_COLORS_PRINT = {
+  textPrimary: '#0b0b0b',
+  textSecondary: '#52514e',
+  textMuted: '#898781',
+  grid: '#e1e0d9',
+  good: '#0ca30c',
+  warning: '#fab219',
+  critical: '#d03b3b',
+  series1: '#2a78d6',
+  series7: '#4a3aa7',
+}
+
+export const RAG_STATUS_PRINT_COLOR = {
+  GOOD: STATUS_REPORT_CHART_COLORS_PRINT.good,
+  WARNING: STATUS_REPORT_CHART_COLORS_PRINT.warning,
+  CRITICAL: STATUS_REPORT_CHART_COLORS_PRINT.critical,
 }
 
 // Risco (RiskLevel/RiskStatus em app/models.py) — usados pela primeira vez

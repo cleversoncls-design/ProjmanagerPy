@@ -1,4 +1,5 @@
 import { formatDate } from '../utils/format'
+import { STATUS_REPORT_CHART_COLORS_SCREEN } from '../utils/labels'
 
 const WIDTH = 600
 const ROW_H = 20
@@ -30,15 +31,31 @@ function truncate(text, max) {
  * aparecendo nas tabelas de texto logo abaixo — nada se perde, só o
  * desenho fica incompleto pra ela. Lista ordenada por data e limitada a
  * MAX_ROWS pra não estourar a página impressa; o resto some com uma nota
- * "+N tarefas" (continuam nas tabelas abaixo). */
-export default function StatusReportGanttMini({ tasksDone, tasksNext, periodStart, periodEnd, doneLabel, nextLabel, emptyMessage, moreLabel }) {
+ * "+N tarefas" (continuam nas tabelas abaixo).
+ *
+ * `colors` default usa `var(--...)` (tema da tela); StatusReportPrintSheet
+ * passa hex fixo (`STATUS_REPORT_CHART_COLORS_PRINT`) — reportado pelo
+ * usuário, com print da folha impressa, que o gráfico aparecia todo cinza/
+ * sem cor (`var(--...)` não resolve no pipeline de impressão do
+ * navegador). */
+export default function StatusReportGanttMini({
+  tasksDone,
+  tasksNext,
+  periodStart,
+  periodEnd,
+  doneLabel,
+  nextLabel,
+  emptyMessage,
+  moreLabel,
+  colors = STATUS_REPORT_CHART_COLORS_SCREEN,
+}) {
   const rows = [
     ...tasksDone.filter((t) => t.planned_start_date).map((t) => ({ ...t, kind: 'done' })),
     ...tasksNext.filter((t) => t.planned_start_date).map((t) => ({ ...t, kind: 'next' })),
   ].sort((a, b) => a.planned_start_date.localeCompare(b.planned_start_date))
 
   if (rows.length === 0) {
-    return <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: 0 }}>{emptyMessage}</p>
+    return <p style={{ color: colors.textMuted, fontSize: '12px', margin: 0 }}>{emptyMessage}</p>
   }
 
   const visibleRows = rows.slice(0, MAX_ROWS)
@@ -64,22 +81,22 @@ export default function StatusReportGanttMini({ tasksDone, tasksNext, periodStar
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: '14px', marginBottom: '4px', fontSize: '10px', color: 'var(--text-secondary)' }}>
-        <LegendSwatch color="var(--status-good)" label={doneLabel} />
-        <LegendSwatch color="var(--series-1)" label={nextLabel} />
+      <div style={{ display: 'flex', gap: '14px', marginBottom: '4px', fontSize: '10px', color: colors.textSecondary }}>
+        <LegendSwatch color={colors.good} label={doneLabel} />
+        <LegendSwatch color={colors.series1} label={nextLabel} />
       </div>
       <svg viewBox={`0 0 ${WIDTH} ${height}`} width="100%" style={{ display: 'block', overflow: 'visible' }}>
-        {showToday && <line x1={todayX} y1={0} x2={todayX} y2={height - PAD_BOTTOM} stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="2 2" />}
+        {showToday && <line x1={todayX} y1={0} x2={todayX} y2={height - PAD_BOTTOM} stroke={colors.textMuted} strokeWidth="1" strokeDasharray="2 2" />}
         {visibleRows.map((task, i) => {
           const y = PAD_TOP + i * ROW_H
           const start = new Date(`${task.planned_start_date}T00:00:00Z`)
           const end = task.planned_end_date ? new Date(`${task.planned_end_date}T00:00:00Z`) : start
           const barX = xScale(start)
           const barW = Math.max(xScale(end) - barX, dayWidth * 0.6, 4)
-          const color = task.kind === 'done' ? 'var(--status-good)' : 'var(--series-1)'
+          const color = task.kind === 'done' ? colors.good : colors.series1
           return (
             <g key={task.id}>
-              <text x={2} y={y + ROW_H / 2} dy="3.5" fontSize="9.5" fill="var(--text-secondary)">
+              <text x={2} y={y + ROW_H / 2} dy="3.5" fontSize="9.5" fill={colors.textSecondary}>
                 {truncate(`${task.wbs_code} — ${task.name}`, 24)}
               </text>
               <rect x={barX} y={y + 3} width={barW} height={ROW_H - 10} rx="3" fill={color}>
@@ -91,15 +108,15 @@ export default function StatusReportGanttMini({ tasksDone, tasksNext, periodStar
             </g>
           )
         })}
-        <line x1={PAD_LEFT} y1={height - PAD_BOTTOM + 4} x2={WIDTH - PAD_RIGHT} y2={height - PAD_BOTTOM + 4} stroke="var(--grid)" strokeWidth="1" />
-        <text x={PAD_LEFT} y={height - 4} fontSize="9" fill="var(--text-muted)">
+        <line x1={PAD_LEFT} y1={height - PAD_BOTTOM + 4} x2={WIDTH - PAD_RIGHT} y2={height - PAD_BOTTOM + 4} stroke={colors.grid} strokeWidth="1" />
+        <text x={PAD_LEFT} y={height - 4} fontSize="9" fill={colors.textMuted}>
           {formatDate(new Date(minTime).toISOString().slice(0, 10))}
         </text>
-        <text x={WIDTH - PAD_RIGHT} y={height - 4} fontSize="9" fill="var(--text-muted)" textAnchor="end">
+        <text x={WIDTH - PAD_RIGHT} y={height - 4} fontSize="9" fill={colors.textMuted} textAnchor="end">
           {formatDate(new Date(maxTime).toISOString().slice(0, 10))}
         </text>
       </svg>
-      {hiddenCount > 0 && <p style={{ marginTop: '4px', fontSize: '10px', color: 'var(--text-muted)' }}>{moreLabel(hiddenCount)}</p>}
+      {hiddenCount > 0 && <p style={{ marginTop: '4px', fontSize: '10px', color: colors.textMuted }}>{moreLabel(hiddenCount)}</p>}
     </div>
   )
 }
