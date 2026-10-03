@@ -938,6 +938,25 @@ export const es = {
   'Sugestão calculada automaticamente a partir dos dados do projeto — ajuste livremente antes de salvar.':
     'Sugerencia calculada automáticamente a partir de los datos del proyecto — ajuste libremente antes de guardar.',
 
+  // Redesenho do layout (pedido do usuário: "não vi o status com o layout
+  // que você apresentou anteriormente [...] preciso que esteja igual ao
+  // modelo apresentado anteriormente" — mockup "Interno"/"Cliente"
+  // validado no canvas de design, com marca, barras de previsto x
+  // realizado, burndown e mini-cronograma).
+  'Uso interno — Diretoria e Gerências (não enviar ao cliente)': 'Uso interno — Dirección y Gerencias (no enviar al cliente)',
+  'Compartilhado com o cliente — acesso do Gerente de Projeto': 'Compartido con el cliente — acceso del Gerente de Proyecto',
+  'Status Report — Interno': 'Informe de estado — Interno',
+  'Gerente do projeto': 'Gerente del proyecto',
+  'Dias até o fim do projeto': 'Días hasta el fin del proyecto',
+  'Custo e Margem — Previsto vs. Realizado': 'Costo y Margen — Previsto vs. Realizado',
+  'Burndown — Horas restantes do orçamento': 'Burndown — Horas restantes del presupuesto',
+  'Cronograma — Marcos e tarefas': 'Cronograma — Hitos y tareas',
+  'Completado': 'Completado',
+  'Mitigação': 'Mitigación',
+  'Sem dados suficientes para calcular o burndown.': 'Sin datos suficientes para calcular el burndown.',
+  'Nenhuma tarefa com data para exibir no cronograma.': 'Ninguna tarea con fecha para mostrar en el cronograma.',
+  'tarefa(s) a mais não exibida(s) no gráfico — veja as tabelas abaixo.': 'tarea(s) adicional(es) no mostrada(s) en el gráfico — vea las tablas abajo.',
+
   // --- Configuração de E-mail (pedido do usuário: "processo de envio de
   // emails") — Configurações > E-mail, EmailSettingsPage.jsx ---
   'Configuração de E-mail': 'Configuración de correo electrónico',

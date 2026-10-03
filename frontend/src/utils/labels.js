@@ -331,6 +331,21 @@ export const RAG_STATUS_TONE = {
   CRITICAL: 'critical',
 }
 
+// Mesmas 3 cores de RAG_STATUS_TONE/StatusPill, mas como valor `var(--...)`
+// cru — usado onde o selo não serve (traço de uma barra SVG, texto de um
+// número) e cor sólida (não o fundo suave de StatusPill) é o que faz
+// sentido. Pedido do usuário: "os indicadores da foto" (mockup tinha barras
+// de Custo/Margem coloridas pelo mesmo semáforo do badge). Mesmas 3
+// variáveis de app/index.css (--status-good/warning/critical) — nunca um
+// hex solto aqui, pra tema claro/escuro continuarem batendo com o resto do
+// app, tela ou impressão (a impressão usa o mesmo documento via portal,
+// então var(--...) resolve igual).
+export const RAG_STATUS_CSS_COLOR = {
+  GOOD: 'var(--status-good)',
+  WARNING: 'var(--status-warning)',
+  CRITICAL: 'var(--status-critical)',
+}
+
 // Risco (RiskLevel/RiskStatus em app/models.py) — usados pela primeira vez
 // numa tela (o CRUD já existia no backend, ver app/routers/risks.py, mas
 // sem UI) dentro do Status Report (risks_snapshot).

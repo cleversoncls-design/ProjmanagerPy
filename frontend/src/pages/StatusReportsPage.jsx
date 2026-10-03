@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import * as statusReportsApi from '../api/statusReports'
 import * as projectsApi from '../api/projects'
 import * as usersApi from '../api/users'
+import * as clientsApi from '../api/clients'
 import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import PageHeader from '../components/PageHeader'
@@ -16,10 +17,14 @@ import Button from '../components/Button'
 import Modal from '../components/Modal'
 import StatusReportDeleteModal from '../components/StatusReportDeleteModal'
 import StatusReportPrintSheet from '../components/StatusReportPrintSheet'
+import StatusReportComparisonBar from '../components/StatusReportComparisonBar'
+import StatusReportBurndownChart from '../components/StatusReportBurndownChart'
+import StatusReportGanttMini from '../components/StatusReportGanttMini'
 import { PencilIcon, PrinterIcon, TrashIcon } from '../components/icons'
 import { FormField, Select, TextArea, TextInput } from '../components/FormField'
-import { formatCurrency, formatDate, formatHoursDuration, formatPercent } from '../utils/format'
-import { MANAGEMENT_ROLES, RAG_STATUS_TONE, RISK_LEVEL_TONE, RISK_STATUS_TONE } from '../utils/labels'
+import { formatCurrency, formatDate, formatHoursDuration, formatPercent, daysBetween } from '../utils/format'
+import { MANAGEMENT_ROLES, RAG_STATUS_TONE, RAG_STATUS_CSS_COLOR, RISK_LEVEL_TONE, RISK_STATUS_TONE } from '../utils/labels'
+import resultarLogo from '../assets/resultar-logo-color.png'
 
 const RAG_FIELDS = [
   { key: 'rag_schedule', label: 'Prazo' },
@@ -73,6 +78,7 @@ export default function StatusReportsPage() {
 
   const [projects, setProjects] = useState([])
   const [usersById, setUsersById] = useState({})
+  const [client, setClient] = useState(null)
   const [projectId, setProjectId] = useState('')
   const [reports, setReports] = useState([])
   const [selected, setSelected] = useState(null)
@@ -128,6 +134,22 @@ export default function StatusReportsPage() {
   useEffect(() => loadReports(), [projectId])
 
   const selectedProject = useMemo(() => projects.find((p) => p.id === projectId), [projects, projectId])
+
+  // Nome do cliente pro cabeçalho do relatório (mockup "Interno"/"Cliente"
+  // validado no canvas de design tinha "Cliente: <razão social>") — não
+  // vinha em ProjectSummary, busca à parte, mesmo padrão de
+  // ProjectDetailPage.jsx. Falha silenciosa: sem o nome, o cabeçalho só
+  // deixa de mostrar essa linha.
+  useEffect(() => {
+    if (!selectedProject?.client_id) {
+      setClient(null)
+      return
+    }
+    clientsApi
+      .getClient(selectedProject.client_id)
+      .then(setClient)
+      .catch(() => setClient(null))
+  }, [selectedProject?.client_id])
 
   function updateForm(field) {
     return (event) => setForm((prev) => ({ ...prev, [field]: event.target.value }))
@@ -298,6 +320,9 @@ export default function StatusReportsPage() {
             <StatusReportDetail
               report={selected}
               project={selectedProject}
+              client={client}
+              preparedByName={usersById[selected.prepared_by_id]?.name}
+              managerName={usersById[selectedProject?.manager_id]?.name}
               canWrite={canWrite}
               onEdit={() => openEditForm(selected)}
               onDelete={() => setDeletingReport(selected)}
@@ -396,7 +421,9 @@ export default function StatusReportsPage() {
             <StatusReportPrintSheet
               report={printTarget}
               project={selectedProject}
+              client={client}
               preparedByName={usersById[printTarget.prepared_by_id]?.name}
+              managerName={usersById[selectedProject?.manager_id]?.name}
             />
           </div>,
           document.body,
@@ -405,12 +432,24 @@ export default function StatusReportsPage() {
   )
 }
 
-function StatusReportDetail({ report, project, canWrite, onEdit, onDelete, onPrint, t, labels }) {
+/** Detalhe do Status Report — layout refeito (pedido do usuário depois de
+ * ver a tela real: "não vi o status com o layout que você apresentou
+ * anteriormente [...] preciso que esteja igual ao modelo apresentado
+ * anteriormente") pra bater com o mockup "Interno"/"Cliente" validado no
+ * canvas de design: marca + faixa de audiência no topo, barras de
+ * Custo/Margem previsto x realizado, burndown e um mini-cronograma dos
+ * marcos — além do que a tela já tinha (badges RAG, KPIs, resumo/próximos
+ * passos, semana anterior×próxima, riscos). `hasFinancials` continua
+ * sendo o mesmo sinal de sempre pra saber se é a audiência Interna (o
+ * backend manda os campos financeiros como null pra EXTERNAL_ROLES — ver
+ * app/routers/status_reports.py), nunca uma checagem de role aqui. */
+function StatusReportDetail({ report, project, client, preparedByName, managerName, canWrite, onEdit, onDelete, onPrint, t, labels }) {
   const hasFinancials = report.hours_consumed !== null || report.cost_actual !== null || report.cost_planned !== null
+  const daysToEnd = project?.end_date ? daysBetween(new Date().toISOString().slice(0, 10), project.end_date) : null
+
   return (
     <div className="space-y-4">
       <Card
-        title={`${t('Status Report')} — ${project ? `${project.code} — ${project.name}` : ''}`}
         action={
           <div className="flex gap-1.5">
             <Button type="button" variant="secondary" onClick={onPrint}>
@@ -429,6 +468,42 @@ function StatusReportDetail({ report, project, canWrite, onEdit, onDelete, onPri
           </div>
         }
       >
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] pb-4">
+          <div>
+            <span
+              className="inline-block rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide"
+              style={
+                hasFinancials
+                  ? { backgroundColor: 'color-mix(in srgb, var(--series-7) 16%, transparent)', color: 'var(--series-7)' }
+                  : { backgroundColor: 'color-mix(in srgb, var(--series-1) 16%, transparent)', color: 'var(--series-1)' }
+              }
+            >
+              {hasFinancials ? t('Uso interno — Diretoria e Gerências (não enviar ao cliente)') : t('Compartilhado com o cliente — acesso do Gerente de Projeto')}
+            </span>
+            <p className="mt-2 text-[10px] font-bold uppercase tracking-wide text-[var(--text-muted)]">
+              {hasFinancials ? t('Status Report — Interno') : t('Status Report')}
+            </p>
+            <h2 className="text-lg font-bold text-[var(--text-primary)]">{project ? `${project.code} — ${project.name}` : ''}</h2>
+            {client && <p className="text-xs text-[var(--text-secondary)]">{t('Cliente')}: {client.legal_name}</p>}
+          </div>
+          <div className="flex items-center gap-2">
+            <img src={resultarLogo} alt="" className="h-9 w-9" />
+            <div className="leading-tight">
+              <p className="text-sm font-extrabold tracking-wide text-[var(--text-primary)]">RESULTAR</p>
+              <p className="text-[9px] font-semibold tracking-[0.2em] text-[var(--text-muted)]">SERVICIOS</p>
+            </div>
+          </div>
+        </div>
+
+        <p className="mb-4 text-xs text-[var(--text-muted)]">
+          {t('Período')}: <span className="font-medium text-[var(--text-primary)]">{formatDate(report.period_start)} – {formatDate(report.period_end)}</span>
+          {' · '}
+          {hasFinancials ? t('Preparado por') : t('Gerente do projeto')}:{' '}
+          <span className="font-medium text-[var(--text-primary)]">{(hasFinancials ? preparedByName : managerName) || '—'}</span>
+          {' · '}
+          {t('Criado em')}: <span className="font-medium text-[var(--text-primary)]">{formatDate(report.created_at)}</span>
+        </p>
+
         <div className="mb-4 flex flex-wrap gap-1.5">
           {RAG_FIELDS.map((field) => (
             <StatusPill
@@ -459,10 +534,54 @@ function StatusReportDetail({ report, project, canWrite, onEdit, onDelete, onPri
               />
             </>
           )}
+          {!hasFinancials && daysToEnd !== null && (
+            <StatTile compact label={t('Dias até o fim do projeto')} value={String(daysToEnd)} />
+          )}
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
+        {hasFinancials && (report.cost_planned !== null || report.margin_planned_pct !== null) && (
+          <div className="mt-4 border-t border-[var(--border)] pt-4">
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--text-muted)]">
+              {t('Custo e Margem — Previsto vs. Realizado')}
+            </p>
+            <StatusReportComparisonBar
+              label={t('Custo')}
+              planned={report.cost_planned}
+              actual={report.cost_actual}
+              formatValue={formatCurrency}
+              color={RAG_STATUS_CSS_COLOR[report.rag_cost]}
+              previstoLabel={t('Previsto')}
+              realizadoLabel={t('Realizado')}
+            />
+            <StatusReportComparisonBar
+              label={t('Margem')}
+              planned={report.margin_planned_pct}
+              actual={report.margin_actual_pct}
+              formatValue={formatPercent}
+              color={RAG_STATUS_CSS_COLOR[report.rag_margin]}
+              previstoLabel={t('Previsto')}
+              realizadoLabel={t('Realizado')}
+            />
+          </div>
+        )}
+
+        {hasFinancials && report.burndown.length > 0 && (
+          <div className="mt-4 border-t border-[var(--border)] pt-4">
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-[var(--text-muted)]">
+              {t('Burndown — Horas restantes do orçamento')}
+            </p>
+            <StatusReportBurndownChart
+              points={report.burndown}
+              emptyMessage={t('Sem dados suficientes para calcular o burndown.')}
+              legendPlanned={t('Previsto')}
+              legendActual={t('Real')}
+              todayLabel={t('Hoje')}
+            />
+          </div>
+        )}
+
+        <div className="mt-4 grid grid-cols-1 gap-4 border-t border-[var(--border)] pt-4 md:grid-cols-2">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--page)] p-3">
             <p className="mb-1 text-xs font-bold uppercase tracking-wide text-[var(--text-muted)]">{t('Resumo executivo')}</p>
             <p className="text-sm text-[var(--text-primary)]">{report.executive_summary}</p>
           </div>
@@ -480,6 +599,19 @@ function StatusReportDetail({ report, project, canWrite, onEdit, onDelete, onPri
             <p className="text-sm text-[var(--text-primary)]">{report.next_steps_internal}</p>
           </div>
         )}
+      </Card>
+
+      <Card title={t('Cronograma — Marcos e tarefas')}>
+        <StatusReportGanttMini
+          tasksDone={report.tasks_done}
+          tasksNext={report.tasks_next}
+          periodStart={report.period_start}
+          periodEnd={report.period_end}
+          doneLabel={t('Completado')}
+          nextLabel={t('Previsto')}
+          emptyMessage={t('Nenhuma tarefa com data para exibir no cronograma.')}
+          moreLabel={(n) => `+${n} ${t('tarefa(s) a mais não exibida(s) no gráfico — veja as tabelas abaixo.')}`}
+        />
       </Card>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -528,6 +660,7 @@ function StatusReportDetail({ report, project, canWrite, onEdit, onDelete, onPri
               header: t('Status'),
               render: (row) => <StatusPill label={labels.RISK_STATUS_LABELS[row.status]} tone={RISK_STATUS_TONE[row.status]} />,
             },
+            { key: 'mitigation', header: t('Mitigação'), render: (row) => row.mitigation_plan || '—' },
           ]}
           rows={report.risks_snapshot}
           getRowKey={(row) => row.id}
