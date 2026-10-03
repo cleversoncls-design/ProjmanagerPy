@@ -14,7 +14,7 @@ import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formataddr
+from email.utils import formataddr, formatdate, make_msgid
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -63,6 +63,20 @@ def send_raw_email(
         message["Subject"] = subject
         message["From"] = formataddr((settings.from_name or "", settings.from_email))
         message["To"] = formataddr((to_name or "", to_email))
+        # Pedido do usuário: "os testes estão sendo enviados mas não chegam
+        # aos destinatários" — o SMTP aceitar a mensagem (sem exceção, por
+        # isso o log mostra "Enviado") não garante entrega na caixa de
+        # entrada; a investigação (pasta de Spam/Lixo Eletrônico do
+        # destinatário, painel de "Enviados" do mail.mailo.com à procura de
+        # um bounce, reputação do domínio do relay) precisa ser feita no
+        # servidor real, fora do alcance desta sandbox (sem acesso de rede a
+        # um SMTP de verdade). Mas a mensagem saía sem "Date"/"Message-ID" —
+        # dois cabeçalhos exigidos pela RFC 5322 que, quando ausentes, são
+        # um sinal clássico de spam pra filtros como o do Gmail. Corrigido
+        # aqui porque é uma causa real e comprovável, mesmo que não seja a
+        # única possível.
+        message["Date"] = formatdate(localtime=True)
+        message["Message-ID"] = make_msgid(domain=(settings.from_email.split("@", 1)[-1] or None))
         if text_body:
             message.attach(MIMEText(text_body, "plain", "utf-8"))
         message.attach(MIMEText(html_body, "html", "utf-8"))

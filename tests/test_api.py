@@ -3309,6 +3309,13 @@ def test_email_settings_test_email_sends_via_configured_smtp(client, setup, monk
     sent_instance = _FakeSmtpConnection.instances[0]
     assert sent_instance.logged_in == ("no-reply@exemplo.com", "senha-smtp")
     assert sent_instance.sent[1] == ["destino@exemplo.com"]
+    # Pedido do usuário: "os testes estão sendo enviados mas não chegam aos
+    # destinatários" — Date/Message-ID ausentes (RFC 5322) são um sinal
+    # clássico de spam; ambos precisam estar na mensagem de verdade mandada
+    # pro servidor SMTP, não só "funcionar sem erro".
+    raw_message = sent_instance.sent[2]
+    assert "\nDate: " in raw_message
+    assert "\nMessage-ID: " in raw_message
 
 
 def test_email_settings_test_email_records_failure_without_raising(client, setup, monkeypatch):

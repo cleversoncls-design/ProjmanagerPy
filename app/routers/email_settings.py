@@ -116,6 +116,12 @@ def send_test_email(
         to_name=None,
         subject=translate("E-mail de teste — ProjmanagerPy", user.language),
         html_body=f"<p>{translate('Este é um e-mail de teste da configuração de SMTP do ProjmanagerPy.', user.language)}</p>",
+        # Alternativa em texto puro (pedido do usuário: "os testes estão
+        # sendo enviados mas não chegam aos destinatários") — uma mensagem
+        # só em HTML, sem a parte "text/plain" que todo cliente de e-mail
+        # espera encontrar, é outro sinal clássico que filtros de spam
+        # usam pra pontuar a mensagem.
+        text_body=translate("Este é um e-mail de teste da configuração de SMTP do ProjmanagerPy.", user.language),
         kind="teste",
     )
     settings.last_test_at = datetime.now(timezone.utc)
