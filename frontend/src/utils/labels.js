@@ -367,6 +367,7 @@ export const STATUS_REPORT_CHART_COLORS_SCREEN = {
   warning: 'var(--status-warning)',
   critical: 'var(--status-critical)',
   series1: 'var(--series-1)',
+  series2: 'var(--series-2)',
   series7: 'var(--series-7)',
 }
 
@@ -379,6 +380,7 @@ export const STATUS_REPORT_CHART_COLORS_PRINT = {
   warning: '#fab219',
   critical: '#d03b3b',
   series1: '#2a78d6',
+  series2: '#eb6834',
   series7: '#4a3aa7',
 }
 
@@ -386,6 +388,16 @@ export const RAG_STATUS_PRINT_COLOR = {
   GOOD: STATUS_REPORT_CHART_COLORS_PRINT.good,
   WARNING: STATUS_REPORT_CHART_COLORS_PRINT.warning,
   CRITICAL: STATUS_REPORT_CHART_COLORS_PRINT.critical,
+}
+
+// Equivalente hex-fixo de TASK_TYPE_COLORS (abaixo) pro Gantt nível 1+2 do
+// Status Report (StatusReportGanttMini.jsx) — a tela usa TASK_TYPE_COLORS
+// (var(--...)) normalmente, direto; só a impressão precisa deste mapa
+// (var(--...) não resolve no pipeline de impressão, mesmo motivo de
+// RAG_STATUS_PRINT_COLOR acima).
+export const TASK_TYPE_PRINT_COLOR = {
+  CONSULTING: STATUS_REPORT_CHART_COLORS_PRINT.series1,
+  MANAGEMENT: STATUS_REPORT_CHART_COLORS_PRINT.series2,
 }
 
 // Risco (RiskLevel/RiskStatus em app/models.py) — usados pela primeira vez

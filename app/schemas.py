@@ -912,6 +912,26 @@ class TaskRefSnapshot(BaseModel):
     planned_end_date: date | None = None
 
 
+class GanttLevel2TaskSnapshot(BaseModel):
+    """Uma linha do Gantt (nível 1+2 da EAP) congelado dentro de
+    ProjectStatusReport.gantt_snapshot — ver
+    services._build_gantt_level2_snapshot. `start_date`/`end_date` já vêm
+    resolvidos (rollup de descendentes quando a tarefa tem filhas, ver
+    `_task_rollups`) e `progress_percent` já vem ponderado pelas horas das
+    folhas descendentes (`_task_progress_rollups`) — o frontend só desenha,
+    não recalcula nada disso."""
+
+    id: str
+    wbs_code: str
+    name: str
+    depth: int
+    task_type: TaskType
+    is_milestone: bool
+    start_date: date | None = None
+    end_date: date | None = None
+    progress_percent: Decimal
+
+
 class StatusReportCreate(BaseModel):
     """Formulário de criação — só os campos que o PM preenche; tudo o mais
     (EVM, financeiro, burndown, tarefas, riscos) é calculado no momento da
@@ -994,6 +1014,11 @@ class StatusReportRead(ORMModel):
     margin_actual_pct: Decimal | None
     tasks_done: list[TaskRefSnapshot]
     tasks_next: list[TaskRefSnapshot]
+    # Gantt nível 1+2, congelado (ver docstring de ProjectStatusReport em
+    # app/models.py) — `None` em relatórios criados antes desta
+    # funcionalidade existir (migração 0027). Aparece pros dois perfis —
+    # cronograma, não dado financeiro, mesmo critério de tasks_done/tasks_next.
+    gantt_snapshot: list[GanttLevel2TaskSnapshot] | None = None
     risks_snapshot: list[RiskSnapshot]
     # Burndown — oculto ([]) para EXTERNAL_ROLES.
     burndown: list[BurndownPoint]

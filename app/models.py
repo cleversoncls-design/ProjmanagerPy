@@ -455,6 +455,17 @@ class ProjectStatusReport(Base):
     # string ISO), igual ao padrão já usado em Baseline.snapshot_data.
     tasks_done: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     tasks_next: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    # Gantt (nível 1+2 da EAP, congelado) — pedido do usuário: "imprima uma
+    # imagem do GANTT [...] até o segundo nível [...] respeitando as cores
+    # conforme definido no projeto [...] quando uma atividade estiver
+    # concluída que mude de cor" (ver services._build_gantt_level2_snapshot
+    # e StatusReportGanttMini.jsx, que desenha a partir deste campo).
+    # Nullable (migração 0027, depois da tabela já existir em produção) —
+    # relatório criado ANTES desta funcionalidade simplesmente não tem essa
+    # "foto"; o frontend mostra uma mensagem no lugar do desenho. Aparece
+    # pros dois perfis (interno/cliente) — é cronograma, não dado
+    # financeiro, mesmo critério de tasks_done/tasks_next.
+    gantt_snapshot: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True, default=None)
     risks_snapshot: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     # Burndown (ver services.project_burndown) — só preenchido pro modelo
     # Interno; oculto (None) para EXTERNAL_ROLES na resposta da API.

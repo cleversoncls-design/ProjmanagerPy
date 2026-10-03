@@ -610,12 +610,14 @@ function StatusReportDetail({ report, project, client, preparedByName, managerNa
 
       <Card title={t('Cronograma — Marcos e tarefas')}>
         <StatusReportGanttMini
-          tasksDone={report.tasks_done}
-          tasksNext={report.tasks_next}
+          tasks={report.gantt_snapshot}
           periodStart={report.period_start}
           periodEnd={report.period_end}
-          doneLabel={t('Completado')}
-          nextLabel={t('Previsto')}
+          consultingLabel={t('Consultoria')}
+          managementLabel={t('Gestão')}
+          partialLabel={t('Progresso parcial')}
+          completedLabel={t('Progresso concluído')}
+          milestoneLabel={t('Marco')}
           emptyMessage={t('Nenhuma tarefa com data para exibir no cronograma.')}
           moreLabel={(n) => `+${n} ${t('tarefa(s) a mais não exibida(s) no gráfico — veja as tabelas abaixo.')}`}
         />

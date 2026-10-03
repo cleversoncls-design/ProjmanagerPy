@@ -765,6 +765,137 @@ def _task_rollups(tasks: list[Task], cal: BusinessCalendar) -> dict[str, dict]:
     return rollups
 
 
+def _task_progress_rollups(tasks: list[Task]) -> dict[str, Decimal]:
+    """% concluído de QUALQUER tarefa (folha ou pai), ponderado pelas
+    `estimated_hours` das folhas descendentes — mesmo critério de
+    `_progress_from_tasks` (usado no dashboard/portfólio: tarefa maior pesa
+    mais, cai pra média simples quando nenhuma folha tem horas estimadas),
+    só que por subárvore em vez do projeto inteiro. Tarefa-folha (sem
+    filhas) usa a própria `progress_percentage`, sem ponderação — nada a
+    agregar.
+
+    Necessário pelo mesmo motivo de `_task_rollups` (acima) não usar as
+    colunas próprias de início/fim/horas de uma tarefa-pai: o motor de
+    agendamento NUNCA escreve em `progress_percentage` de uma tarefa-pai —
+    só apontamento de horas em tarefa-FOLHA mexe nela (ver
+    `_apply_task_progress`/`routers/timesheets.py`) — então uma tarefa de
+    2º nível que também é um agrupador da EAP ficaria sempre com 0% "cru",
+    mesmo com as folhas descendentes 100% concluídas. Usado só pelo
+    snapshot do Gantt (nível 1+2) do Status Report — ver
+    `build_status_report_snapshot`/`gantt_snapshot`; o Gantt completo
+    (`GET /schedule`, tela de Tarefas) sempre mostra tarefa-folha, nunca
+    precisa deste agregado."""
+    children_by_parent: dict[str | None, list[Task]] = defaultdict(list)
+    for t in tasks:
+        children_by_parent[t.parent_task_id].append(t)
+
+    memo: dict[str, tuple[Decimal, Decimal, Decimal, int]] = {}
+
+    def resolve(task: Task) -> tuple[Decimal, Decimal, Decimal, int]:
+        """(horas, ponderado, soma_simples, contagem) da subárvore."""
+        if task.id in memo:
+            return memo[task.id]
+        children = children_by_parent.get(task.id, [])
+        if not children:
+            hours = Decimal(task.estimated_hours or 0)
+            progress = Decimal(task.progress_percentage or 0)
+            result = (hours, hours * progress, progress, 1)
+        else:
+            hours = Decimal("0")
+            weighted = Decimal("0")
+            simple_sum = Decimal("0")
+            count = 0
+            for child in children:
+                c_hours, c_weighted, c_simple, c_count = resolve(child)
+                hours += c_hours
+                weighted += c_weighted
+                simple_sum += c_simple
+                count += c_count
+            result = (hours, weighted, simple_sum, count)
+        memo[task.id] = result
+        return result
+
+    percent_by_id: dict[str, Decimal] = {}
+    for t in tasks:
+        hours, weighted, simple_sum, count = resolve(t)
+        if hours > 0:
+            percent_by_id[t.id] = _q(weighted / hours)
+        elif count > 0:
+            percent_by_id[t.id] = _q(simple_sum / count)
+        else:
+            percent_by_id[t.id] = Decimal("0")
+    return percent_by_id
+
+
+def _task_depths(tasks: list[Task]) -> dict[str, int]:
+    """Profundidade de cada tarefa na EAP (0 = 1º nível/raiz, 1 = 2º nível,
+    ...) — mesmo critério de `buildOrderedTasks` no frontend
+    (ProjectDetailPage.jsx), usado aqui pra filtrar o snapshot do Gantt do
+    Status Report em até o 2º nível (depth <= 1, ver
+    `build_status_report_snapshot`/`gantt_snapshot`)."""
+    by_id = {t.id: t for t in tasks}
+    memo: dict[str, int] = {}
+
+    def depth_of(task: Task) -> int:
+        if task.id in memo:
+            return memo[task.id]
+        parent = by_id.get(task.parent_task_id) if task.parent_task_id else None
+        result = depth_of(parent) + 1 if parent else 0
+        memo[task.id] = result
+        return result
+
+    return {t.id: depth_of(t) for t in tasks}
+
+
+def _build_gantt_level2_snapshot(session: Session, project: Project, tasks: list[Task]) -> list[dict]:
+    """Congela, no momento da criação do Status Report, uma "foto" do Gantt
+    do projeto limitada ao 1º+2º nível da EAP (`depth <= 1`) — pedido do
+    usuário, com 2 prints da EAP recolhida manualmente até o 2º nível:
+    "imprima uma imagem do GANTT considerando as informações até o segundo
+    nível de tarefas pai e filhas, em forma recolhida", "respeitando as
+    cores conforme definido no projeto [...] quando uma atividade estiver
+    concluída que mude de cor". Confirmado com o usuário: fixo em nível 2
+    (nunca os filhos de 3º nível em diante) e CONGELADO junto com o resto
+    do "fechamento" (ver docstring de `ProjectStatusReport`) — reabrir um
+    relatório antigo mostra o MESMO Gantt daquela época, mesmo que o
+    projeto tenha mudado depois (tarefa renomeada/reagendada/apagada).
+
+    As cores (por `task_type`) e a lógica de "muda de cor quando
+    concluída" (laranja parcial/verde 100%) já existem no Gantt completo
+    (`GanttTab`/`handleExportPng` em ProjectDetailPage.jsx) e são
+    reaproveitadas sem mudança nenhuma — aqui só é preciso congelar os
+    DADOS; o desenho (cores, barra, legenda) é feito no frontend a partir
+    deste snapshot (ver `StatusReportGanttMini.jsx`)."""
+    cal = calendar_for_project(session, project)
+    rollups = _task_rollups(tasks, cal)
+    progress_by_id = _task_progress_rollups(tasks)
+    depth_by_id = _task_depths(tasks)
+    ordered = order_tasks_hierarchically(tasks)
+
+    snapshot = []
+    for t in ordered:
+        depth = depth_by_id.get(t.id, 0)
+        if depth > 1:
+            continue
+        rollup = rollups.get(t.id)
+        start = rollup["start"] if rollup else t.planned_start_date
+        end = rollup["end"] if rollup else t.planned_end_date
+        snapshot.append(
+            {
+                "id": t.id,
+                "wbs_code": t.wbs_code,
+                "name": t.name,
+                "depth": depth,
+                "task_type": t.task_type.value,
+                "is_milestone": t.is_milestone,
+                "start_date": start.isoformat() if start else None,
+                "end_date": end.isoformat() if end else None,
+                "progress_percent": str(progress_by_id.get(t.id, Decimal("0"))),
+            }
+        )
+    return snapshot
+
+
 def _natural_sort_key(text: str) -> tuple:
     """Chave de comparação "numérica por trecho" pra strings tipo WBS
     (ex.: "1.2" < "1.10", não o contrário como daria a comparação de string
@@ -1480,6 +1611,12 @@ def build_status_report_snapshot(session: Session, project_id: str, *, period_st
         for point in project_burndown(session, project_id)
     ]
 
+    # Gantt (nível 1+2, congelado) — pedido do usuário: "imprima uma imagem
+    # do GANTT [...] até o segundo nível [...] respeitando as cores
+    # conforme definido no projeto [...] quando uma atividade estiver
+    # concluída que mude de cor" — ver `_build_gantt_level2_snapshot`.
+    gantt_snapshot = _build_gantt_level2_snapshot(session, project, tasks)
+
     return {
         "schedule_actual_pct": evm["percent_complete"],
         "schedule_planned_pct": evm["planned_percent_complete"],
@@ -1491,6 +1628,7 @@ def build_status_report_snapshot(session: Session, project_id: str, *, period_st
         "margin_actual_pct": financials["real_margin_percentage"],
         "tasks_done": tasks_done,
         "tasks_next": tasks_next,
+        "gantt_snapshot": gantt_snapshot,
         "risks_snapshot": risks_snapshot,
         "burndown": burndown,
     }

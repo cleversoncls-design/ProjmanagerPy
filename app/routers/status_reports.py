@@ -64,6 +64,7 @@ def _serialize(report: ProjectStatusReport, user: User) -> StatusReportRead:
             "margin_actual_pct": None if external else report.margin_actual_pct,
             "tasks_done": report.tasks_done,
             "tasks_next": report.tasks_next,
+            "gantt_snapshot": report.gantt_snapshot,
             "risks_snapshot": report.risks_snapshot,
             "burndown": [] if external else report.burndown,
         }

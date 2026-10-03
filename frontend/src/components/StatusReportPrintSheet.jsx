@@ -1,6 +1,6 @@
 import { useLanguage } from '../context/LanguageContext'
 import { formatCurrency, formatDate, formatHoursDuration, formatPercent, daysBetween } from '../utils/format'
-import { RAG_STATUS_PRINT_COLOR, STATUS_REPORT_CHART_COLORS_PRINT as C } from '../utils/labels'
+import { RAG_STATUS_PRINT_COLOR, STATUS_REPORT_CHART_COLORS_PRINT as C, TASK_TYPE_PRINT_COLOR } from '../utils/labels'
 import StatusReportComparisonBar from './StatusReportComparisonBar'
 import StatusReportBurndownChart from './StatusReportBurndownChart'
 import StatusReportGanttMini from './StatusReportGanttMini'
@@ -171,15 +171,18 @@ export default function StatusReportPrintSheet({ report, project, client, prepar
           {t('Cronograma — Marcos e tarefas')}
         </h2>
         <StatusReportGanttMini
-          tasksDone={report.tasks_done}
-          tasksNext={report.tasks_next}
+          tasks={report.gantt_snapshot}
           periodStart={report.period_start}
           periodEnd={report.period_end}
-          doneLabel={t('Completado')}
-          nextLabel={t('Previsto')}
+          consultingLabel={t('Consultoria')}
+          managementLabel={t('Gestão')}
+          partialLabel={t('Progresso parcial')}
+          completedLabel={t('Progresso concluído')}
+          milestoneLabel={t('Marco')}
           emptyMessage={t('Nenhuma tarefa com data para exibir no cronograma.')}
           moreLabel={(n) => `+${n} ${t('tarefa(s) a mais não exibida(s) no gráfico — veja as tabelas abaixo.')}`}
           colors={C}
+          taskTypeColors={TASK_TYPE_PRINT_COLOR}
         />
       </div>
 
