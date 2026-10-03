@@ -46,7 +46,17 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("smtp_host", sa.String(255), nullable=False),
         sa.Column("smtp_port", sa.Integer(), nullable=False, server_default="587"),
-        sa.Column("security", email_security_enum, nullable=False, server_default="STARTTLS"),
+        sa.Column(
+            "security",
+            # create_type=False de propósito: o tipo já foi criado acima,
+            # na linha `email_security_enum.create(bind, checkfirst=True)`
+            # — sem isso, o create_table tenta criar o enum de novo e
+            # quebra com "DuplicateObject: type already exists" (bug visto
+            # em produção ao aplicar esta migração).
+            sa.Enum("NONE", "STARTTLS", "SSL", name="email_security", create_type=False),
+            nullable=False,
+            server_default="STARTTLS",
+        ),
         sa.Column("smtp_username", sa.String(255), nullable=True),
         sa.Column("smtp_password_encrypted", sa.Text(), nullable=True),
         sa.Column("from_email", sa.String(255), nullable=False),
