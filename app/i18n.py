@@ -99,6 +99,7 @@ _ES: dict[str, str] = {
     ),
     "O usuário Administrador não pode ser excluído": "El usuario Administrador no se puede eliminar",
     "Risco não encontrado": "Riesgo no encontrado",
+    "Status report não encontrado": "Informe de estado no encontrado",
     "Solicitação de mudança não encontrada": "Solicitud de cambio no encontrada",
     "Solicitação não encontrada": "Solicitud no encontrada",
     "Somente o PM do cliente pode solicitar um novo projeto": "Solo el PM del cliente puede solicitar un nuevo proyecto",
@@ -196,6 +197,7 @@ _ES: dict[str, str] = {
     "parent_task_id precisa ser uma tarefa do mesmo projeto": "parent_task_id debe ser una tarea del mismo proyecto",
     "schedule_id exige project_id ou task_id": "schedule_id requiere project_id o task_id",
     "start precisa ser anterior ou igual a end": "start debe ser anterior o igual a end",
+    "period_start precisa ser anterior ou igual a period_end": "period_start debe ser anterior o igual a period_end",
     "status precisa ser APPROVED ou REJECTED": "status debe ser APPROVED o REJECTED",
 }
 

@@ -16,6 +16,7 @@ from .models import (
     IntakeStatus,
     Language,
     ProjectStatus,
+    RagStatus,
     ResourceFunction,
     ReworkReason,
     RiskLevel,
@@ -876,6 +877,93 @@ class ProjectReportResponse(BaseModel):
     # Ver comentário em ProjectDetail.financials — mesmo motivo.
     financials: dict[str, Decimal | None] | None = None
     financials_by_task_type: dict[str, dict[str, Decimal]] | None = None
+    burndown: list[BurndownPoint]
+
+
+# ---------------------------------------------------------------------------
+# Status Report (pedido do usuário: "pode implementar os 2 modelos e
+# colocar na opção de relatórios") — ver docstring de ProjectStatusReport
+# em app/models.py.
+# ---------------------------------------------------------------------------
+
+
+class RiskSnapshot(BaseModel):
+    """Um risco "congelado" dentro de ProjectStatusReport.risks_snapshot —
+    mesmos campos de RiskRead, mas copiados (não uma referência viva à
+    tabela `risks`, que pode mudar depois do relatório salvo)."""
+
+    id: str
+    description: str
+    probability: RiskLevel
+    impact: RiskLevel
+    mitigation_plan: str | None = None
+    status: RiskStatus
+
+
+class TaskRefSnapshot(BaseModel):
+    """Referência leve a uma tarefa dentro de tasks_done/tasks_next —
+    só o que a tela do Status Report precisa mostrar (ver mockup "Semana
+    anterior × próxima semana")."""
+
+    id: str
+    wbs_code: str
+    name: str
+    planned_start_date: date | None = None
+    planned_end_date: date | None = None
+
+
+class StatusReportCreate(BaseModel):
+    """Formulário de criação — só os campos que o PM preenche; tudo o mais
+    (EVM, financeiro, burndown, tarefas, riscos) é calculado no momento da
+    criação (ver services.build_status_report_snapshot) e nunca recebido
+    do cliente HTTP."""
+
+    period_start: date
+    period_end: date
+    rag_schedule: RagStatus
+    rag_cost: RagStatus
+    rag_margin: RagStatus
+    rag_scope: RagStatus
+    rag_risk: RagStatus
+    executive_summary: str = Field(min_length=1)
+    next_steps_client: str = Field(min_length=1)
+    next_steps_internal: str | None = None
+
+
+class StatusReportRead(ORMModel):
+    """Resposta de um Status Report. Os campos financeiros/burndown são
+    `None` (nunca um valor zerado fajuto) quando o perfil de quem pediu é
+    EXTERNAL_ROLES — ver app/routers/status_reports.py, mesmo critério já
+    usado em ProjectReportResponse.financials."""
+
+    id: str
+    project_id: str
+    period_start: date
+    period_end: date
+    prepared_by_id: str | None
+    created_at: datetime
+    rag_schedule: RagStatus
+    rag_cost: RagStatus
+    rag_margin: RagStatus
+    rag_scope: RagStatus
+    rag_risk: RagStatus
+    executive_summary: str
+    next_steps_client: str
+    # Oculto (None) para EXTERNAL_ROLES — "não compartilhadas com o cliente".
+    next_steps_internal: str | None
+    schedule_actual_pct: Decimal
+    schedule_planned_pct: Decimal
+    # Financeiro — oculto (None) para EXTERNAL_ROLES.
+    hours_consumed: Decimal | None
+    hours_budgeted: Decimal | None
+    cost_planned: Decimal | None
+    cost_actual: Decimal | None
+    margin_planned_pct: Decimal | None
+    margin_actual_pct: Decimal | None
+    tasks_done: list[TaskRefSnapshot]
+    tasks_next: list[TaskRefSnapshot]
+    risks_snapshot: list[RiskSnapshot]
+    # Burndown — oculto ([]) para EXTERNAL_ROLES.
     burndown: list[BurndownPoint]
 
 

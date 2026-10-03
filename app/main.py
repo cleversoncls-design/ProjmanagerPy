@@ -26,6 +26,7 @@ from .routers import (
     resources,
     risks,
     schedules,
+    status_reports,
     task_groups,
     tasks,
     timesheets,
@@ -117,3 +118,4 @@ app.include_router(changes.router)
 app.include_router(baselines.router)
 app.include_router(audit.router)
 app.include_router(reports.router)
+app.include_router(status_reports.router)

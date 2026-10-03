@@ -76,6 +76,16 @@ export const DASHBOARD_ROLES = ['ADMIN', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR']
 // somente leitura (ver require_project_access em app/deps.py).
 export const PROJECTS_VISIBLE_ROLES = ['ADMIN', 'INTERNAL_PM', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR', 'CLIENT_PM']
 
+// Relatórios: pedido do usuário ("pode implementar os 2 modelos e colocar
+// na opção de relatorios" — Status Report Interno/Cliente, depois dos
+// mockups validados no canvas de design) — PM do cliente passou a ter
+// acesso ao menu "Relatórios" pela primeira vez, mas só enxerga o Status
+// Report do próprio projeto (ver ReportsIndexPage.jsx), nunca "Horas por
+// tipo" (que continua só MANAGEMENT_ROLES — expõe horas/ausência de TODOS
+// os recursos da empresa). Backend equivalente: EXTERNAL_ROLES em
+// app/deps.py tem leitura normal em GET /projects/{id}/status-reports.
+export const STATUS_REPORT_VISIBLE_ROLES = ['ADMIN', 'INTERNAL_PM', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR', 'CLIENT_PM']
+
 // Primeira tela de cada perfil ao logar (ou ao cair em "/" depois de ser
 // barrado por ProtectedRoute em alguma rota) — precisa ser uma rota que o
 // próprio perfil tenha acesso, senão vira redirecionamento em loop.
@@ -302,6 +312,48 @@ export const STATUS_DOT_LABELS = {
   red: 'Atrasada',
 }
 
+// Semáforo RAG do Status Report (ver RagStatus em app/models.py) — os 5
+// indicadores (Prazo/Custo/Margem/Escopo/Risco) dos mockups "Interno" e
+// "Cliente" validados no canvas de design.
+export const RAG_STATUS_LABELS = {
+  GOOD: 'No prazo',
+  WARNING: 'Atenção',
+  CRITICAL: 'Crítico',
+}
+
+export const RAG_STATUS_TONE = {
+  GOOD: 'good',
+  WARNING: 'warning',
+  CRITICAL: 'critical',
+}
+
+// Risco (RiskLevel/RiskStatus em app/models.py) — usados pela primeira vez
+// numa tela (o CRUD já existia no backend, ver app/routers/risks.py, mas
+// sem UI) dentro do Status Report (risks_snapshot).
+export const RISK_LEVEL_LABELS = {
+  LOW: 'Baixa',
+  MED: 'Média',
+  HIGH: 'Alta',
+}
+
+export const RISK_LEVEL_TONE = {
+  LOW: 'good',
+  MED: 'warning',
+  HIGH: 'critical',
+}
+
+export const RISK_STATUS_LABELS = {
+  OPEN: 'Aberto',
+  MITIGATED: 'Mitigado',
+  CLOSED: 'Fechado',
+}
+
+export const RISK_STATUS_TONE = {
+  OPEN: 'critical',
+  MITIGATED: 'warning',
+  CLOSED: 'good',
+}
+
 // --- Versões traduzidas dos rótulos acima (para o idioma da interface) ----
 // As constantes exportadas acima continuam sendo o texto em Português
 // (usado como chave de tradução em toda a base — ver i18n/translations.js).
@@ -333,6 +385,9 @@ export function getLabels(lang) {
     DEPENDENCY_TYPE_LABELS: translateMap(DEPENDENCY_TYPE_LABELS, lang),
     DEPENDENCY_TYPE_SHORT: translateMap(DEPENDENCY_TYPE_SHORT, lang),
     STATUS_DOT_LABELS: translateMap(STATUS_DOT_LABELS, lang),
+    RAG_STATUS_LABELS: translateMap(RAG_STATUS_LABELS, lang),
+    RISK_LEVEL_LABELS: translateMap(RISK_LEVEL_LABELS, lang),
+    RISK_STATUS_LABELS: translateMap(RISK_STATUS_LABELS, lang),
     WEEKDAY_LABELS: WEEKDAY_LABELS.map((day) => translate(lang, day)),
     TIMESHEET_STATUS_LABELS: translateMap(TIMESHEET_STATUS_LABELS, lang),
     ABSENCE_TYPE_LABELS: translateMap(ABSENCE_TYPE_LABELS, lang),

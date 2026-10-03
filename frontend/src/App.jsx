@@ -20,8 +20,9 @@ import TimesheetApprovalsPage from './pages/TimesheetApprovalsPage'
 import ServiceOrdersPage from './pages/ServiceOrdersPage'
 import ReportsIndexPage from './pages/ReportsIndexPage'
 import HoursBreakdownReportPage from './pages/HoursBreakdownReportPage'
+import StatusReportsPage from './pages/StatusReportsPage'
 import NoAccessPage from './pages/NoAccessPage'
-import { ADMIN_LIKE_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECTS_VISIBLE_ROLES } from './utils/labels'
+import { ADMIN_LIKE_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECTS_VISIBLE_ROLES, STATUS_REPORT_VISIBLE_ROLES } from './utils/labels'
 
 export default function App() {
   return (
@@ -72,8 +73,19 @@ export default function App() {
                     <Route path="/calendars" element={<CalendarsPage />} />
                     <Route path="/task-groups" element={<TaskGroupsPage />} />
                     <Route path="/task-groups/:groupId" element={<TaskGroupDetailPage />} />
-                    <Route path="/reports" element={<ReportsIndexPage />} />
                     <Route path="/reports/hours-breakdown" element={<HoursBreakdownReportPage />} />
+                  </Route>
+
+                  {/* Status Report (pedido do usuário: "pode implementar os
+                      2 modelos e colocar na opção de relatorios") — PM do
+                      cliente ganhou acesso ao índice de Relatórios e ao
+                      Status Report pela primeira vez (ver
+                      STATUS_REPORT_VISIBLE_ROLES em utils/labels.js), mas
+                      continua sem "Horas por tipo" acima, que fica só com
+                      MANAGEMENT_ROLES. */}
+                  <Route element={<ProtectedRoute roles={STATUS_REPORT_VISIBLE_ROLES} />}>
+                    <Route path="/reports" element={<ReportsIndexPage />} />
+                    <Route path="/reports/status-report" element={<StatusReportsPage />} />
                   </Route>
                 </Route>
               </Route>

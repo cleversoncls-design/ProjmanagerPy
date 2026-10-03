@@ -212,6 +212,23 @@ class RiskStatus(StrEnum):
     CLOSED = "CLOSED"
 
 
+class RagStatus(StrEnum):
+    """Semáforo (verde/amarelo/vermelho) usado nos 5 indicadores do Status
+    Report (prazo, custo, margem, escopo, risco) — pedido do usuário: "2
+    modelos de status report" baseados nos mockups já validados (badges
+    "No prazo"/"Atenção"/"Atrasado" etc. do canvas de design). Só 3
+    valores, fixo — por isso `ProjectStatusReport` abaixo guarda estes como
+    `String` simples (não enum do Postgres), mesmo critério já usado em
+    `EmailLog.kind`: evita repetir o bug de enum duplicado da migração
+    0024 (ver alembic/versions/0024_email_settings.py), e aqui nem seria
+    necessário por não ter previsão de crescer, mas o padrão String já
+    estabelecido no projeto evita qualquer risco à toa."""
+
+    GOOD = "GOOD"
+    WARNING = "WARNING"
+    CRITICAL = "CRITICAL"
+
+
 class ChangeStatus(StrEnum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
@@ -366,6 +383,85 @@ class Baseline(Base):
     version_name: Mapped[str] = mapped_column(String(100), nullable=False)
     snapshot_data: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ProjectStatusReport(Base):
+    """Status Report por período (pedido do usuário: "pode implementar os
+    2 modelos e colocar na opção de relatórios", depois dos mockups
+    visuais no canvas de design — modelos "Interno"/diretoria-gerências e
+    "Cliente"/gerente de projeto do cliente). Cada linha é um "fechamento"
+    congelado — como uma Baseline, mas do panorama do período inteiro, não
+    só das tarefas: uma vez salvo, os números não mudam mesmo que o
+    projeto continue evoluindo depois (é o que permite reabrir um relatório
+    antigo e ver exatamente o que foi reportado naquela data, mesmo que
+    get_db/services já tenham dados mais novos).
+
+    Campos calculados automaticamente na criação (ver
+    services.build_status_report_snapshot) a partir de EVM
+    (`services.project_evm`), financeiro (`services.project_financials`),
+    burndown (`services.project_burndown`) e das tarefas/riscos do projeto
+    — nunca recalculados depois. Campos narrativos (resumo, próximos
+    passos) são digitados pelo PM ao criar.
+
+    Dois perfis de leitura da MESMA linha, nunca duas linhas separadas:
+    perfil externo (CLIENT_PM) recebe os campos financeiros
+    (hours_consumed/hours_budgeted/cost_planned/cost_actual/
+    margin_planned_pct/margin_actual_pct/burndown) como `None` na resposta
+    da API (ver app/routers/status_reports.py, mesmo critério já usado em
+    GET /projects/{id}/report para `financials`) — nunca mais um valor
+    "zerado" fajuto, que seria indistinguível de um resultado real.
+
+    `rag_*`/risks_snapshot usam `String`/`JSON` (nunca um enum do Postgres
+    novo) — ver docstring de `RagStatus` acima."""
+
+    __tablename__ = "project_status_reports"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+    prepared_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+
+    # RAG (semáforo) — ver RagStatus acima. String simples, validado pelo
+    # schema Pydantic (StatusReportCreate), não por constraint de banco.
+    rag_schedule: Mapped[str] = mapped_column(String(12), nullable=False)
+    rag_cost: Mapped[str] = mapped_column(String(12), nullable=False)
+    rag_margin: Mapped[str] = mapped_column(String(12), nullable=False)
+    rag_scope: Mapped[str] = mapped_column(String(12), nullable=False)
+    rag_risk: Mapped[str] = mapped_column(String(12), nullable=False)
+
+    executive_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    # Compartilhado com o cliente (vai para os dois modelos/audiências).
+    next_steps_client: Mapped[str] = mapped_column(Text, nullable=False)
+    # "Ações internas (não compartilhadas com o cliente)" do modelo Interno
+    # — nunca aparece na resposta da API para EXTERNAL_ROLES.
+    next_steps_internal: Mapped[str | None] = mapped_column(Text)
+
+    # --- Snapshot calculado (ver services.build_status_report_snapshot) ---
+    schedule_actual_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    schedule_planned_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    # Campos financeiros — todos nullable (projeto pode não ter horas
+    # orçadas/valor vendido ainda) E todos ocultados para EXTERNAL_ROLES na
+    # resposta da API (ver docstring da classe).
+    hours_consumed: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    hours_budgeted: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    cost_planned: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    cost_actual: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    margin_planned_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    margin_actual_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+
+    # Listas congeladas no momento da criação (ver docstring da classe) —
+    # cada item é um dict simples (chaves em string, datas/decimais como
+    # string ISO), igual ao padrão já usado em Baseline.snapshot_data.
+    tasks_done: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    tasks_next: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    risks_snapshot: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    # Burndown (ver services.project_burndown) — só preenchido pro modelo
+    # Interno; oculto (None) para EXTERNAL_ROLES na resposta da API.
+    burndown: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+
+    project: Mapped[Project] = relationship()
+    prepared_by: Mapped[User | None] = relationship()
 
 
 class Task(Base):

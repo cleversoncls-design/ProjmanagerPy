@@ -1,27 +1,40 @@
 import { Link } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import PageHeader from '../components/PageHeader'
 import { BarChartIcon, ChevronRightIcon } from '../components/icons'
+import { MANAGEMENT_ROLES } from '../utils/labels'
 
-/** Índice do menu "Relatórios" (pedido do usuário) — por enquanto só um
- * card (Horas por tipo), pensado pra receber mais relatórios depois sem
- * precisar redesenhar nada: cada novo relatório é só mais uma entrada em
- * REPORTS abaixo. */
+/** Índice do menu "Relatórios" (pedido do usuário) — cada novo relatório é
+ * só mais uma entrada em REPORTS abaixo. "Horas por tipo" expõe horas/
+ * ausência de TODOS os recursos da empresa — continua só MANAGEMENT_ROLES.
+ * "Status Report" (pedido do usuário: "pode implementar os 2 modelos e
+ * colocar na opção de relatorios") é o primeiro relatório desta tela que
+ * o PM do cliente também enxerga — escopado ao próprio projeto, sem dado
+ * financeiro (ver StatusReportsPage.jsx/app/routers/status_reports.py). */
 const REPORTS = [
   {
     to: '/reports/hours-breakdown',
     title: 'Horas por tipo (Projeto, Traslado e Ausência)',
     description: 'Totais da empresa e por consultor — horas de projeto por cliente, Traslado e cada tipo de ausência, num período.',
+    roles: MANAGEMENT_ROLES,
+  },
+  {
+    to: '/reports/status-report',
+    title: 'Status Report',
+    description: 'Fechamento do período por projeto — indicadores, cronograma, riscos e próximos passos.',
   },
 ]
 
 export default function ReportsIndexPage() {
+  const { user } = useAuth()
   const { t } = useLanguage()
+  const visibleReports = REPORTS.filter((report) => !report.roles || report.roles.includes(user?.role))
   return (
     <div>
       <PageHeader title={t('Relatórios')} subtitle={t('Escolha um relatório para abrir.')} />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {REPORTS.map((report) => (
+        {visibleReports.map((report) => (
           <Link
             key={report.to}
             to={report.to}

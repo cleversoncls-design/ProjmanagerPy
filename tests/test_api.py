@@ -1370,6 +1370,119 @@ def test_risk_matrix_endpoint_counts_project_risks(client, setup):
     assert cross_client.status_code == 403
 
 
+def _status_report_payload(**overrides) -> dict:
+    payload = {
+        "period_start": "2026-08-01",
+        "period_end": "2026-08-15",
+        "rag_schedule": "GOOD",
+        "rag_cost": "WARNING",
+        "rag_margin": "GOOD",
+        "rag_scope": "GOOD",
+        "rag_risk": "WARNING",
+        "executive_summary": "Projeto avançando dentro do previsto, com atenção ao custo.",
+        "next_steps_client": "Validar entrega da fase 2 até o fim do mês.",
+        "next_steps_internal": "Negociar horas extras com o consultor X.",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_status_report_create_restricted_to_management_roles(client, setup):
+    """Pedido do usuário: "pode implementar os 2 modelos e colocar na
+    opção de relatorios" — quem fecha o período é a gerência interna
+    (MANAGEMENT_ROLES), nunca Consultor nem perfil externo."""
+    project_id = setup["project_a"].id
+
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    denied = client.post(
+        f"/projects/{project_id}/status-reports", json=_status_report_payload(), headers=consultant_headers
+    )
+    assert denied.status_code == 403
+
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    denied_external = client.post(
+        f"/projects/{project_id}/status-reports", json=_status_report_payload(), headers=external_headers
+    )
+    assert denied_external.status_code == 403
+
+    allowed = client.post(
+        f"/projects/{project_id}/status-reports", json=_status_report_payload(), headers=setup["admin_headers"]
+    )
+    assert allowed.status_code == 201
+    body = allowed.json()
+    assert body["project_id"] == project_id
+    assert body["rag_cost"] == "WARNING"
+    assert body["prepared_by_id"] == setup["admin"].id
+    assert body["hours_consumed"] is not None
+    assert body["next_steps_internal"] == "Negociar horas extras com o consultor X."
+
+
+def test_status_report_hides_financials_and_internal_notes_for_external_role(client, setup):
+    """Mesmo critério de GET /projects/{id}/report (financials=None para
+    EXTERNAL_ROLES): os campos financeiros/burndown/next_steps_internal
+    do Status Report viram None/[] pro gerente de projeto do cliente,
+    nunca um valor zerado fajuto — e tasks_done/tasks_next/risks_snapshot
+    continuam aparecendo (os dois mockups mostram essas seções)."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+
+    client.patch(f"/projects/{project_id}", json={"start_date": "2026-08-01", "end_date": "2026-08-15"}, headers=admin_headers)
+    client.post(
+        f"/projects/{project_id}/tasks",
+        json={"name": "Entrega", "wbs_code": "1", "estimated_hours": "10", "planned_end_date": "2026-08-10"},
+        headers=admin_headers,
+    )
+    client.post(
+        f"/projects/{project_id}/risks",
+        json={"description": "Atraso de fornecedor", "probability": "HIGH", "impact": "HIGH"},
+        headers=admin_headers,
+    )
+
+    created = client.post(
+        f"/projects/{project_id}/status-reports", json=_status_report_payload(), headers=admin_headers
+    )
+    assert created.status_code == 201
+    report_id = created.json()["id"]
+
+    internal_list = client.get(f"/projects/{project_id}/status-reports", headers=admin_headers)
+    assert internal_list.status_code == 200
+    internal_body = internal_list.json()[0]
+    assert internal_body["hours_consumed"] is not None or internal_body["hours_budgeted"] is not None
+    assert internal_body["next_steps_internal"] == "Negociar horas extras com o consultor X."
+    assert len(internal_body["risks_snapshot"]) == 1
+
+    external_headers = auth_headers(client, setup["client_pm_a"].email)
+    external_detail = client.get(f"/projects/{project_id}/status-reports/{report_id}", headers=external_headers)
+    assert external_detail.status_code == 200
+    external_body = external_detail.json()
+    assert external_body["hours_consumed"] is None
+    assert external_body["hours_budgeted"] is None
+    assert external_body["cost_planned"] is None
+    assert external_body["cost_actual"] is None
+    assert external_body["margin_planned_pct"] is None
+    assert external_body["margin_actual_pct"] is None
+    assert external_body["burndown"] == []
+    assert external_body["next_steps_internal"] is None
+    assert external_body["next_steps_client"] == "Validar entrega da fase 2 até o fim do mês."
+    assert len(external_body["risks_snapshot"]) == 1
+
+    cross_client_headers = auth_headers(client, setup["client_pm_a"].email)
+    cross_client = client.get(f"/projects/{setup['project_b'].id}/status-reports", headers=cross_client_headers)
+    assert cross_client.status_code == 403
+
+
+def test_status_report_detail_404_for_wrong_project(client, setup):
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    created = client.post(
+        f"/projects/{project_id}/status-reports", json=_status_report_payload(), headers=admin_headers
+    )
+    report_id = created.json()["id"]
+
+    wrong_project = client.get(f"/projects/{setup['project_b'].id}/status-reports/{report_id}", headers=admin_headers)
+    assert wrong_project.status_code == 404
+
+
 def test_velocity_endpoint_requires_project_id_for_external_role(client, setup):
     external_headers = auth_headers(client, setup["client_pm_a"].email)
     missing_project = client.get("/reports/velocity", headers=external_headers)

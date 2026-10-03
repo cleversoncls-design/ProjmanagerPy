@@ -1378,6 +1378,121 @@ def project_burndown(session: Session, project_id: str) -> list[dict]:
     return points
 
 
+def build_status_report_snapshot(session: Session, project_id: str, *, period_start: date, period_end: date) -> dict:
+    """Monta o "fechamento" congelado de um Status Report (pedido do
+    usuário: "pode implementar os 2 modelos e colocar na opção de
+    relatórios") — reaproveita os cálculos já existentes (`project_evm`,
+    `project_financials`, `project_burndown`) em vez de duplicar lógica, e
+    resolve só o que ainda não existia: tarefas concluídas no período,
+    tarefas previstas para o período seguinte (mesma duração do período
+    informado, começando no dia seguinte a `period_end` — "semana anterior
+    × próxima semana" do mockup) e o snapshot dos riscos abertos/mitigados
+    do projeto. O retorno é consumido tanto por `POST
+    /projects/{id}/status-reports` (grava como está) quanto, campo a
+    campo, pelos `Numeric`/`JSON` de `ProjectStatusReport`.
+
+    Dados financeiros (custo/margem) nunca são ocultados AQUI — quem
+    decide se o perfil pedindo pode vê-los é o router (mesmo critério de
+    `project_report`), porque o snapshot grava os dois perfis de dado na
+    MESMA linha."""
+    project = session.get(Project, project_id)
+    if not project:
+        raise ValueError("Projeto não encontrado")
+
+    evm = project_evm(session, project_id)
+
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project_id)).all())
+    hours_budgeted = sum((Decimal(t.estimated_hours or 0) for t in tasks), Decimal("0"))
+
+    financials = project_financials(session, project_id)
+    # "Custo previsto": não existe campo próprio no projeto (ver docstring
+    # de Project.margin_percentage) — derivado do valor vendido e da %
+    # margem PLANEJADA/BID, mesma relação (margem = (vendido - custo) /
+    # vendido) usada por `real_margin_percentage` em `project_financials`,
+    # só que isolando o custo em vez da margem. None sem valor vendido ou
+    # sem margem planejada informada (nada pra derivar).
+    cost_planned = None
+    if project.margin_percentage is not None and financials["sold_value"] > 0:
+        cost_planned = _q(financials["sold_value"] * (1 - Decimal(project.margin_percentage) / 100))
+
+    # Tarefas concluídas no período informado ("semana anterior" do mockup).
+    tasks_done = [
+        {
+            "id": t.id,
+            "wbs_code": t.wbs_code,
+            "name": t.name,
+            "planned_start_date": t.planned_start_date.isoformat() if t.planned_start_date else None,
+            "planned_end_date": t.planned_end_date.isoformat() if t.planned_end_date else None,
+        }
+        for t in tasks
+        if t.status in TASK_FINISHED_STATUSES and t.actual_end_date and period_start <= t.actual_end_date <= period_end
+    ]
+
+    # Tarefas previstas pro período seguinte, de mesma duração ("próxima
+    # semana" do mockup) — qualquer tarefa ainda não finalizada cuja janela
+    # planejada cruza esse intervalo (não só as que começam exatamente
+    # nele), senão uma tarefa em andamento que atravessa a virada some do
+    # relatório.
+    next_start = period_end + timedelta(days=1)
+    next_end = next_start + (period_end - period_start)
+    tasks_next = [
+        {
+            "id": t.id,
+            "wbs_code": t.wbs_code,
+            "name": t.name,
+            "planned_start_date": t.planned_start_date.isoformat() if t.planned_start_date else None,
+            "planned_end_date": t.planned_end_date.isoformat() if t.planned_end_date else None,
+        }
+        for t in tasks
+        if t.status not in TASK_FINISHED_STATUSES
+        and t.planned_start_date
+        and t.planned_start_date <= next_end
+        and (t.planned_end_date is None or t.planned_end_date >= next_start)
+    ]
+
+    # Riscos abertos/mitigados (CLOSED fica de fora — não é mais relevante
+    # pro relatório do período) — snapshot copiado, não referência viva à
+    # tabela `risks` (ver docstring de ProjectStatusReport).
+    risks = list(
+        session.scalars(select(Risk).where(Risk.project_id == project_id, Risk.status != RiskStatus.CLOSED)).all()
+    )
+    risks_snapshot = [
+        {
+            "id": r.id,
+            "description": r.description,
+            "probability": r.probability.value,
+            "impact": r.impact.value,
+            "mitigation_plan": r.mitigation_plan,
+            "status": r.status.value,
+        }
+        for r in risks
+    ]
+
+    burndown = [
+        {
+            "date": point["date"].isoformat(),
+            "planned_remaining_hours": str(point["planned_remaining_hours"]),
+            "actual_remaining_hours": str(point["actual_remaining_hours"]),
+        }
+        for point in project_burndown(session, project_id)
+    ]
+
+    return {
+        "schedule_actual_pct": evm["percent_complete"],
+        "schedule_planned_pct": evm["planned_percent_complete"],
+        "hours_consumed": _q(evm["actual_hours"]),
+        "hours_budgeted": _q(hours_budgeted) if hours_budgeted > 0 else None,
+        "cost_planned": cost_planned,
+        "cost_actual": _q(financials["real_cost"]),
+        "margin_planned_pct": project.margin_percentage,
+        "margin_actual_pct": financials["real_margin_percentage"],
+        "tasks_done": tasks_done,
+        "tasks_next": tasks_next,
+        "risks_snapshot": risks_snapshot,
+        "burndown": burndown,
+    }
+
+
 def resource_utilization(session: Session, *, start: date, end: date, resource_id: str | None = None) -> list[dict]:
     """Carga de trabalho por recurso no período [start, end]:
 

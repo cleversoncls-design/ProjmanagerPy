@@ -2,7 +2,14 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
-import { ADMIN_LIKE_ROLES, DASHBOARD_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECTS_VISIBLE_ROLES } from '../utils/labels'
+import {
+  ADMIN_LIKE_ROLES,
+  DASHBOARD_ROLES,
+  INTERNAL_ROLES,
+  MANAGEMENT_ROLES,
+  PROJECTS_VISIBLE_ROLES,
+  STATUS_REPORT_VISIBLE_ROLES,
+} from '../utils/labels'
 import logo from '../assets/resultar-logo.png'
 import {
   BadgeCheckIcon,
@@ -69,8 +76,12 @@ const NAV_SECTIONS = [
   // "Relatórios" (pedido do usuário): saiu de ADMIN_LIKE_ROLES pra
   // MANAGEMENT_ROLES — Gerente de Projetos ganhou este item do menu
   // (decisão confirmada com o usuário na reorganização de menus; mesma
-  // mudança replicada em GET /reports/hours-breakdown no backend).
-  { type: 'item', to: '/reports', label: 'Relatórios', icon: BarChartIcon, roles: MANAGEMENT_ROLES },
+  // mudança replicada em GET /reports/hours-breakdown no backend). Depois,
+  // com o Status Report (pedido do usuário: "pode implementar os 2
+  // modelos e colocar na opção de relatorios"), PM do cliente passou a
+  // enxergar este item pela primeira vez — mas ReportsIndexPage.jsx
+  // mostra só o card do Status Report pra ele, nunca "Horas por tipo".
+  { type: 'item', to: '/reports', label: 'Relatórios', icon: BarChartIcon, roles: STATUS_REPORT_VISIBLE_ROLES },
 ]
 
 const WIDTH_EXPANDED = 252
