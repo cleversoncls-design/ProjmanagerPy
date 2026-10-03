@@ -253,8 +253,6 @@ export const es = {
   'Expandir tudo': 'Expandir todo',
   'Exportar (Excel)': 'Exportar (Excel)',
   'Exportar PNG': 'Exportar PNG',
-  'Imprimir resumo (até o 2º nível)': 'Imprimir resumen (hasta el 2.º nivel)',
-  'resumo até o 2º nível': 'resumen hasta el 2.º nivel',
   'Feriados': 'Feriados',
   'Fim': 'Fin',
   'Fim do período exibido': 'Fin del período mostrado',
