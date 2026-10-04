@@ -1291,12 +1291,15 @@ class KnowledgeModuleCreate(BaseModel):
     """`applies_to_consultant`/`applies_to_internal_pm`: pelo menos um
     precisa ficar marcado (mesma regra do `CheckConstraint` em
     KnowledgeModule — validada aqui também pra devolver um 422 amigável
-    em vez de um erro de banco)."""
+    em vez de um erro de banco). `requirement` (pedido do usuário, 2ª
+    rodada) é só classificação neste nível — ver docstring de
+    KnowledgeModule em app/models.py."""
 
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
     applies_to_consultant: bool = True
     applies_to_internal_pm: bool = True
+    requirement: KnowledgeRequirement = KnowledgeRequirement.REQUIRED
 
     @model_validator(mode="after")
     def _at_least_one_profile(self) -> "KnowledgeModuleCreate":
@@ -1312,18 +1315,41 @@ class KnowledgeModuleRead(ORMModel):
     description: str | None = None
     applies_to_consultant: bool
     applies_to_internal_pm: bool
+    requirement: KnowledgeRequirement
     functionalities: list[KnowledgeFunctionalityRead] = []
 
 
 class KnowledgeSystemCreate(BaseModel):
+    """`applies_to_consultant`/`applies_to_internal_pm`/`requirement`
+    (pedido do usuário, 2ª rodada: "a obrigatoriedade que hoje está para
+    consultor e gerente de projetos, gostaria de configurar no
+    sistema/módulo, incluindo se é necessário ou desejável") — só
+    classificação/organização neste nível, sem nenhum efeito em quem vê
+    o quê na autoavaliação nem no badge mostrado na revisão (isso continua
+    vindo só do Módulo/Funcionalidade, respectivamente — ver docstring de
+    KnowledgeSystem em app/models.py). Mesma validação "pelo menos um
+    perfil" do Módulo, por consistência visual."""
+
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
+    applies_to_consultant: bool = True
+    applies_to_internal_pm: bool = True
+    requirement: KnowledgeRequirement = KnowledgeRequirement.REQUIRED
+
+    @model_validator(mode="after")
+    def _at_least_one_profile(self) -> "KnowledgeSystemCreate":
+        if not self.applies_to_consultant and not self.applies_to_internal_pm:
+            raise ValueError("Selecione ao menos um perfil (Consultor e/ou Gerente de Projeto)")
+        return self
 
 
 class KnowledgeSystemRead(ORMModel):
     id: str
     name: str
     description: str | None = None
+    applies_to_consultant: bool
+    applies_to_internal_pm: bool
+    requirement: KnowledgeRequirement
     modules: list[KnowledgeModuleRead] = []
 
 

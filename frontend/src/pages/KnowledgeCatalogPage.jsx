@@ -119,12 +119,16 @@ export default function KnowledgeCatalogPage() {
           return <span style={{ paddingLeft: row.depth * 18 }} className="text-xs italic text-[var(--text-muted)]">{t(row.message)}</span>
         }
         const isSystem = row.type === 'system'
+        // Perfil (Consultor/Gerente de Projetos) agora também existe no
+        // Sistema, além do Módulo (pedido do usuário, 2ª rodada) — mas só
+        // como classificação: não filtra nada na autoavaliação (ver
+        // docstring de KnowledgeSystem em app/models.py).
         return (
           <span style={{ paddingLeft: row.depth * 18 }} className="flex items-center gap-2">
             <span className={isSystem ? 'font-semibold text-[var(--text-primary)]' : row.type === 'module' ? 'font-medium text-[var(--text-primary)]' : 'text-[var(--text-primary)]'}>
               {row.data.name}
             </span>
-            {row.type === 'module' && (
+            {(row.type === 'system' || row.type === 'module') && (
               <>
                 {row.data.applies_to_consultant && <StatusPill label={t('Consultor')} tone="good" />}
                 {row.data.applies_to_internal_pm && <StatusPill label={t('Gerente de Projetos')} tone="good" />}
@@ -137,8 +141,12 @@ export default function KnowledgeCatalogPage() {
     {
       key: 'requirement',
       header: t('Conhecimento'),
+      // Necessário/Desejável agora também existe no Sistema e no Módulo
+      // (pedido do usuário, 2ª rodada) — só classificação neste nível; o
+      // badge "oficial" mostrado na autoavaliação/revisão continua vindo
+      // só da Funcionalidade (sem mudança nenhuma aí).
       render: (row) =>
-        row.type === 'functionality' ? (
+        row.type !== 'empty' ? (
           <StatusPill label={labels.KNOWLEDGE_REQUIREMENT_LABELS[row.data.requirement]} tone={KNOWLEDGE_REQUIREMENT_TONE[row.data.requirement]} />
         ) : (
           ''
@@ -247,15 +255,28 @@ function SystemFormModal({ modal, onClose, onSaved }) {
   const editing = modal.mode === 'edit'
   const [name, setName] = useState(editing ? modal.system.name : '')
   const [description, setDescription] = useState(editing ? modal.system.description || '' : '')
+  const [appliesConsultant, setAppliesConsultant] = useState(editing ? modal.system.applies_to_consultant : true)
+  const [appliesPm, setAppliesPm] = useState(editing ? modal.system.applies_to_internal_pm : true)
+  const [requirement, setRequirement] = useState(editing ? modal.system.requirement : 'REQUIRED')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
   async function handleSubmit(event) {
     event.preventDefault()
     setError('')
+    if (!appliesConsultant && !appliesPm) {
+      setError(t('Selecione ao menos um perfil (Consultor e/ou Gerente de Projeto)'))
+      return
+    }
     setSaving(true)
     try {
-      const payload = { name, description: description || null }
+      const payload = {
+        name,
+        description: description || null,
+        applies_to_consultant: appliesConsultant,
+        applies_to_internal_pm: appliesPm,
+        requirement,
+      }
       if (editing) await knowledgeApi.updateSystem(modal.system.id, payload)
       else await knowledgeApi.createSystem(payload)
       onSaved()
@@ -274,6 +295,29 @@ function SystemFormModal({ modal, onClose, onSaved }) {
         </FormField>
         <FormField label={t('Descrição')}>
           <TextArea rows={2} value={description} onChange={(event) => setDescription(event.target.value)} />
+        </FormField>
+        {/* Perfil + Necessário/Desejável (pedido do usuário, 2ª rodada) —
+            só classificação/organização neste nível (ver docstring de
+            KnowledgeSystem em app/models.py): não filtra a autoavaliação
+            nem muda o badge mostrado na revisão, que continuam vindo do
+            Módulo e da Funcionalidade, respectivamente. */}
+        <FormField label={t('Perfil')} hint={t('Pelo menos um dos dois precisa ficar marcado.')}>
+          <div className="flex flex-col gap-1.5 pt-1">
+            <label className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+              <input type="checkbox" checked={appliesConsultant} onChange={(event) => setAppliesConsultant(event.target.checked)} />
+              {t('Consultor')}
+            </label>
+            <label className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+              <input type="checkbox" checked={appliesPm} onChange={(event) => setAppliesPm(event.target.checked)} />
+              {t('Gerente de Projetos')}
+            </label>
+          </div>
+        </FormField>
+        <FormField label={t('Conhecimento')} required>
+          <Select value={requirement} onChange={(event) => setRequirement(event.target.value)}>
+            <option value="REQUIRED">{t('Necessário')}</option>
+            <option value="DESIRABLE">{t('Desejável')}</option>
+          </Select>
         </FormField>
         <ErrorBanner message={error} />
         <div className="flex justify-end gap-2 pt-1">
@@ -296,6 +340,7 @@ function ModuleFormModal({ modal, onClose, onSaved }) {
   const [description, setDescription] = useState(editing ? modal.module.description || '' : '')
   const [appliesConsultant, setAppliesConsultant] = useState(editing ? modal.module.applies_to_consultant : true)
   const [appliesPm, setAppliesPm] = useState(editing ? modal.module.applies_to_internal_pm : true)
+  const [requirement, setRequirement] = useState(editing ? modal.module.requirement : 'REQUIRED')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -313,6 +358,7 @@ function ModuleFormModal({ modal, onClose, onSaved }) {
         description: description || null,
         applies_to_consultant: appliesConsultant,
         applies_to_internal_pm: appliesPm,
+        requirement,
       }
       if (editing) await knowledgeApi.updateModule(modal.module.id, payload)
       else await knowledgeApi.createModule(modal.systemId, payload)
@@ -344,6 +390,16 @@ function ModuleFormModal({ modal, onClose, onSaved }) {
               {t('Gerente de Projetos')}
             </label>
           </div>
+        </FormField>
+        {/* Necessário/Desejável no Módulo (pedido do usuário, 2ª rodada) —
+            só classificação neste nível, igual no Sistema acima; o badge
+            mostrado na autoavaliação/revisão continua vindo só da
+            Funcionalidade. */}
+        <FormField label={t('Conhecimento')} required>
+          <Select value={requirement} onChange={(event) => setRequirement(event.target.value)}>
+            <option value="REQUIRED">{t('Necessário')}</option>
+            <option value="DESIRABLE">{t('Desejável')}</option>
+          </Select>
         </FormField>
         <ErrorBanner message={error} />
         <div className="flex justify-end gap-2 pt-1">

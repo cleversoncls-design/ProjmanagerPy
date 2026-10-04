@@ -1041,14 +1041,36 @@ class KnowledgeSystem(Base):
     qualquer perfil interno (não-cliente) pode LER, pra poder se
     autoavaliar. Excluir um Sistema apaga em cascata seus Módulos,
     Funcionalidades e qualquer ResourceKnowledge ligado a elas — ver
-    docstring de KnowledgeModule/KnowledgeFunctionality."""
+    docstring de KnowledgeModule/KnowledgeFunctionality.
+
+    `applies_to_consultant`/`applies_to_internal_pm`/`requirement` (pedido
+    do usuário, olhando a tela pronta: "a obrigatoriedade que hoje está
+    para consultor e gerente de projetos, gostaria de configurar no
+    sistema/módulo, incluindo se é necessário ou desejável") — decisão
+    confirmada com o usuário: são campos **só de classificação/
+    organização** neste nível. Diferente do mesmo par em KnowledgeModule,
+    o perfil AQUI não filtra nada em GET /knowledge/my-catalog, e
+    `requirement` AQUI não é o que aparece como badge na autoavaliação/
+    revisão (isso continua vindo só de KnowledgeFunctionality.requirement,
+    sem mudança nenhuma — "manter pela funcionalidade a mesma regra").
+    Pelo menos um perfil marcado (CheckConstraint), mesmo critério visual
+    do Módulo, mas aqui é só pra evitar um cadastro que pareça "não serve
+    pra ninguém"."""
 
     __tablename__ = "knowledge_systems"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text)
+    applies_to_consultant: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    applies_to_internal_pm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # String simples, não enum do Postgres — mesmo critério de
+    # KnowledgeFunctionality.requirement (ver comentário lá).
+    requirement: Mapped[str] = mapped_column(String(12), nullable=False, default=KnowledgeRequirement.REQUIRED.value)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    __table_args__ = (
+        CheckConstraint("applies_to_consultant OR applies_to_internal_pm", name="ck_knowledge_system_has_profile"),
+    )
     modules: Mapped[list["KnowledgeModule"]] = relationship(back_populates="system", cascade="all, delete-orphan", order_by="KnowledgeModule.name")
 
 
@@ -1057,10 +1079,17 @@ class KnowledgeModule(Base):
     vínculo de perfil (decisão confirmada com o usuário, ver docstring da
     seção acima): `applies_to_consultant`/`applies_to_internal_pm`
     controlam quem enxerga este módulo (e suas Funcionalidades) na tela de
-    autoavaliação ("Registro de Funcionalidades por Consultor/Gerente").
-    Pelo menos um dos dois precisa ficar marcado (CheckConstraint) — um
-    módulo sem nenhum perfil nunca apareceria pra ninguém se autoavaliar,
-    o que não faria sentido."""
+    autoavaliação ("Registro de Funcionalidades por Consultor/Gerente") —
+    esse efeito NÃO mudou com a adição do mesmo campo em KnowledgeSystem
+    (lá é só classificação; aqui continua sendo o que de fato filtra,
+    exatamente como antes). Pelo menos um dos dois precisa ficar marcado
+    (CheckConstraint) — um módulo sem nenhum perfil nunca apareceria pra
+    ninguém se autoavaliar, o que não faria sentido.
+
+    `requirement` (pedido do usuário, mesma rodada do parágrafo acima) é
+    só classificação/organização neste nível, igual em KnowledgeSystem —
+    o badge "Necessário/Desejável" mostrado na autoavaliação/revisão
+    continua vindo só de KnowledgeFunctionality.requirement."""
 
     __tablename__ = "knowledge_modules"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -1069,6 +1098,8 @@ class KnowledgeModule(Base):
     description: Mapped[str | None] = mapped_column(Text)
     applies_to_consultant: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     applies_to_internal_pm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # String simples — mesmo critério de KnowledgeSystem.requirement acima.
+    requirement: Mapped[str] = mapped_column(String(12), nullable=False, default=KnowledgeRequirement.REQUIRED.value)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     __table_args__ = (

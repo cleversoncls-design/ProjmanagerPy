@@ -112,7 +112,13 @@ def list_catalog(user: User = Depends(get_current_user), db: Session = Depends(g
 def create_system(
     data: KnowledgeSystemCreate, user: User = Depends(require_roles(*KNOWLEDGE_CATALOG_ROLES)), db: Session = Depends(get_db)
 ) -> KnowledgeSystem:
-    system = KnowledgeSystem(name=data.name, description=data.description)
+    system = KnowledgeSystem(
+        name=data.name,
+        description=data.description,
+        applies_to_consultant=data.applies_to_consultant,
+        applies_to_internal_pm=data.applies_to_internal_pm,
+        requirement=data.requirement.value,
+    )
     db.add(system)
     db.flush()
     record_audit(db, entity_type="knowledge_system", entity_id=system.id, action=AuditAction.CREATE, user_id=user.id)
@@ -131,6 +137,9 @@ def update_system(
     system = _get_system_or_404(db, system_id, user.language)
     system.name = data.name
     system.description = data.description
+    system.applies_to_consultant = data.applies_to_consultant
+    system.applies_to_internal_pm = data.applies_to_internal_pm
+    system.requirement = data.requirement.value
     record_audit(db, entity_type="knowledge_system", entity_id=system.id, action=AuditAction.UPDATE, user_id=user.id)
     db.commit()
     db.refresh(system)
@@ -166,6 +175,7 @@ def create_module(
         description=data.description,
         applies_to_consultant=data.applies_to_consultant,
         applies_to_internal_pm=data.applies_to_internal_pm,
+        requirement=data.requirement.value,
     )
     db.add(module)
     db.flush()
@@ -187,6 +197,7 @@ def update_module(
     module.description = data.description
     module.applies_to_consultant = data.applies_to_consultant
     module.applies_to_internal_pm = data.applies_to_internal_pm
+    module.requirement = data.requirement.value
     record_audit(db, entity_type="knowledge_module", entity_id=module.id, action=AuditAction.UPDATE, user_id=user.id)
     db.commit()
     db.refresh(module)
