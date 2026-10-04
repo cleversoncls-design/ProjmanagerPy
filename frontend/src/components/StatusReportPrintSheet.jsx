@@ -14,12 +14,13 @@ const RAG_FIELDS = [
   { key: 'rag_risk', label: 'Risco' },
 ]
 
-// Tinta de fundo da faixa de audiência (series-7/series-1 a 16% sobre branco,
+// Tinta de fundo da faixa de audiência (series-7 a 16% sobre branco,
 // pré-calculada — ver STATUS_REPORT_CHART_COLORS_PRINT) — mesmo efeito visual
 // do color-mix(...) usado na tela, mas em hex fixo (color-mix também não
-// resolve no pipeline de impressão).
+// resolve no pipeline de impressão). Só usada na versão INTERNA agora — a
+// versão para o cliente não mostra mais a faixa de audiência na impressão
+// (pedido do usuário).
 const BANNER_BG_INTERNAL = '#e2dff1'
-const BANNER_BG_CLIENT = '#dde9f8'
 
 /** Folha impressa de um Status Report (pedido do usuário: "onde imprimir o
  * status?", depois reforçado: "preciso que esteja igual ao modelo
@@ -53,21 +54,29 @@ export default function StatusReportPrintSheet({ report, project, client, prepar
     <div className="status-report-print-page" style={{ fontFamily: 'Arial, Helvetica, sans-serif', color: C.textPrimary, fontSize: '11px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', borderBottom: `2px solid ${C.textPrimary}`, paddingBottom: '10px', marginBottom: '10px' }}>
         <div>
-          <span
-            style={{
-              display: 'inline-block',
-              borderRadius: '999px',
-              padding: '3px 10px',
-              fontSize: '9px',
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.03em',
-              backgroundColor: hasFinancials ? BANNER_BG_INTERNAL : BANNER_BG_CLIENT,
-              color: hasFinancials ? C.series7 : C.series1,
-            }}
-          >
-            {hasFinancials ? t('Uso interno — Diretoria e Gerências (não enviar ao cliente)') : t('Compartilhado com o cliente — acesso do Gerente de Projeto')}
-          </span>
+          {/* Pedido do usuário: "tirar as frases das impressões:
+           * COMPARTILHADO COM O CLIENTE — ACESSO DO GERENTE DE PROJETO" —
+           * confirmado: só na versão para o cliente e só na impressão (a
+           * tela, StatusReportsPage.jsx, continua mostrando a faixa
+           * completa normalmente; a frase "Uso interno..." da versão
+           * interna também não muda). */}
+          {hasFinancials && (
+            <span
+              style={{
+                display: 'inline-block',
+                borderRadius: '999px',
+                padding: '3px 10px',
+                fontSize: '9px',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.03em',
+                backgroundColor: BANNER_BG_INTERNAL,
+                color: C.series7,
+              }}
+            >
+              {t('Uso interno — Diretoria e Gerências (não enviar ao cliente)')}
+            </span>
+          )}
           <p style={{ margin: '6px 0 0', fontSize: '9px', fontWeight: 700, textTransform: 'uppercase', color: C.textMuted }}>
             {hasFinancials ? t('Status Report — Interno') : t('Status Report')}
           </p>
