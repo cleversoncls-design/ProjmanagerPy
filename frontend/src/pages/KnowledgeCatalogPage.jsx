@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as knowledgeApi from '../api/knowledge'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
@@ -10,7 +10,7 @@ import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
 import StatusPill from '../components/StatusPill'
 import { FormField, TextInput, TextArea, Select } from '../components/FormField'
-import { PencilIcon, TrashIcon } from '../components/icons'
+import { PencilIcon, PlusIcon, TrashIcon } from '../components/icons'
 import { useLanguage } from '../context/LanguageContext'
 import { KNOWLEDGE_REQUIREMENT_TONE } from '../utils/labels'
 
@@ -26,7 +26,49 @@ import { KNOWLEDGE_REQUIREMENT_TONE } from '../utils/labels'
  * `applies_to_consultant`/`applies_to_internal_pm` no Módulo (decisão
  * confirmada com o usuário) controlam quem vê aquele módulo na
  * autoavaliação — mostrados aqui como dois selos, nunca escondidos: quem
- * cadastra precisa ver pra quem o módulo está liberado. */
+ * cadastra precisa ver pra quem o módulo está liberado.
+ *
+ * Visão em WBS/EAP (pedido do usuário, olhando a tela pronta: "existe a
+ * possibilidade de colocar em formato de WBS/EAP?") — substitui os cards
+ * aninhados por uma única tabela achatada (Sistema > Módulo >
+ * Funcionalidade), numerada e indentada, mesmo padrão já usado em Grupos
+ * de Tarefas (`TaskGroupDetailPage.jsx`: `computeWbsCodes`/`flattenTree`).
+ * A numeração aqui é só "de visualização" (recalculada pela posição atual
+ * de cada item), sem nenhum campo novo no backend. */
+function flattenCatalog(systems) {
+  const rows = []
+  systems.forEach((system, systemIndex) => {
+    const systemCode = String(systemIndex + 1)
+    rows.push({ _key: `system-${system.id}`, type: 'system', depth: 0, wbs: systemCode, data: system })
+    if (system.modules.length === 0) {
+      rows.push({ _key: `empty-modules-${system.id}`, type: 'empty', depth: 1, message: 'Nenhum módulo cadastrado neste sistema.' })
+    }
+    system.modules.forEach((module, moduleIndex) => {
+      const moduleCode = `${systemCode}.${moduleIndex + 1}`
+      rows.push({ _key: `module-${module.id}`, type: 'module', depth: 1, wbs: moduleCode, data: module, systemId: system.id })
+      if (module.functionalities.length === 0) {
+        rows.push({
+          _key: `empty-functionalities-${module.id}`,
+          type: 'empty',
+          depth: 2,
+          message: 'Nenhuma funcionalidade cadastrada neste módulo.',
+        })
+      }
+      module.functionalities.forEach((functionality, functionalityIndex) => {
+        rows.push({
+          _key: `functionality-${functionality.id}`,
+          type: 'functionality',
+          depth: 2,
+          wbs: `${moduleCode}.${functionalityIndex + 1}`,
+          data: functionality,
+          moduleId: module.id,
+        })
+      })
+    })
+  })
+  return rows
+}
+
 export default function KnowledgeCatalogPage() {
   const { t, labels } = useLanguage()
   const [systems, setSystems] = useState([])
@@ -64,6 +106,113 @@ export default function KnowledgeCatalogPage() {
     load()
   }
 
+  const rows = useMemo(() => flattenCatalog(systems), [systems])
+
+  const columns = [
+    { key: 'wbs', header: 'WBS', render: (row) => <span className="font-mono text-xs text-[var(--text-muted)]">{row.wbs || ''}</span> },
+    {
+      key: 'name',
+      header: t('Nome'),
+      nowrap: true,
+      render: (row) => {
+        if (row.type === 'empty') {
+          return <span style={{ paddingLeft: row.depth * 18 }} className="text-xs italic text-[var(--text-muted)]">{t(row.message)}</span>
+        }
+        const isSystem = row.type === 'system'
+        return (
+          <span style={{ paddingLeft: row.depth * 18 }} className="flex items-center gap-2">
+            <span className={isSystem ? 'font-semibold text-[var(--text-primary)]' : row.type === 'module' ? 'font-medium text-[var(--text-primary)]' : 'text-[var(--text-primary)]'}>
+              {row.data.name}
+            </span>
+            {row.type === 'module' && (
+              <>
+                {row.data.applies_to_consultant && <StatusPill label={t('Consultor')} tone="good" />}
+                {row.data.applies_to_internal_pm && <StatusPill label={t('Gerente de Projetos')} tone="good" />}
+              </>
+            )}
+          </span>
+        )
+      },
+    },
+    {
+      key: 'requirement',
+      header: t('Conhecimento'),
+      render: (row) =>
+        row.type === 'functionality' ? (
+          <StatusPill label={labels.KNOWLEDGE_REQUIREMENT_LABELS[row.data.requirement]} tone={KNOWLEDGE_REQUIREMENT_TONE[row.data.requirement]} />
+        ) : (
+          ''
+        ),
+    },
+    {
+      key: 'description',
+      header: t('Detalhes'),
+      render: (row) => (row.type === 'empty' ? '' : row.data.description || '—'),
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      sticky: true,
+      render: (row) => {
+        if (row.type === 'system') {
+          return (
+            <div className="flex justify-end gap-1">
+              <IconButton icon={PlusIcon} label={t('Novo módulo')} onClick={() => setModuleModal({ mode: 'create', systemId: row.data.id })} />
+              <IconButton icon={PencilIcon} label={t('Editar sistema')} onClick={() => setSystemModal({ mode: 'edit', system: row.data })} />
+              <IconButton
+                icon={TrashIcon}
+                label={t('Excluir sistema')}
+                variant="danger"
+                onClick={() => setDeleteTarget({ kind: 'system', id: row.data.id, name: row.data.name })}
+              />
+            </div>
+          )
+        }
+        if (row.type === 'module') {
+          return (
+            <div className="flex justify-end gap-1">
+              <IconButton
+                icon={PlusIcon}
+                label={t('Nova funcionalidade')}
+                onClick={() => setFunctionalityModal({ mode: 'create', moduleId: row.data.id })}
+              />
+              <IconButton
+                icon={PencilIcon}
+                label={t('Editar módulo')}
+                onClick={() => setModuleModal({ mode: 'edit', systemId: row.systemId, module: row.data })}
+              />
+              <IconButton
+                icon={TrashIcon}
+                label={t('Excluir módulo')}
+                variant="danger"
+                onClick={() => setDeleteTarget({ kind: 'module', id: row.data.id, name: row.data.name })}
+              />
+            </div>
+          )
+        }
+        if (row.type === 'functionality') {
+          return (
+            <div className="flex justify-end gap-1">
+              <IconButton
+                icon={PencilIcon}
+                label={t('Editar funcionalidade')}
+                onClick={() => setFunctionalityModal({ mode: 'edit', moduleId: row.moduleId, functionality: row.data })}
+              />
+              <IconButton
+                icon={TrashIcon}
+                label={t('Excluir funcionalidade')}
+                variant="danger"
+                onClick={() => setDeleteTarget({ kind: 'functionality', id: row.data.id, name: row.data.name })}
+              />
+            </div>
+          )
+        }
+        return null
+      },
+    },
+  ]
+
   return (
     <div>
       <PageHeader
@@ -75,110 +224,11 @@ export default function KnowledgeCatalogPage() {
       {loading && <Spinner />}
       <ErrorBanner message={error} />
 
-      {!loading && !error && systems.length === 0 && (
-        <Card>
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('Nenhum sistema cadastrado ainda.')}</p>
+      {!loading && !error && (
+        <Card dense>
+          <Table columns={columns} rows={rows} getRowKey={(row) => row._key} emptyMessage={t('Nenhum sistema cadastrado ainda.')} dense />
         </Card>
       )}
-
-      <div className="space-y-4">
-        {systems.map((system) => (
-          <Card
-            key={system.id}
-            title={system.name}
-            action={
-              <div className="flex items-center gap-1.5">
-                <Button variant="secondary" onClick={() => setModuleModal({ mode: 'create', systemId: system.id })}>
-                  {t('Novo módulo')}
-                </Button>
-                <IconButton icon={PencilIcon} label={t('Editar sistema')} onClick={() => setSystemModal({ mode: 'edit', system })} />
-                <IconButton
-                  icon={TrashIcon}
-                  label={t('Excluir sistema')}
-                  variant="danger"
-                  onClick={() => setDeleteTarget({ kind: 'system', id: system.id, name: system.name })}
-                />
-              </div>
-            }
-          >
-            {system.description && <p className="mb-3 text-sm text-[var(--text-secondary)]">{system.description}</p>}
-            {system.modules.length === 0 && <p className="text-sm text-[var(--text-muted)]">{t('Nenhum módulo cadastrado neste sistema.')}</p>}
-            <div className="space-y-4">
-              {system.modules.map((module) => (
-                <div key={module.id} className="rounded-xl border border-[var(--border)] p-3.5">
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-sm font-semibold text-[var(--text-primary)]">{module.name}</h3>
-                      {module.applies_to_consultant && <StatusPill label={t('Consultor')} tone="good" />}
-                      {module.applies_to_internal_pm && <StatusPill label={t('Gerente de Projetos')} tone="good" />}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        variant="secondary"
-                        onClick={() => setFunctionalityModal({ mode: 'create', moduleId: module.id })}
-                      >
-                        {t('Nova funcionalidade')}
-                      </Button>
-                      <IconButton
-                        icon={PencilIcon}
-                        label={t('Editar módulo')}
-                        onClick={() => setModuleModal({ mode: 'edit', systemId: system.id, module })}
-                      />
-                      <IconButton
-                        icon={TrashIcon}
-                        label={t('Excluir módulo')}
-                        variant="danger"
-                        onClick={() => setDeleteTarget({ kind: 'module', id: module.id, name: module.name })}
-                      />
-                    </div>
-                  </div>
-                  {module.description && <p className="mb-2 text-xs text-[var(--text-secondary)]">{module.description}</p>}
-                  <Table
-                    dense
-                    columns={[
-                      { key: 'name', header: t('Funcionalidade') },
-                      {
-                        key: 'requirement',
-                        header: t('Conhecimento'),
-                        render: (row) => (
-                          <StatusPill
-                            label={labels.KNOWLEDGE_REQUIREMENT_LABELS[row.requirement]}
-                            tone={KNOWLEDGE_REQUIREMENT_TONE[row.requirement]}
-                          />
-                        ),
-                      },
-                      { key: 'description', header: t('Detalhes'), render: (row) => row.description || '—' },
-                      {
-                        key: 'actions',
-                        header: '',
-                        align: 'right',
-                        render: (row) => (
-                          <div className="flex justify-end gap-1">
-                            <IconButton
-                              icon={PencilIcon}
-                              label={t('Editar funcionalidade')}
-                              onClick={() => setFunctionalityModal({ mode: 'edit', moduleId: module.id, functionality: row })}
-                            />
-                            <IconButton
-                              icon={TrashIcon}
-                              label={t('Excluir funcionalidade')}
-                              variant="danger"
-                              onClick={() => setDeleteTarget({ kind: 'functionality', id: row.id, name: row.name })}
-                            />
-                          </div>
-                        ),
-                      },
-                    ]}
-                    rows={module.functionalities}
-                    getRowKey={(row) => row.id}
-                    emptyMessage={t('Nenhuma funcionalidade cadastrada neste módulo.')}
-                  />
-                </div>
-              ))}
-            </div>
-          </Card>
-        ))}
-      </div>
 
       {systemModal && <SystemFormModal modal={systemModal} onClose={() => setSystemModal(null)} onSaved={handleSaved} />}
       {moduleModal && <ModuleFormModal modal={moduleModal} onClose={() => setModuleModal(null)} onSaved={handleSaved} />}

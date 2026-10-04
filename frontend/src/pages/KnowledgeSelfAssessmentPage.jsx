@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import * as knowledgeApi from '../api/knowledge'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
+import Table from '../components/Table'
 import Button from '../components/Button'
 import Spinner from '../components/Spinner'
 import ErrorBanner from '../components/ErrorBanner'
@@ -24,7 +25,33 @@ import { KNOWLEDGE_REQUIREMENT_TONE, KNOWLEDGE_STATUS_TONE } from '../utils/labe
  * novo ciclo, decisão confirmada: editar depois de aprovado volta pra
  * DRAFT) podem ser editadas. Isso evita o recurso "puxar" por engano um
  * item de dentro de um envio que já está sendo revisado.
- */
+ *
+ * Visão em WBS/EAP (pedido do usuário): mesmo achatamento numerado de
+ * `KnowledgeCatalogPage.jsx` (`flattenMyCatalog` aqui é a versão dessa
+ * tela — sem os selos de perfil do Módulo, que não fazem sentido aqui: o
+ * catálogo já vem filtrado pro perfil de quem está logado). */
+function flattenMyCatalog(systems) {
+  const rows = []
+  systems.forEach((system, systemIndex) => {
+    const systemCode = String(systemIndex + 1)
+    rows.push({ _key: `system-${system.id}`, type: 'system', depth: 0, wbs: systemCode, name: system.name })
+    system.modules.forEach((module, moduleIndex) => {
+      const moduleCode = `${systemCode}.${moduleIndex + 1}`
+      rows.push({ _key: `module-${module.id}`, type: 'module', depth: 1, wbs: moduleCode, name: module.name })
+      module.functionalities.forEach((functionality, functionalityIndex) => {
+        rows.push({
+          _key: `functionality-${functionality.id}`,
+          type: 'functionality',
+          depth: 2,
+          wbs: `${moduleCode}.${functionalityIndex + 1}`,
+          moduleId: module.id,
+          data: functionality,
+        })
+      })
+    })
+  })
+  return rows
+}
 export default function KnowledgeSelfAssessmentPage() {
   const { t, labels } = useLanguage()
   const [systems, setSystems] = useState([])
@@ -121,6 +148,88 @@ export default function KnowledgeSelfAssessmentPage() {
   }
 
   const lastSubmission = submissions[0]
+  const rows = useMemo(() => flattenMyCatalog(systems), [systems])
+
+  const columns = [
+    { key: 'wbs', header: 'WBS', render: (row) => <span className="font-mono text-xs text-[var(--text-muted)]">{row.wbs}</span> },
+    {
+      key: 'name',
+      header: t('Funcionalidade'),
+      nowrap: true,
+      render: (row) => {
+        if (row.type !== 'functionality') {
+          return (
+            <span
+              style={{ paddingLeft: row.depth * 18 }}
+              className={row.type === 'system' ? 'font-semibold text-[var(--text-primary)]' : 'font-medium text-[var(--text-primary)]'}
+            >
+              {row.name}
+            </span>
+          )
+        }
+        const functionality = row.data
+        return (
+          <span style={{ paddingLeft: row.depth * 18 }} className="block">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-[var(--text-primary)]">{functionality.name}</span>
+              <StatusPill
+                label={labels.KNOWLEDGE_REQUIREMENT_LABELS[functionality.requirement]}
+                tone={KNOWLEDGE_REQUIREMENT_TONE[functionality.requirement]}
+              />
+              {functionality.status && (
+                <StatusPill label={labels.KNOWLEDGE_STATUS_LABELS[functionality.status]} tone={KNOWLEDGE_STATUS_TONE[functionality.status]} />
+              )}
+            </span>
+            {functionality.description && <span className="mt-0.5 block text-xs text-[var(--text-muted)]">{functionality.description}</span>}
+          </span>
+        )
+      },
+    },
+    {
+      key: 'level',
+      header: t('Nível'),
+      render: (row) => {
+        if (row.type !== 'functionality') return ''
+        const functionality = row.data
+        const locked = functionality.status === 'SUBMITTED'
+        return (
+          <div className="w-64">
+            <Select
+              value={functionality.self_level ?? ''}
+              disabled={locked || savingId === functionality.id}
+              onChange={(event) => handleLevelChange(row.moduleId, functionality, event.target.value)}
+            >
+              <option value="">{t('Não avaliado')}</option>
+              {[0, 1, 2, 3, 4].map((level) => (
+                <option key={level} value={level}>
+                  {labels.KNOWLEDGE_LEVEL_LABELS[level]}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )
+      },
+    },
+    {
+      key: 'notes',
+      header: t('Observações'),
+      render: (row) => {
+        if (row.type !== 'functionality') return ''
+        const functionality = row.data
+        const locked = functionality.status === 'SUBMITTED'
+        return (
+          <div className="w-64">
+            <TextInput
+              placeholder={t('Observações (opcional)')}
+              defaultValue={functionality.notes || ''}
+              disabled={locked || functionality.self_level === null || functionality.self_level === undefined}
+              onBlur={(event) => handleNotesBlur(row.moduleId, functionality, event.target.value)}
+            />
+          </div>
+        )
+      },
+    },
+  ]
 
   return (
     <div>
@@ -150,79 +259,17 @@ export default function KnowledgeSelfAssessmentPage() {
       <ErrorBanner message={error} />
       <ErrorBanner message={submitError} />
 
-      {!loading && !error && systems.length === 0 && (
-        <Card>
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">
-            {t('Nenhuma funcionalidade liberada para o seu perfil ainda.')}
-          </p>
+      {!loading && !error && (
+        <Card dense>
+          <Table
+            columns={columns}
+            rows={rows}
+            getRowKey={(row) => row._key}
+            emptyMessage={t('Nenhuma funcionalidade liberada para o seu perfil ainda.')}
+            dense
+          />
         </Card>
       )}
-
-      <div className="space-y-4">
-        {systems.map((system) => (
-          <Card key={system.id} title={system.name}>
-            <div className="space-y-4">
-              {system.modules.map((module) => (
-                <div key={module.id} className="rounded-xl border border-[var(--border)] p-3.5">
-                  <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">{module.name}</h3>
-                  <div className="space-y-2">
-                    {module.functionalities.map((functionality) => {
-                      const locked = functionality.status === 'SUBMITTED'
-                      return (
-                        <div
-                          key={functionality.id}
-                          className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2"
-                        >
-                          <div className="min-w-[200px] flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-[var(--text-primary)]">{functionality.name}</span>
-                              <StatusPill
-                                label={labels.KNOWLEDGE_REQUIREMENT_LABELS[functionality.requirement]}
-                                tone={KNOWLEDGE_REQUIREMENT_TONE[functionality.requirement]}
-                              />
-                              {functionality.status && (
-                                <StatusPill
-                                  label={labels.KNOWLEDGE_STATUS_LABELS[functionality.status]}
-                                  tone={KNOWLEDGE_STATUS_TONE[functionality.status]}
-                                />
-                              )}
-                            </div>
-                            {functionality.description && (
-                              <p className="mt-0.5 text-xs text-[var(--text-muted)]">{functionality.description}</p>
-                            )}
-                          </div>
-                          <div className="w-64">
-                            <Select
-                              value={functionality.self_level ?? ''}
-                              disabled={locked || savingId === functionality.id}
-                              onChange={(event) => handleLevelChange(module.id, functionality, event.target.value)}
-                            >
-                              <option value="">{t('Não avaliado')}</option>
-                              {[0, 1, 2, 3, 4].map((level) => (
-                                <option key={level} value={level}>
-                                  {labels.KNOWLEDGE_LEVEL_LABELS[level]}
-                                </option>
-                              ))}
-                            </Select>
-                          </div>
-                          <div className="w-64">
-                            <TextInput
-                              placeholder={t('Observações (opcional)')}
-                              defaultValue={functionality.notes || ''}
-                              disabled={locked || functionality.self_level === null || functionality.self_level === undefined}
-                              onBlur={(event) => handleNotesBlur(module.id, functionality, event.target.value)}
-                            />
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        ))}
-      </div>
     </div>
   )
 }
