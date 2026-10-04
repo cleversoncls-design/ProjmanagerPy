@@ -1,13 +1,58 @@
 from __future__ import annotations
 
+import math
+import re
+import uuid
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .models import Calendar, DependencyType, Holiday, Project, Task, TaskDependency, Timesheet, Resource, ProjectExpense
+from .models import (
+    AbsenceType,
+    Baseline,
+    Calendar,
+    ChangeRequest,
+    ChangeStatus,
+    Client,
+    DependencyType,
+    Holiday,
+    Project,
+    Resource,
+    ProjectExpense,
+    RagStatus,
+    Risk,
+    RiskLevel,
+    RiskStatus,
+    ServiceOrderNumber,
+    Task,
+    TaskAssignment,
+    TaskDependency,
+    TaskGroup,
+    TaskGroupItem,
+    TaskStatus,
+    TASK_FINISHED_STATUSES,
+    TaskType,
+    Timesheet,
+    TimesheetStatus,
+    User,
+)
+
+# "Trabalho" (estimated_hours) sem nenhum recurso alocado ainda assume uma
+# única FTE genérica de 8h/dia — mesmo padrão do daily_capacity_hours
+# default em Resource. Ver apply_effort_driven/capacity_hours_per_day_for_task.
+DEFAULT_CAPACITY_HOURS_PER_DAY = Decimal("8")
+
+# Duas casas decimais para percentuais e valores monetários calculados nos
+# relatórios — mesma precisão das colunas Numeric(*, 2) do banco.
+_TWOPLACES = Decimal("0.01")
+
+
+def _q(value: Decimal) -> Decimal:
+    return Decimal(value).quantize(_TWOPLACES)
 
 
 class BusinessCalendar:
@@ -53,6 +98,37 @@ def _duration_days(cal: BusinessCalendar, start: date, end: date) -> int:
     return max(count, 1)
 
 
+def _whole_days(duration_days: Decimal) -> int:
+    """`duration_days` pode ser fracionário (ex.: 0,15 dia = ~1,2h, visto em
+    cronogramas importados do MS Project) — para POSICIONAR datas no
+    calendário de dias úteis, arredonda pra cima com mínimo de 1 dia. O
+    valor fracionário original continua guardado em Task.duration_days
+    (usado tal e qual no cálculo de horas de `apply_effort_driven`); só o
+    posicionamento no calendário é inteiro."""
+    return max(1, math.ceil(float(duration_days)))
+
+
+def _end_date_from_duration(cal: BusinessCalendar, start: date, duration_days: Decimal) -> date:
+    """Data final = início + duração (dias úteis), usando Task.duration_days
+    como fonte da verdade — em vez de re-derivar a duração a partir de
+    datas planejadas antigas, como a versão anterior deste motor fazia
+    antes de duration_days existir como campo."""
+    aligned_start = cal.next_working_day(start)
+    return cal.add_working_days(aligned_start, _whole_days(duration_days) - 1)
+
+
+def end_date_from_duration(cal: BusinessCalendar, start: date, duration_days: Decimal) -> date:
+    """Versão pública de `_end_date_from_duration` — para uso fora deste
+    módulo. `reschedule_cascade`/`recalculate_schedule` já preenchem o Fim
+    planejado das SUCESSORAS (quem tem predecessora); esta função cobre a
+    tarefa que está sendo diretamente criada/editada (ver
+    routers/tasks.py create_task/update_task), que não passa por nenhuma
+    das duas — sem isso, uma tarefa sem predecessora nascia (ou ficava,
+    numa edição) sem Fim planejado, precisando de "Recalcular tudo" pra
+    ganhar um."""
+    return _end_date_from_duration(cal, start, duration_days)
+
+
 def _successor_start(cal: BusinessCalendar, predecessor: Task, successor: Task, dependency: TaskDependency) -> date:
     pred_start = predecessor.planned_start_date or predecessor.planned_end_date
     pred_end = predecessor.planned_end_date or predecessor.planned_start_date
@@ -65,57 +141,1891 @@ def _successor_start(cal: BusinessCalendar, predecessor: Task, successor: Task, 
     if dependency.dependency_type == DependencyType.SS:
         return cal.next_working_day(lagged_start)
     if dependency.dependency_type == DependencyType.FF:
-        successor_duration = _duration_days(cal, successor.planned_start_date or lagged_end, successor.planned_end_date or lagged_end)
-        return cal.add_working_days(lagged_end, -(successor_duration - 1))
+        return cal.add_working_days(lagged_end, -(_whole_days(successor.duration_days) - 1))
     # SF: sucessora termina quando a predecessora inicia; derive início pela duração atual.
-    successor_duration = _duration_days(cal, successor.planned_start_date or lagged_start, successor.planned_end_date or lagged_start)
-    return cal.add_working_days(lagged_start, -(successor_duration - 1))
+    return cal.add_working_days(lagged_start, -(_whole_days(successor.duration_days) - 1))
 
 
 def reschedule_cascade(session: Session, changed_task_id: str, cal: BusinessCalendar) -> list[Task]:
-    """Recalcula sucessoras em profundidade; rejeita ciclos no grafo de dependências."""
+    """Recalcula as sucessoras a partir da tarefa alterada.
+
+    Duas propriedades importantes que a versão anterior (DFS recursivo) não
+    garantia:
+
+    1. Uma sucessora com MÚLTIPLAS predecessoras precisa respeitar a mais
+       restritiva (a que empurra o início mais tarde) entre todas elas, não
+       apenas a última visitada — por isso o grafo afetado é processado em
+       ordem topológica e a data final de cada sucessora é o `max()` dos
+       candidatos calculados a partir de cada uma de suas predecessoras.
+    2. A travessia é iterativa (fila de Kahn), então uma EAP muito profunda
+       não esbarra no limite de recursão do Python.
+
+    Ciclos no grafo de dependências continuam sendo rejeitados com
+    ValueError.
+    """
     changed = session.get(Task, changed_task_id)
     if not changed:
         raise ValueError("Tarefa não encontrada")
-    updated: list[Task] = []
-    visiting: set[str] = set()
 
-    def visit(predecessor: Task) -> None:
-        if predecessor.id in visiting:
-            raise ValueError("Ciclo detectado nas dependências")
-        visiting.add(predecessor.id)
-        deps = session.scalars(select(TaskDependency).where(TaskDependency.predecessor_task_id == predecessor.id)).all()
+    # 1) BFS a partir da tarefa alterada para descobrir todas as sucessoras
+    #    potencialmente afetadas (direta ou transitivamente).
+    affected: set[str] = set()
+    frontier = [changed_task_id]
+    while frontier:
+        current_id = frontier.pop()
+        deps = session.scalars(
+            select(TaskDependency).where(TaskDependency.predecessor_task_id == current_id)
+        ).all()
         for dep in deps:
-            successor = session.get(Task, dep.successor_task_id)
-            if not successor:
-                continue
-            old_start = successor.planned_start_date
-            new_start = _successor_start(cal, predecessor, successor, dep)
-            duration = _duration_days(cal, successor.planned_start_date or new_start, successor.planned_end_date or new_start)
-            successor.planned_start_date = new_start
-            successor.planned_end_date = cal.add_working_days(new_start, duration - 1)
-            if successor.planned_start_date != old_start:
-                updated.append(successor)
-            visit(successor)
-        visiting.remove(predecessor.id)
+            if dep.successor_task_id not in affected:
+                affected.add(dep.successor_task_id)
+                frontier.append(dep.successor_task_id)
 
-    visit(changed)
+    if not affected:
+        session.flush()
+        return []
+
+    # 2) Para cada sucessora afetada, carrega TODAS as suas dependências de
+    #    predecessora (inclusive as que não mudaram nesta cascata), porque a
+    #    data final precisa respeitar todas elas, não só o caminho que
+    #    disparou a mudança.
+    deps_by_successor: dict[str, list[TaskDependency]] = {}
+    in_degree: dict[str, int] = {tid: 0 for tid in affected}
+    successors_by_predecessor: dict[str, list[str]] = defaultdict(list)
+    for tid in affected:
+        deps = session.scalars(
+            select(TaskDependency).where(TaskDependency.successor_task_id == tid)
+        ).all()
+        deps_by_successor[tid] = deps
+        for dep in deps:
+            if dep.predecessor_task_id in affected:
+                in_degree[tid] += 1
+                successors_by_predecessor[dep.predecessor_task_id].append(tid)
+
+    # 3) Ordenação topológica (Kahn) do subconjunto afetado: uma sucessora só
+    #    é processada depois que todas as suas predecessoras afetadas já
+    #    tiverem sido recalculadas.
+    queue = [tid for tid, degree in in_degree.items() if degree == 0]
+    order: list[str] = []
+    remaining = dict(in_degree)
+    while queue:
+        node = queue.pop()
+        order.append(node)
+        for succ in successors_by_predecessor.get(node, []):
+            remaining[succ] -= 1
+            if remaining[succ] == 0:
+                queue.append(succ)
+
+    if len(order) != len(affected):
+        raise ValueError("Ciclo detectado nas dependências")
+
+    # 4) Recalcula cada sucessora, tomando a data mais tardia entre todas as
+    #    suas predecessoras (afetadas ou não).
+    updated: list[Task] = []
+    for successor_id in order:
+        successor = session.get(Task, successor_id)
+        if not successor:
+            continue
+        candidate_starts: list[date] = []
+        for dep in deps_by_successor[successor_id]:
+            predecessor = session.get(Task, dep.predecessor_task_id)
+            if not predecessor or not predecessor.planned_start_date or not predecessor.planned_end_date:
+                continue
+            candidate_starts.append(_successor_start(cal, predecessor, successor, dep))
+        if not candidate_starts:
+            continue
+        new_start = max(candidate_starts)
+        old_start = successor.planned_start_date
+        successor.planned_start_date = new_start
+        successor.planned_end_date = _end_date_from_duration(cal, new_start, successor.duration_days)
+        if successor.planned_start_date != old_start:
+            updated.append(successor)
+
     session.flush()
     return updated
 
 
-def project_financials(session: Session, project_id: str) -> dict[str, Decimal]:
+def recalculate_schedule(session: Session, project_id: str, cal: BusinessCalendar) -> list[Task]:
+    """Recalcula as datas de TODAS as tarefas do projeto que têm alguma
+    predecessora, varrendo o grafo de dependências inteiro de uma vez —
+    para usar como botão "recalcular tudo" depois de várias edições em
+    lote (mover tarefas, trocar predecessoras, mudar durações), em vez de
+    depender de chamar `reschedule_cascade` tarefa por tarefa.
+
+    Tarefas SEM nenhuma predecessora nunca são tocadas aqui: a data de
+    início delas é sempre informação manual (mesma regra de
+    `reschedule_cascade`, só que aplicada ao projeto inteiro de uma vez).
+    """
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project_id)).all())
+    task_ids = {t.id for t in tasks}
+    tasks_by_id = {t.id: t for t in tasks}
+    if not task_ids:
+        return []
+
+    deps = list(
+        session.scalars(
+            select(TaskDependency).where(
+                TaskDependency.predecessor_task_id.in_(task_ids),
+                TaskDependency.successor_task_id.in_(task_ids),
+            )
+        ).all()
+    )
+    deps_by_successor: dict[str, list[TaskDependency]] = defaultdict(list)
+    in_degree: dict[str, int] = {tid: 0 for tid in task_ids}
+    successors_by_predecessor: dict[str, list[str]] = defaultdict(list)
+    for dep in deps:
+        deps_by_successor[dep.successor_task_id].append(dep)
+        in_degree[dep.successor_task_id] += 1
+        successors_by_predecessor[dep.predecessor_task_id].append(dep.successor_task_id)
+
+    queue = [tid for tid, degree in in_degree.items() if degree == 0]
+    order: list[str] = []
+    remaining = dict(in_degree)
+    while queue:
+        node = queue.pop()
+        order.append(node)
+        for succ in successors_by_predecessor.get(node, []):
+            remaining[succ] -= 1
+            if remaining[succ] == 0:
+                queue.append(succ)
+    if len(order) != len(task_ids):
+        raise ValueError("Ciclo detectado nas dependências")
+
+    updated: list[Task] = []
+    for tid in order:
+        deps_here = deps_by_successor.get(tid)
+        if not deps_here:
+            continue  # sem predecessora: início manual, não recalcula
+        successor = tasks_by_id[tid]
+        candidate_starts: list[date] = []
+        for dep in deps_here:
+            predecessor = tasks_by_id.get(dep.predecessor_task_id)
+            if not predecessor or not predecessor.planned_start_date or not predecessor.planned_end_date:
+                continue
+            candidate_starts.append(_successor_start(cal, predecessor, successor, dep))
+        if not candidate_starts:
+            continue
+        new_start = max(candidate_starts)
+        old_start = successor.planned_start_date
+        successor.planned_start_date = new_start
+        successor.planned_end_date = _end_date_from_duration(cal, new_start, successor.duration_days)
+        if successor.planned_start_date != old_start:
+            updated.append(successor)
+
+    session.flush()
+    return updated
+
+
+def copy_project_tasks(session: Session, source_project_id: str, target_project: Project, cal: BusinessCalendar) -> list[Task]:
+    """Copia a estrutura de tarefas de `source_project_id` pro
+    `target_project` (botão "Copiar estrutura de outro projeto") — WBS/EAP,
+    nome, duração, horas, tipo, milestone, hierarquia (parent_task_id
+    remapeado) e as dependências (predecessoras + tipo/atraso, via
+    TaskDependency), SEM nenhuma TaskAssignment: recurso alocado é sempre
+    um vínculo novo, específico de cada projeto — nunca copiado.
+
+    Datas planejadas: a tarefa de origem com o planned_start_date mais
+    cedo vira a "tarefa 1" — todas as datas são deslocadas em dias
+    corridos (mesmo delta da original) pra essa tarefa cair em
+    `target_project.start_date` (ou hoje, se o projeto novo não tiver
+    início definido), preservando o espaçamento relativo do modelo
+    original. planned_end_date de cada uma é recalculada a partir da
+    duration_days copiada + o calendário do projeto NOVO (não do
+    original) via `_end_date_from_duration`, pra nascer consistente com o
+    resto do motor de agendamento. Tarefas de origem sem
+    planned_start_date ficam sem data também na cópia (nada pra
+    deslocar). Isso é só o deslocamento "ingênuo" — tarefas com
+    predecessora são recalculadas de novo (com prioridade sobre esse
+    valor inicial) por quem chama esta função, via `recalculate_schedule`
+    no projeto novo (ver routers/tasks.py copy_project_tasks_endpoint):
+    esta função só cria as linhas, não mexe em dependência entre projetos
+    diferentes.
+
+    Levanta ValueError se o projeto de origem não tiver tarefas, ou se o
+    projeto novo já tiver alguma (pra não arriscar colidir wbs_code nem
+    misturar duas estruturas na mesma EAP)."""
+    source_tasks = list(
+        session.scalars(select(Task).where(Task.project_id == source_project_id).order_by(Task.wbs_code)).all()
+    )
+    if not source_tasks:
+        raise ValueError("O projeto de origem não tem tarefas para copiar")
+    if session.scalar(select(Task.id).where(Task.project_id == target_project.id).limit(1)):
+        raise ValueError("O projeto de destino já tem tarefas — a cópia de estrutura só vale para um projeto vazio")
+
+    starts = [t.planned_start_date for t in source_tasks if t.planned_start_date]
+    source_min_start = min(starts) if starts else None
+    anchor = target_project.start_date or date.today()
+
+    old_to_new: dict[str, Task] = {}
+    for source in source_tasks:
+        if source.planned_start_date and source_min_start:
+            new_start = anchor + timedelta(days=(source.planned_start_date - source_min_start).days)
+            new_end = _end_date_from_duration(cal, new_start, source.duration_days)
+        else:
+            new_start = None
+            new_end = None
+        new_task = Task(
+            project_id=target_project.id,
+            name=source.name,
+            wbs_code=source.wbs_code,
+            task_type=source.task_type,
+            duration_days=source.duration_days,
+            estimated_hours=source.estimated_hours,
+            sort_order=source.sort_order,
+            planned_start_date=new_start,
+            planned_end_date=new_end,
+            is_milestone=source.is_milestone,
+            notes=source.notes,
+        )
+        session.add(new_task)
+        old_to_new[source.id] = new_task
+
+    session.flush()  # gera os ids novos, precisos pro remapeamento abaixo
+
+    for source in source_tasks:
+        if source.parent_task_id and source.parent_task_id in old_to_new:
+            old_to_new[source.id].parent_task_id = old_to_new[source.parent_task_id].id
+
+    source_ids = set(old_to_new.keys())
+    source_deps = list(
+        session.scalars(
+            select(TaskDependency).where(
+                TaskDependency.predecessor_task_id.in_(source_ids),
+                TaskDependency.successor_task_id.in_(source_ids),
+            )
+        ).all()
+    )
+    for dep in source_deps:
+        session.add(
+            TaskDependency(
+                predecessor_task_id=old_to_new[dep.predecessor_task_id].id,
+                successor_task_id=old_to_new[dep.successor_task_id].id,
+                dependency_type=dep.dependency_type,
+                lag_days=dep.lag_days,
+            )
+        )
+
+    session.flush()
+    return list(old_to_new.values())
+
+
+def apply_task_group_to_task(session: Session, task_group_id: str, parent_task: Task) -> list[Task]:
+    """Aplica um TaskGroup (ver app/models.py) dentro de `parent_task`.
+    Pedido do usuário: um "agrupador de tarefas" reutilizável pra acelerar
+    a criação de projetos parecidos.
+
+    Cria primeiro uma tarefa "envelope" com o NOME do próprio grupo, como
+    tarefa-filha nova de `parent_task` — e só então clona a árvore inteira
+    do grupo (TaskGroupItem) como tarefas-filhas dessa tarefa envelope (não
+    direto em `parent_task`). Pedido do usuário, olhando o resultado da
+    primeira versão (que jogava os itens do grupo direto como filhas de
+    `parent_task`, sem indicar de qual grupo cada um veio): "o Agrupador
+    precisa ser uma tarefa também, e as subtarefas dele vêm como filhas do
+    [nome do grupo]". Isso também é o que permite aplicar grupos
+    diferentes em partes diferentes do cronograma dentro da mesma tarefa
+    pai (cada aplicação vira seu próprio "galho" na EAP, nomeado como o
+    grupo correspondente) sem misturar os itens de um grupo com os de
+    outro.
+
+    Sem nenhuma TaskAssignment (recurso alocado é sempre específico de cada
+    projeto, mesmo critério de `copy_project_tasks`) e sem nenhuma
+    TaskDependency (um TaskGroup não carrega dependência nenhuma — é só
+    estrutura/duração/trabalho) — nem na tarefa envelope, nem nos itens
+    clonados. Datas planejadas ficam em branco: sem predecessora (o grupo
+    não carrega dependência) e sem Início próprio no molde, não há o que
+    calcular — igual uma Task criada manualmente sem `planned_start_date`
+    (ver routers/tasks.py `create_task`). Por isso quem chama esta função
+    não precisa (nem deveria) rodar `recalculate_schedule` depois — só
+    `recalculate_wbs`, pro WBS/EAP do projeto renumerar com os nós novos
+    (ver routers/tasks.py `apply_task_group`).
+
+    A tarefa envelope em si fica com Duração/Trabalho no default do modelo
+    (1 dia / 0h) — como qualquer tarefa-pai com filhas, o que a grade de
+    Tarefas mostra de verdade pra ela é o rollup agregado das descendentes
+    (ver `_task_rollups`/`rollup_duration_days`/`rollup_estimated_hours`),
+    não esse valor cru. Duração e Trabalho dos ITENS clonados continuam
+    copiados direto de cada TaskGroupItem — ao contrário de
+    `create_task`/`copy_project_tasks`, aqui NÃO passam pelo motor
+    effort-driven (`apply_effort_driven`): o usuário pediu pra informar a
+    quantidade de horas de cada tarefa já no próprio molde (sem nenhum
+    recurso real por trás pra derivar uma capacidade), então esse valor é o
+    que deve valer na tarefa clonada — editável depois, como qualquer
+    tarefa, se uma alocação de recurso precisar recalcular.
+
+    `wbs_code` recebe um placeholder único (`_tmp_<id>`, mesmo padrão de
+    `recalculate_wbs`) — provisório até o `recalculate_wbs` que o chamador
+    roda em seguida atribuir o código definitivo; sem isso colidiria com a
+    constraint de unicidade por projeto assim que a segunda tarefa nova for
+    inserida.
+
+    Levanta ValueError se o grupo não existir ou não tiver nenhum item."""
+    group = session.get(TaskGroup, task_group_id)
+    if not group:
+        raise ValueError("Grupo de tarefas não encontrado")
+    items = list(session.scalars(select(TaskGroupItem).where(TaskGroupItem.group_id == task_group_id)).all())
+    if not items:
+        raise ValueError("Este grupo de tarefas não tem nenhuma tarefa cadastrada")
+
+    by_parent: dict[str | None, list[TaskGroupItem]] = defaultdict(list)
+    for item in items:
+        by_parent[item.parent_item_id].append(item)
+    for siblings in by_parent.values():
+        siblings.sort(key=lambda i: i.sort_order)
+
+    created: list[Task] = []
+
+    def clone(item: TaskGroupItem, parent_task_id: str) -> None:
+        new_id = str(uuid.uuid4())
+        new_task = Task(
+            id=new_id,
+            project_id=parent_task.project_id,
+            parent_task_id=parent_task_id,
+            name=item.name,
+            wbs_code=f"_tmp_{new_id}",
+            task_type=item.task_type,
+            duration_days=item.duration_days,
+            estimated_hours=item.estimated_hours,
+            sort_order=item.sort_order,
+            is_milestone=item.is_milestone,
+            notes=item.notes,
+            min_level=item.min_level,
+            modality=item.modality,
+        )
+        session.add(new_task)
+        session.flush()
+        created.append(new_task)
+        for child in by_parent.get(item.id, []):
+            clone(child, new_task.id)
+
+    wrapper_id = str(uuid.uuid4())
+    wrapper_task = Task(
+        id=wrapper_id,
+        project_id=parent_task.project_id,
+        parent_task_id=parent_task.id,
+        name=group.name,
+        wbs_code=f"_tmp_{wrapper_id}",
+        task_type=TaskType.CONSULTING,
+    )
+    session.add(wrapper_task)
+    session.flush()
+    created.append(wrapper_task)
+
+    for top_item in by_parent.get(None, []):
+        clone(top_item, wrapper_task.id)
+
+    return created
+
+
+def calendar_for_project(session: Session, project: Project) -> BusinessCalendar:
+    """Calendário efetivo do projeto: o que estiver em Project.calendar_id,
+    ou o padrão (segunda a sexta, sem feriados) se nenhum foi atribuído."""
+    if project.calendar_id:
+        return calendar_from_db(session, project.calendar_id)
+    return BusinessCalendar()
+
+
+def capacity_hours_per_day_for_task(session: Session, task_id: str) -> Decimal:
+    """Soma da capacidade diária dos recursos alocados na tarefa — usada
+    como o "×horas/dia×nº de recursos" do modelo effort-driven. Sem nenhum
+    recurso alocado ainda, assume uma FTE genérica (DEFAULT_CAPACITY_HOURS_PER_DAY),
+    para Duração×Trabalho continuarem fazendo sentido antes de qualquer
+    alocação."""
+    rows = session.execute(
+        select(Resource.daily_capacity_hours)
+        .join(TaskAssignment, TaskAssignment.resource_id == Resource.id)
+        .where(TaskAssignment.task_id == task_id)
+    ).all()
+    total = sum((Decimal(r[0]) for r in rows), Decimal("0"))
+    return total if total > 0 else DEFAULT_CAPACITY_HOURS_PER_DAY
+
+
+def apply_effort_driven(
+    task: Task,
+    *,
+    duration_days: Decimal | None,
+    estimated_hours: Decimal | None,
+    capacity_hours_per_day: Decimal,
+) -> None:
+    """Agendamento effort-driven (estilo MS Project, "Fixed Units"):
+    Trabalho = Duração × capacidade diária somada dos recursos alocados.
+
+    - Informar `duration_days` (com ou sem `estimated_hours` junto): Duração
+      manda, Trabalho é recalculado a partir dela — precedência documentada
+      em TaskCreate/TaskUpdate.
+    - Informar só `estimated_hours`: Trabalho manda, Duração é recalculada
+      pelo caminho inverso (Trabalho ÷ capacidade).
+    - Nenhum dos dois: no-op — usado quando quem mudou foi a ALOCAÇÃO de
+      recurso (ver assign_resource/remove assignment em routers/tasks.py),
+      que mantém a Duração fixa e recalcula só o Trabalho com a nova
+      capacidade total (equivalente ao "Fixed Units": mais gente no mesmo
+      prazo = mais trabalho total, não prazo menor).
+    """
+    if duration_days is not None:
+        task.duration_days = duration_days
+        task.estimated_hours = duration_days * capacity_hours_per_day
+    elif estimated_hours is not None:
+        task.estimated_hours = estimated_hours
+        if capacity_hours_per_day > 0:
+            task.duration_days = estimated_hours / capacity_hours_per_day
+    else:
+        task.estimated_hours = task.duration_days * capacity_hours_per_day
+
+
+def recalculate_wbs(session: Session, project_id: str) -> list[Task]:
+    """Renumera o WBS/EAP de todas as tarefas do projeto a partir da
+    hierarquia (parent_task_id) e da ordem manual (sort_order, com o
+    wbs_code atual como desempate estável na primeira vez que isso roda).
+
+    Passa por um código temporário único (`_tmp_<id>`) antes de gravar os
+    códigos finais: como wbs_code tem uma constraint de unicidade por
+    projeto, renumerar "in-place" arriscaria uma trocar temporariamente
+    para o código que outra tarefa ainda não trocou — o passo intermediário
+    evita essa colisão.
+    """
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project_id)).all())
+    if not tasks:
+        return []
+    original_code = {t.id: t.wbs_code for t in tasks}
+    by_parent: dict[str | None, list[Task]] = defaultdict(list)
+    for t in tasks:
+        by_parent[t.parent_task_id].append(t)
+    for siblings in by_parent.values():
+        siblings.sort(key=lambda t: (t.sort_order, original_code[t.id]))
+
+    for t in tasks:
+        t.wbs_code = f"_tmp_{t.id}"
+    session.flush()
+
+    updated: list[Task] = []
+
+    def assign(parent_id: str | None, prefix_parts: list[int]) -> None:
+        for idx, t in enumerate(by_parent.get(parent_id, []), start=1):
+            parts = prefix_parts + [idx]
+            code = ".".join(str(p) for p in parts)
+            if original_code[t.id] != code:
+                updated.append(t)
+            t.wbs_code = code
+            assign(t.id, parts)
+
+    assign(None, [])
+    session.flush()
+    return updated
+
+
+def move_task(session: Session, task_id: str, *, new_parent_id: str | None, before_task_id: str | None) -> Task:
+    """Move uma tarefa para outro pai e/ou reordena entre as irmãs no
+    destino. Não mexe em wbs_code (chame `recalculate_wbs` depois) nem em
+    datas planejadas (chame `reschedule_cascade`/`recalculate_schedule`
+    depois, se a tarefa tiver predecessoras/sucessoras)."""
+    task = session.get(Task, task_id)
+    if not task:
+        raise ValueError("Tarefa não encontrada")
+
+    if new_parent_id:
+        parent = session.get(Task, new_parent_id)
+        if not parent or parent.project_id != task.project_id:
+            raise ValueError("new_parent_id precisa ser uma tarefa do mesmo projeto")
+        cursor: Task | None = parent
+        while cursor:
+            if cursor.id == task.id:
+                raise ValueError("Não é possível mover uma tarefa para dentro dela mesma (ou de uma descendente)")
+            cursor = session.get(Task, cursor.parent_task_id) if cursor.parent_task_id else None
+
+    siblings = [
+        s
+        for s in session.scalars(
+            select(Task)
+            .where(Task.project_id == task.project_id, Task.parent_task_id == new_parent_id)
+            .order_by(Task.sort_order)
+        ).all()
+        if s.id != task.id
+    ]
+
+    if before_task_id:
+        before = session.get(Task, before_task_id)
+        if not before or before.parent_task_id != new_parent_id or before.project_id != task.project_id:
+            raise ValueError("before_task_id precisa ser uma tarefa-irmã já existente no destino")
+        index = next(i for i, s in enumerate(siblings) if s.id == before_task_id)
+    else:
+        index = len(siblings)
+
+    siblings.insert(index, task)
+    task.parent_task_id = new_parent_id
+    for i, s in enumerate(siblings):
+        s.sort_order = i * 10
+    session.flush()
+    return task
+
+
+def _leaf_status_dot(task: Task, status_date: date) -> str:
+    """Bolinha de status de uma tarefa FOLHA (sem filhas) — regras
+    combinadas com o usuário: branca=por iniciar, vermelha=atrasada
+    (marcada DELAYED, ou planned_end_date já passou da status_date e ainda
+    não está 100% concluída), verde=dentro do prazo (inclui concluída)."""
+    if task.status == TaskStatus.NOT_STARTED:
+        return "white"
+    if task.status == TaskStatus.DELAYED:
+        return "red"
+    if task.status not in TASK_FINISHED_STATUSES and task.planned_end_date and task.planned_end_date < status_date:
+        return "red"
+    return "green"
+
+
+def task_dot_colors(tasks: list[Task], status_date: date) -> dict[str, str]:
+    """Bolinha de status por tarefa, já resolvendo a agregação de
+    tarefas-pai: amarela sempre que as filhas (recursivamente, usando a
+    bolinha JÁ agregada de cada uma) tiverem mais de uma cor diferente
+    entre si; senão, herda a cor única comum."""
+    children_by_parent: dict[str | None, list[Task]] = defaultdict(list)
+    for t in tasks:
+        children_by_parent[t.parent_task_id].append(t)
+
+    colors: dict[str, str] = {}
+
+    def resolve(task: Task) -> str:
+        if task.id in colors:
+            return colors[task.id]
+        children = children_by_parent.get(task.id, [])
+        if not children:
+            color = _leaf_status_dot(task, status_date)
+        else:
+            child_colors = {resolve(child) for child in children}
+            color = child_colors.pop() if len(child_colors) == 1 else "yellow"
+        colors[task.id] = color
+        return color
+
+    for t in tasks:
+        resolve(t)
+    return colors
+
+
+def _latest_baseline_task_map(session: Session, project_id: str) -> dict[str, dict] | None:
+    baseline = session.scalar(
+        select(Baseline).where(Baseline.project_id == project_id).order_by(Baseline.created_at.desc())
+    )
+    if not baseline:
+        return None
+    return {row["id"]: row for row in baseline.snapshot_data.get("tasks", [])}
+
+
+def _task_rollups(tasks: list[Task], cal: BusinessCalendar) -> dict[str, dict]:
+    """Agrega Duração/Trabalho/Início/Fim para tarefas-pai (WBS) a partir das
+    descendentes — mesmo padrão de agregação recursiva de `task_dot_colors`
+    (memoização por id, uma passada), só que para os campos de cronograma em
+    vez da bolinha de status.
+
+    Uma tarefa-pai nunca teve essas colunas próprias preenchidas de forma
+    útil (o próprio motor de agendamento nunca escreve nelas: cascata e
+    recálculo de EAP só mexem em tarefas-folha) — daí aparecerem em branco/
+    0h na grade sem isto. O valor "de verdade" mora nas folhas; o pai só
+    reflete o agregado, calculado sob demanda (nunca gravado em coluna,
+    mesmo espírito de status_dot/planned_percent_complete).
+
+    Início = menor planned_start_date entre as folhas descendentes.
+    Fim = maior planned_end_date entre as folhas descendentes.
+    Trabalho = soma de estimated_hours das folhas descendentes.
+    Duração = dias úteis (calendário do projeto) entre Início e Fim — não é
+    soma das durações das filhas (que podem rodar em paralelo).
+
+    Retorna só as entradas com pelo menos uma filha; o chamador usa os
+    campos próprios da tarefa para as demais (folhas)."""
+    children_by_parent: dict[str | None, list[Task]] = defaultdict(list)
+    for t in tasks:
+        children_by_parent[t.parent_task_id].append(t)
+
+    memo: dict[str, tuple[date | None, date | None, Decimal]] = {}
+
+    def resolve(task: Task) -> tuple[date | None, date | None, Decimal]:
+        if task.id in memo:
+            return memo[task.id]
+        children = children_by_parent.get(task.id, [])
+        if not children:
+            result = (task.planned_start_date, task.planned_end_date, Decimal(task.estimated_hours or 0))
+        else:
+            starts: list[date] = []
+            ends: list[date] = []
+            hours = Decimal("0")
+            for child in children:
+                c_start, c_end, c_hours = resolve(child)
+                if c_start:
+                    starts.append(c_start)
+                if c_end:
+                    ends.append(c_end)
+                hours += c_hours
+            result = (min(starts) if starts else None, max(ends) if ends else None, hours)
+        memo[task.id] = result
+        return result
+
+    rollups: dict[str, dict] = {}
+    for t in tasks:
+        start, end, hours = resolve(t)
+        if children_by_parent.get(t.id):
+            duration = Decimal(_duration_days(cal, start, end)) if start and end else None
+            rollups[t.id] = {"start": start, "end": end, "hours": hours, "duration": duration}
+    return rollups
+
+
+def _task_progress_rollups(tasks: list[Task]) -> dict[str, Decimal]:
+    """% concluído de QUALQUER tarefa (folha ou pai), ponderado pelas
+    `estimated_hours` das folhas descendentes — mesmo critério de
+    `_progress_from_tasks` (usado no dashboard/portfólio: tarefa maior pesa
+    mais, cai pra média simples quando nenhuma folha tem horas estimadas),
+    só que por subárvore em vez do projeto inteiro. Tarefa-folha (sem
+    filhas) usa a própria `progress_percentage`, sem ponderação — nada a
+    agregar.
+
+    Necessário pelo mesmo motivo de `_task_rollups` (acima) não usar as
+    colunas próprias de início/fim/horas de uma tarefa-pai: o motor de
+    agendamento NUNCA escreve em `progress_percentage` de uma tarefa-pai —
+    só apontamento de horas em tarefa-FOLHA mexe nela (ver
+    `_apply_task_progress`/`routers/timesheets.py`) — então uma tarefa de
+    2º nível que também é um agrupador da EAP ficaria sempre com 0% "cru",
+    mesmo com as folhas descendentes 100% concluídas. Usado só pelo
+    snapshot do Gantt (nível 1+2) do Status Report — ver
+    `build_status_report_snapshot`/`gantt_snapshot`; o Gantt completo
+    (`GET /schedule`, tela de Tarefas) sempre mostra tarefa-folha, nunca
+    precisa deste agregado."""
+    children_by_parent: dict[str | None, list[Task]] = defaultdict(list)
+    for t in tasks:
+        children_by_parent[t.parent_task_id].append(t)
+
+    memo: dict[str, tuple[Decimal, Decimal, Decimal, int]] = {}
+
+    def resolve(task: Task) -> tuple[Decimal, Decimal, Decimal, int]:
+        """(horas, ponderado, soma_simples, contagem) da subárvore."""
+        if task.id in memo:
+            return memo[task.id]
+        children = children_by_parent.get(task.id, [])
+        if not children:
+            hours = Decimal(task.estimated_hours or 0)
+            progress = Decimal(task.progress_percentage or 0)
+            result = (hours, hours * progress, progress, 1)
+        else:
+            hours = Decimal("0")
+            weighted = Decimal("0")
+            simple_sum = Decimal("0")
+            count = 0
+            for child in children:
+                c_hours, c_weighted, c_simple, c_count = resolve(child)
+                hours += c_hours
+                weighted += c_weighted
+                simple_sum += c_simple
+                count += c_count
+            result = (hours, weighted, simple_sum, count)
+        memo[task.id] = result
+        return result
+
+    percent_by_id: dict[str, Decimal] = {}
+    for t in tasks:
+        hours, weighted, simple_sum, count = resolve(t)
+        if hours > 0:
+            percent_by_id[t.id] = _q(weighted / hours)
+        elif count > 0:
+            percent_by_id[t.id] = _q(simple_sum / count)
+        else:
+            percent_by_id[t.id] = Decimal("0")
+    return percent_by_id
+
+
+def _task_depths(tasks: list[Task]) -> dict[str, int]:
+    """Profundidade de cada tarefa na EAP (0 = 1º nível/raiz, 1 = 2º nível,
+    ...) — mesmo critério de `buildOrderedTasks` no frontend
+    (ProjectDetailPage.jsx), usado aqui pra filtrar o snapshot do Gantt do
+    Status Report em até o 2º nível (depth <= 1, ver
+    `build_status_report_snapshot`/`gantt_snapshot`)."""
+    by_id = {t.id: t for t in tasks}
+    memo: dict[str, int] = {}
+
+    def depth_of(task: Task) -> int:
+        if task.id in memo:
+            return memo[task.id]
+        parent = by_id.get(task.parent_task_id) if task.parent_task_id else None
+        result = depth_of(parent) + 1 if parent else 0
+        memo[task.id] = result
+        return result
+
+    return {t.id: depth_of(t) for t in tasks}
+
+
+def _build_gantt_level2_snapshot(session: Session, project: Project, tasks: list[Task]) -> list[dict]:
+    """Congela, no momento da criação do Status Report, uma "foto" do Gantt
+    do projeto limitada ao 1º+2º nível da EAP (`depth <= 1`) — pedido do
+    usuário, com 2 prints da EAP recolhida manualmente até o 2º nível:
+    "imprima uma imagem do GANTT considerando as informações até o segundo
+    nível de tarefas pai e filhas, em forma recolhida", "respeitando as
+    cores conforme definido no projeto [...] quando uma atividade estiver
+    concluída que mude de cor". Confirmado com o usuário: fixo em nível 2
+    (nunca os filhos de 3º nível em diante) e CONGELADO junto com o resto
+    do "fechamento" (ver docstring de `ProjectStatusReport`) — reabrir um
+    relatório antigo mostra o MESMO Gantt daquela época, mesmo que o
+    projeto tenha mudado depois (tarefa renomeada/reagendada/apagada).
+
+    As cores (por `task_type`) e a lógica de "muda de cor quando
+    concluída" (laranja parcial/verde 100%) já existem no Gantt completo
+    (`GanttTab`/`handleExportPng` em ProjectDetailPage.jsx) e são
+    reaproveitadas sem mudança nenhuma — aqui só é preciso congelar os
+    DADOS; o desenho (cores, barra, legenda) é feito no frontend a partir
+    deste snapshot (ver `StatusReportGanttMini.jsx`)."""
+    cal = calendar_for_project(session, project)
+    rollups = _task_rollups(tasks, cal)
+    progress_by_id = _task_progress_rollups(tasks)
+    depth_by_id = _task_depths(tasks)
+    ordered = order_tasks_hierarchically(tasks)
+
+    snapshot = []
+    for t in ordered:
+        depth = depth_by_id.get(t.id, 0)
+        if depth > 1:
+            continue
+        rollup = rollups.get(t.id)
+        start = rollup["start"] if rollup else t.planned_start_date
+        end = rollup["end"] if rollup else t.planned_end_date
+        snapshot.append(
+            {
+                "id": t.id,
+                "wbs_code": t.wbs_code,
+                "name": t.name,
+                "depth": depth,
+                "task_type": t.task_type.value,
+                "is_milestone": t.is_milestone,
+                "start_date": start.isoformat() if start else None,
+                "end_date": end.isoformat() if end else None,
+                "progress_percent": str(progress_by_id.get(t.id, Decimal("0"))),
+            }
+        )
+    return snapshot
+
+
+def _natural_sort_key(text: str) -> tuple:
+    """Chave de comparação "numérica por trecho" pra strings tipo WBS
+    (ex.: "1.2" < "1.10", não o contrário como daria a comparação de string
+    pura) — mesmo critério do `localeCompare(..., {numeric: true})` usado
+    em `buildOrderedTasks` no frontend (ver ProjectDetailPage.jsx)."""
+    return tuple(int(part) if part.isdigit() else part for part in re.split(r"(\d+)", text or ""))
+
+
+def order_tasks_hierarchically(tasks: list[Task]) -> list[Task]:
+    """Ordena tarefas na ordem "natural" da EAP/WBS: hierarquia
+    (parent_task_id) + ordem manual entre irmãs (sort_order, com wbs_code
+    como desempate) — igual ao `recalculate_wbs` usa pra renumerar e ao
+    `buildOrderedTasks` do frontend usa pra montar a grade de Tarefas.
+    Usada em qualquer lugar que precise listar tarefas nessa ordem sem
+    depender de `ORDER BY wbs_code` do banco (que é só comparação de
+    string — quebra a partir de 10 tarefas-irmãs, ex.: "1.10" antes de
+    "1.2"), como o Gantt e a exportação para Excel (ambos consomem
+    `task_schedule_rows`, ver abaixo)."""
+    by_parent: dict[str | None, list[Task]] = defaultdict(list)
+    for t in tasks:
+        by_parent[t.parent_task_id].append(t)
+    for siblings in by_parent.values():
+        siblings.sort(key=lambda t: (t.sort_order, _natural_sort_key(t.wbs_code)))
+
+    ordered: list[Task] = []
+
+    def visit(parent_id: str | None) -> None:
+        for t in by_parent.get(parent_id, []):
+            ordered.append(t)
+            visit(t.id)
+
+    visit(None)
+    # Defensivo: se alguma tarefa tiver parent_task_id "órfão" (não deveria
+    # acontecer — FK é sempre para outra tarefa do mesmo projeto — mas não
+    # pode sumir silenciosamente do Gantt/exportação se acontecer).
+    if len(ordered) != len(tasks):
+        seen = {t.id for t in ordered}
+        ordered.extend(t for t in tasks if t.id not in seen)
+    return ordered
+
+
+def task_schedule_rows(session: Session, project: Project) -> dict:
+    """Monta a grade de cronograma (bolinha de status + linha base + %
+    previsto por tarefa) usada por GET /projects/{id}/schedule — junta o
+    que já existe em Task com o que precisa ser calculado sob demanda
+    (nunca fica guardado em coluna, porque muda conforme status_date e o
+    baseline mais recente).
+
+    As tarefas voltam na ordem hierárquica da EAP/WBS (ver
+    order_tasks_hierarchically) — GET /schedule alimenta tanto o Gantt
+    quanto a exportação para Excel (app/exports.py), e nenhum dos dois
+    reordena por conta própria."""
+    status_date = project.status_date or date.today()
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project.id)).all())
+    tasks = order_tasks_hierarchically(tasks)
+    dots = task_dot_colors(tasks, status_date)
+    baseline_map = _latest_baseline_task_map(session, project.id)
+    cal = calendar_for_project(session, project)
+    rollups = _task_rollups(tasks, cal)
+
+    def _baseline_field(row: dict | None, direct_key: str, rollup_key: str):
+        """Tarefa-folha usa o campo direto do snapshot; tarefa-pai (sem
+        planned_start_date/end_date/estimated_hours próprios, ver
+        _task_rollups) cai pro agregado que create_baseline também gravou
+        no snapshot (rollup_start_date/rollup_end_date/rollup_estimated_hours)
+        — mesma regra de fallback rollup ?? campo próprio usada em toda a
+        grade "ao vivo", só que lendo de um snapshot congelado em vez das
+        tarefas atuais. Baselines salvos antes desta rollup existir no
+        snapshot simplesmente não têm a chave — cai pra None, não quebra."""
+        if not row:
+            return None
+        return row.get(direct_key) or row.get(rollup_key)
+
+    rows = []
+    for t in tasks:
+        baseline_row = baseline_map.get(t.id) if baseline_map else None
+        rollup = rollups.get(t.id)
+        # Pra % previsto, uma tarefa-pai usa o intervalo agregado das
+        # descendentes (rollup) — sem isso, ficaria sempre em 0% porque
+        # planned_start_date/end_date da própria linha-pai são nulos.
+        effective_start = rollup["start"] if rollup else t.planned_start_date
+        effective_end = rollup["end"] if rollup else t.planned_end_date
+        planned_percent = Decimal("100") if (effective_end and effective_end <= status_date) else Decimal("0")
+        if effective_start and effective_end and effective_start <= status_date < effective_end:
+            total_span = max((effective_end - effective_start).days, 1)
+            elapsed = (status_date - effective_start).days
+            planned_percent = _q(Decimal(max(elapsed, 0)) / Decimal(total_span) * 100)
+
+        # SPI/CPI POR TAREFA — mesma lógica de project_evm (base de horas,
+        # usando o baseline mais recente quando existe), só que aplicada a
+        # uma única tarefa em vez de somada no projeto inteiro.
+        baseline_hours = Decimal(baseline_row["estimated_hours"]) if baseline_row and baseline_row.get("estimated_hours") else None
+        task_planned_hours = baseline_hours if baseline_hours is not None else Decimal(t.estimated_hours or 0)
+        task_planned_end = (
+            date.fromisoformat(baseline_row["planned_end_date"])
+            if baseline_row and baseline_row.get("planned_end_date")
+            else t.planned_end_date
+        )
+        task_pv = task_planned_hours if (task_planned_end and task_planned_end <= status_date) else Decimal("0")
+        task_ev = task_planned_hours * Decimal(t.progress_percentage or 0) / 100
+        task_ac = Decimal(t.actual_hours or 0)
+        task_spi = _q(task_ev / task_pv) if task_pv > 0 else None
+        task_cpi = _q(task_ev / task_ac) if task_ac > 0 else None
+
+        rows.append(
+            {
+                "task": t,
+                "status_dot": dots.get(t.id, "white"),
+                "rollup_start_date": rollup["start"] if rollup else None,
+                "rollup_end_date": rollup["end"] if rollup else None,
+                "rollup_duration_days": rollup["duration"] if rollup else None,
+                "rollup_estimated_hours": rollup["hours"] if rollup else None,
+                "baseline_start_date": (
+                    date.fromisoformat(_baseline_field(baseline_row, "planned_start_date", "rollup_start_date"))
+                    if _baseline_field(baseline_row, "planned_start_date", "rollup_start_date")
+                    else None
+                ),
+                "baseline_end_date": (
+                    date.fromisoformat(_baseline_field(baseline_row, "planned_end_date", "rollup_end_date"))
+                    if _baseline_field(baseline_row, "planned_end_date", "rollup_end_date")
+                    else None
+                ),
+                "baseline_estimated_hours": (
+                    Decimal(_baseline_field(baseline_row, "estimated_hours", "rollup_estimated_hours"))
+                    if _baseline_field(baseline_row, "estimated_hours", "rollup_estimated_hours")
+                    else None
+                ),
+                "planned_percent_complete": planned_percent,
+                "spi": task_spi,
+                "cpi": task_cpi,
+            }
+        )
+    return {"status_date": status_date, "rows": rows}
+
+
+def project_evm(session: Session, project_id: str, status_date: date | None = None) -> dict:
+    """SPI/CPI e % previsto em base de HORAS (estimated_hours), não
+    monetária — decisão registrada com o usuário. PV e EV usam as horas do
+    baseline mais recente quando existe (prática padrão de EVM: o "budget"
+    é o plano congelado, não o plano que continua sendo replanejado); sem
+    nenhum baseline ainda, caem para as horas/datas planejadas atuais.
+
+    - PV (planned value): soma das horas orçadas das tarefas cujo fim
+      planejado (baseline ou atual) já passou da status_date — "quanto
+      trabalho deveria ter sido concluído até aqui".
+    - EV (earned value): soma das horas orçadas × % concluído de CADA
+      tarefa, na mesma base de horas do PV.
+    - AC (actual cost, em horas): soma de Task.actual_hours.
+    - SPI = EV/PV, CPI = EV/AC — None quando o denominador é zero.
+    """
     project = session.get(Project, project_id)
     if not project:
         raise ValueError("Projeto não encontrado")
+    status_date = status_date or project.status_date or date.today()
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project_id)).all())
+    baseline_map = _latest_baseline_task_map(session, project_id)
+
+    def planned_hours(t: Task) -> Decimal:
+        row = baseline_map.get(t.id) if baseline_map else None
+        if row and row.get("estimated_hours"):
+            return Decimal(row["estimated_hours"])
+        return Decimal(t.estimated_hours or 0)
+
+    def planned_end(t: Task) -> date | None:
+        row = baseline_map.get(t.id) if baseline_map else None
+        if row and row.get("planned_end_date"):
+            return date.fromisoformat(row["planned_end_date"])
+        return t.planned_end_date
+
+    total_planned_hours = sum((planned_hours(t) for t in tasks), Decimal("0"))
+    pv = sum((planned_hours(t) for t in tasks if planned_end(t) and planned_end(t) <= status_date), Decimal("0"))
+    ev = sum((planned_hours(t) * Decimal(t.progress_percentage or 0) / 100 for t in tasks), Decimal("0"))
+    ac = sum((Decimal(t.actual_hours or 0) for t in tasks), Decimal("0"))
+
+    spi = _q(ev / pv) if pv > 0 else None
+    cpi = _q(ev / ac) if ac > 0 else None
+    planned_percent_complete = _q((pv / total_planned_hours) * 100) if total_planned_hours > 0 else Decimal("0")
+    percent_complete = _progress_from_tasks(tasks)["percent_complete"]
+
+    return {
+        "status_date": status_date,
+        "planned_value_hours": _q(pv),
+        "earned_value_hours": _q(ev),
+        "actual_hours": _q(ac),
+        "spi": spi,
+        "cpi": cpi,
+        "planned_percent_complete": planned_percent_complete,
+        "percent_complete": percent_complete,
+    }
+
+
+def project_statistics(session: Session, project_id: str) -> dict:
+    """Espelha a caixa "Project Statistics" do MS Project. Uma simplificação
+    honesta: este sistema não faz custeio completo por recurso/tarefa como
+    o MS Project, então a coluna "Cost" só é preenchida em `actual` (usando
+    o mesmo custo real de `project_financials`) — em `current`/`baseline`
+    fica None em vez de inventar um número."""
+    project = session.get(Project, project_id)
+    if not project:
+        raise ValueError("Projeto não encontrado")
+    cal = calendar_for_project(session, project)
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project_id)).all())
+
+    starts = [t.planned_start_date for t in tasks if t.planned_start_date]
+    ends = [t.planned_end_date for t in tasks if t.planned_end_date]
+    current_start = project.start_date or (min(starts) if starts else None)
+    current_finish = project.end_date or (max(ends) if ends else None)
+    current_duration = Decimal(_duration_days(cal, current_start, current_finish)) if current_start and current_finish else Decimal("0")
+    current_work = sum((Decimal(t.estimated_hours or 0) for t in tasks), Decimal("0"))
+    current = {
+        "start_date": current_start,
+        "finish_date": current_finish,
+        "duration_days": current_duration,
+        "work_hours": current_work,
+        "cost": None,
+    }
+
+    baseline_map = _latest_baseline_task_map(session, project_id)
+    baseline = None
+    if baseline_map:
+        b_starts = [date.fromisoformat(r["planned_start_date"]) for r in baseline_map.values() if r.get("planned_start_date")]
+        b_ends = [date.fromisoformat(r["planned_end_date"]) for r in baseline_map.values() if r.get("planned_end_date")]
+        b_start = min(b_starts) if b_starts else None
+        b_finish = max(b_ends) if b_ends else None
+        baseline = {
+            "start_date": b_start,
+            "finish_date": b_finish,
+            "duration_days": Decimal(_duration_days(cal, b_start, b_finish)) if b_start and b_finish else Decimal("0"),
+            "work_hours": sum((Decimal(r["estimated_hours"]) for r in baseline_map.values() if r.get("estimated_hours")), Decimal("0")),
+            "cost": None,
+        }
+
+    actual_starts = [t.actual_start_date for t in tasks if t.actual_start_date]
+    all_finished = bool(tasks) and all(t.actual_end_date for t in tasks)
+    actual_ends = [t.actual_end_date for t in tasks if t.actual_end_date]
+    actual_start = min(actual_starts) if actual_starts else None
+    actual_finish = max(actual_ends) if (all_finished and actual_ends) else None
+    reference_end = actual_finish or date.today()
+    actual_duration = Decimal(_duration_days(cal, actual_start, reference_end)) if actual_start else Decimal("0")
+    actual_work = sum((Decimal(t.actual_hours or 0) for t in tasks), Decimal("0"))
+    actual_cost = project_financials(session, project_id)["real_cost"]
+    actual = {
+        "start_date": actual_start,
+        "finish_date": actual_finish,
+        "duration_days": actual_duration,
+        "work_hours": actual_work,
+        "cost": actual_cost,
+    }
+
+    variance_finish_days = None
+    if baseline and baseline["finish_date"] and current["finish_date"]:
+        sign = 1 if current["finish_date"] >= baseline["finish_date"] else -1
+        variance_finish_days = Decimal(sign * _duration_days(cal, min(current["finish_date"], baseline["finish_date"]), max(current["finish_date"], baseline["finish_date"])))
+
+    percent_complete_duration = _q((actual_duration / current_duration) * 100) if current_duration > 0 else Decimal("0")
+    percent_complete_work = _q((actual_work / current_work) * 100) if current_work > 0 else Decimal("0")
+
+    return {
+        "current": current,
+        "baseline": baseline,
+        "actual": actual,
+        "variance_finish_days": variance_finish_days,
+        "percent_complete_duration": percent_complete_duration,
+        "percent_complete_work": percent_complete_work,
+    }
+
+
+def project_financials(session: Session, project_id: str) -> dict[str, Decimal | None]:
+    project = session.get(Project, project_id)
+    if not project:
+        raise ValueError("Projeto não encontrado")
+    # outerjoin (não join) porque um apontamento avulso (Timesheet.task_id
+    # nulo) pode mesmo assim estar alocado a este projeto via
+    # Timesheet.project_id — sem isso, hora avulsa nunca entraria no custo
+    # real do projeto.
     rows = session.execute(
         select(Timesheet.hours_spent, Resource.internal_cost_per_hour)
         .join(Resource, Resource.id == Timesheet.resource_id)
-        .join(Task, Task.id == Timesheet.task_id)
-        .where(Task.project_id == project_id, Timesheet.status != "REJECTED")
+        .outerjoin(Task, Task.id == Timesheet.task_id)
+        .where(
+            or_(Task.project_id == project_id, Timesheet.project_id == project_id),
+            Timesheet.status != TimesheetStatus.REJECTED,
+        )
     ).all()
     timesheet_cost = sum((Decimal(hours) * Decimal(rate) for hours, rate in rows), Decimal("0"))
     expense_cost = sum((Decimal(x) for x in session.scalars(select(ProjectExpense.amount).where(ProjectExpense.project_id == project_id)).all()), Decimal("0"))
     real_cost = timesheet_cost + expense_cost
     sold = Decimal(project.sold_value or 0)
-    return {"sold_value": sold, "timesheet_cost": timesheet_cost, "expense_cost": expense_cost, "real_cost": real_cost, "profit_margin": sold - real_cost}
+    profit_margin = sold - real_cost
+    # "% Margem Real" (pedido do usuário, "melhorias parte 5") — comparável
+    # com Project.margin_percentage ("% Margem Planejada" na tela, o valor
+    # DECLARADO na venda/BID): esta sim calculada a partir do custo efetivo
+    # (sold_value x real_cost), exibida lado a lado no Financeiro do
+    # projeto. None sem valor vendido (nada pra comparar — evita divisão
+    # por zero).
+    real_margin_percentage = _q((profit_margin / sold) * 100) if sold > 0 else None
+    return {
+        "sold_value": sold,
+        "timesheet_cost": timesheet_cost,
+        "expense_cost": expense_cost,
+        "real_cost": real_cost,
+        "profit_margin": profit_margin,
+        "real_margin_percentage": real_margin_percentage,
+    }
+
+
+def _progress_from_tasks(tasks: list[Task]) -> dict:
+    """% concluído ponderado pelas estimated_hours de cada tarefa (uma
+    tarefa maior pesa mais no percentual do que uma pequena); cai para
+    média simples quando nenhuma tarefa tem horas estimadas. Recebe a
+    lista de tarefas já carregada para permitir reaproveitamento (ver
+    `portfolio_rows`, que evita reconsultar o banco por projeto)."""
+    tasks_total = len(tasks)
+    tasks_remaining = sum(1 for t in tasks if t.status not in TASK_FINISHED_STATUSES)
+    tasks_by_status: dict[str, int] = defaultdict(int)
+    for t in tasks:
+        tasks_by_status[t.status.value] += 1
+    total_hours = sum((Decimal(t.estimated_hours or 0) for t in tasks), Decimal("0"))
+    if total_hours > 0:
+        weighted = sum((Decimal(t.estimated_hours or 0) * Decimal(t.progress_percentage or 0) for t in tasks), Decimal("0"))
+        percent_complete = weighted / total_hours
+    elif tasks_total:
+        percent_complete = sum((Decimal(t.progress_percentage or 0) for t in tasks), Decimal("0")) / tasks_total
+    else:
+        percent_complete = Decimal("0")
+    return {
+        "tasks_total": tasks_total,
+        "tasks_remaining": tasks_remaining,
+        "tasks_by_status": dict(tasks_by_status),
+        "percent_complete": _q(percent_complete),
+    }
+
+
+def project_progress(session: Session, project_id: str) -> dict:
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project_id)).all())
+    return _progress_from_tasks(tasks)
+
+
+def _next_milestone(tasks: list[Task]) -> tuple[str | None, date | None]:
+    today = date.today()
+    upcoming = [t for t in tasks if t.is_milestone and t.planned_end_date and t.planned_end_date >= today]
+    if not upcoming:
+        return None, None
+    nxt = min(upcoming, key=lambda t: t.planned_end_date)
+    return nxt.name, nxt.planned_end_date
+
+
+def portfolio_rows(session: Session, projects: list[Project], *, include_financials: bool) -> list[dict]:
+    """Uma linha por projeto (status, % concluído, margem, próximo marco) —
+    usada tanto por GET /reports/portfolio quanto pela seção `portfolio` de
+    GET /dashboard. `include_financials=False` (perfis externos) omite a
+    margem, no mesmo padrão de ocultação usado em ProjectDetail."""
+    # Nome do gerente responsável (pedido do usuário: aparecer na lista de
+    # Projetos) — um lookup em lote (nunca N+1 por linha).
+    manager_ids = {project.manager_id for project in projects}
+    managers_by_id = (
+        {u.id: u.name for u in session.scalars(select(User).where(User.id.in_(manager_ids))).all()} if manager_ids else {}
+    )
+    rows: list[dict] = []
+    for project in projects:
+        tasks = list(session.scalars(select(Task).where(Task.project_id == project.id)).all())
+        progress = _progress_from_tasks(tasks)
+        milestone_name, milestone_date = _next_milestone(tasks)
+        margin = None
+        if include_financials:
+            margin = project_financials(session, project.id)["profit_margin"]
+        rows.append(
+            {
+                "id": project.id,
+                "code": project.code,
+                "name": project.name,
+                "status": project.status,
+                "manager_name": managers_by_id.get(project.manager_id, "—"),
+                "percent_complete": progress["percent_complete"],
+                "tasks_total": progress["tasks_total"],
+                "tasks_remaining": progress["tasks_remaining"],
+                "margin": margin,
+                "next_milestone_name": milestone_name,
+                "next_milestone_date": milestone_date,
+                "color": project.color,
+                "color_striped": project.color_striped,
+            }
+        )
+    return rows
+
+
+def financials_by_task_type(session: Session, project_id: str) -> dict[str, dict[str, Decimal]]:
+    """Quebra do custo real do projeto entre horas de GESTÃO e de
+    CONSULTORIA (Task.task_type). Um apontamento avulso vinculado só ao
+    projeto (Timesheet.task_id nulo) não tem task_type — entra no bucket
+    "ADHOC" em vez de ser descartado ou atribuído arbitrariamente a uma das
+    duas bolsas contratadas. "Traslado" (Timesheet.is_transit, pedido do
+    usuário) é um caso parecido mas com bucket próprio ("TRASLADO"), pra dar
+    pra ver quanto foi gasto em deslocamento separado do resto das horas
+    avulsas (decisão confirmada com o usuário)."""
+    rows = session.execute(
+        select(Timesheet.hours_spent, Resource.internal_cost_per_hour, Task.task_type, Timesheet.is_transit)
+        .join(Resource, Resource.id == Timesheet.resource_id)
+        .outerjoin(Task, Task.id == Timesheet.task_id)
+        .where(
+            or_(Task.project_id == project_id, Timesheet.project_id == project_id),
+            Timesheet.status != TimesheetStatus.REJECTED,
+        )
+    ).all()
+    buckets: dict[str, dict[str, Decimal]] = {
+        TaskType.MANAGEMENT.value: {"hours": Decimal("0"), "cost": Decimal("0")},
+        TaskType.CONSULTING.value: {"hours": Decimal("0"), "cost": Decimal("0")},
+        "TRASLADO": {"hours": Decimal("0"), "cost": Decimal("0")},
+        "ADHOC": {"hours": Decimal("0"), "cost": Decimal("0")},
+    }
+    for hours, rate, task_type, is_transit in rows:
+        key = task_type.value if task_type is not None else ("TRASLADO" if is_transit else "ADHOC")
+        buckets[key]["hours"] += Decimal(hours)
+        buckets[key]["cost"] += Decimal(hours) * Decimal(rate)
+    for bucket in buckets.values():
+        bucket["hours"] = _q(bucket["hours"])
+        bucket["cost"] = _q(bucket["cost"])
+    return buckets
+
+
+def _empty_hours_breakdown_bucket() -> dict:
+    return {
+        "project_hours": Decimal("0"),
+        "transit_hours": Decimal("0"),
+        "internal_hours": Decimal("0"),
+        "absence_hours": {absence_type.value: Decimal("0") for absence_type in AbsenceType},
+    }
+
+
+def _quantize_hours_breakdown_bucket(bucket: dict) -> dict:
+    bucket["project_hours"] = _q(bucket["project_hours"])
+    bucket["transit_hours"] = _q(bucket["transit_hours"])
+    bucket["internal_hours"] = _q(bucket["internal_hours"])
+    bucket["absence_hours"] = {key: _q(value) for key, value in bucket["absence_hours"].items()}
+    return bucket
+
+
+def hours_breakdown_report(
+    session: Session,
+    *,
+    start: date,
+    end: date,
+    resource_id: str | None = None,
+    client_id: str | None = None,
+    project_id: str | None = None,
+) -> dict:
+    """Relatório novo (pedido do usuário, menu "Relatórios"): acompanha, num
+    só lugar, horas de PROJETO (cliente), TRASLADO e cada tipo de AUSÊNCIA —
+    coisa que antes só dava pra ver espalhada (Financeiro é por projeto e
+    nunca mostra ausência; Aprovações/Meus apontamentos são lista crua, sem
+    totalizador). "Horas internas" (hora administrativa interna — sem
+    projeto, sem Traslado, sem ausência) entra como quarta categoria, pra o
+    total bater com a soma de todos os apontamentos do período.
+
+    Dois níveis (decisão confirmada com o usuário): totais da empresa
+    inteira + quebra por recurso. "Horas de projeto" tem ainda uma terceira
+    tabela (`by_project`) com o detalhe por cliente/projeto — sem isso a
+    categoria "projeto" ficaria um número opaco, diferente de Traslado/
+    Ausência que já são auto-explicativos.
+
+    Mesmos critérios de exclusão dos demais relatórios de horas
+    (financials_by_task_type/service_orders): REJECTED não conta."""
+    project_col = func.coalesce(Task.project_id, Timesheet.project_id)
+    stmt = (
+        select(
+            Timesheet.resource_id,
+            Timesheet.hours_spent,
+            Timesheet.is_transit,
+            Timesheet.absence_type,
+            project_col.label("project_id"),
+        )
+        .outerjoin(Task, Task.id == Timesheet.task_id)
+        .where(
+            Timesheet.date >= start,
+            Timesheet.date <= end,
+            Timesheet.status != TimesheetStatus.REJECTED,
+        )
+    )
+    if resource_id:
+        stmt = stmt.where(Timesheet.resource_id == resource_id)
+    if project_id:
+        stmt = stmt.where(project_col == project_id)
+    if client_id:
+        client_project_ids = select(Project.id).where(Project.client_id == client_id)
+        stmt = stmt.where(project_col.in_(client_project_ids))
+    rows = session.execute(stmt).all()
+
+    totals = _empty_hours_breakdown_bucket()
+    by_resource: dict[str, dict] = {}
+    by_project: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+
+    for row in rows:
+        bucket = by_resource.setdefault(row.resource_id, _empty_hours_breakdown_bucket())
+        hours = Decimal(row.hours_spent)
+        if row.absence_type:
+            totals["absence_hours"][row.absence_type.value] += hours
+            bucket["absence_hours"][row.absence_type.value] += hours
+        elif row.is_transit:
+            totals["transit_hours"] += hours
+            bucket["transit_hours"] += hours
+        elif row.project_id:
+            totals["project_hours"] += hours
+            bucket["project_hours"] += hours
+            by_project[row.project_id] += hours
+        else:
+            totals["internal_hours"] += hours
+            bucket["internal_hours"] += hours
+
+    _quantize_hours_breakdown_bucket(totals)
+    for bucket in by_resource.values():
+        _quantize_hours_breakdown_bucket(bucket)
+
+    resources = (
+        {r.id: r for r in session.scalars(select(Resource).where(Resource.id.in_(by_resource.keys()))).all()}
+        if by_resource
+        else {}
+    )
+    user_ids = {r.user_id for r in resources.values()}
+    users = {u.id: u for u in session.scalars(select(User).where(User.id.in_(user_ids))).all()} if user_ids else {}
+
+    by_resource_rows = []
+    for rid, bucket in by_resource.items():
+        resource = resources.get(rid)
+        user = users.get(resource.user_id) if resource else None
+        by_resource_rows.append({"resource_id": rid, "resource_name": user.name if user else rid, **bucket})
+    by_resource_rows.sort(key=lambda row: row["resource_name"])
+
+    projects = (
+        {p.id: p for p in session.scalars(select(Project).where(Project.id.in_(by_project.keys()))).all()}
+        if by_project
+        else {}
+    )
+    client_ids = {p.client_id for p in projects.values()}
+    clients = {c.id: c for c in session.scalars(select(Client).where(Client.id.in_(client_ids))).all()} if client_ids else {}
+
+    by_project_rows = []
+    for pid, hours in by_project.items():
+        project = projects.get(pid)
+        client = clients.get(project.client_id) if project else None
+        by_project_rows.append(
+            {
+                "project_id": pid,
+                "project_code": project.code if project else pid,
+                "project_name": project.name if project else "",
+                "client_name": client.legal_name if client else "",
+                "hours": _q(hours),
+            }
+        )
+    by_project_rows.sort(key=lambda row: (row["client_name"], row["project_code"]))
+
+    return {
+        "period_start": start,
+        "period_end": end,
+        "totals": totals,
+        "by_resource": by_resource_rows,
+        "by_project": by_project_rows,
+    }
+
+
+def project_burndown(session: Session, project_id: str) -> list[dict]:
+    """Burndown calculado sob demanda a partir dos dados atuais — sem
+    snapshot diário armazenado (decisão de design: mais simples e nunca
+    fica dessincronizado dos dados reais; um snapshot fica disponível via
+    Baseline se algum dia for preciso "congelar" um burndown histórico).
+
+    - "Planejado": assume que cada tarefa consome 100% da sua
+      estimated_hours exatamente em planned_end_date.
+    - "Realizado": acumulado de horas apontadas (Timesheet.hours_spent,
+      excluindo REJECTED) até cada data amostrada.
+
+    Amostragem semanal entre o início e o fim do projeto (datas do próprio
+    projeto se informadas; senão o menor planned_start_date / maior
+    planned_end_date entre as tarefas). Sem essas datas, ou sem nenhuma
+    hora estimada, retorna lista vazia — não há uma linha de base para
+    desenhar o gráfico.
+    """
+    project = session.get(Project, project_id)
+    if not project:
+        raise ValueError("Projeto não encontrado")
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project_id)).all())
+    total_hours = sum((Decimal(t.estimated_hours or 0) for t in tasks), Decimal("0"))
+    starts = [t.planned_start_date for t in tasks if t.planned_start_date]
+    ends = [t.planned_end_date for t in tasks if t.planned_end_date]
+    start = project.start_date or (min(starts) if starts else None)
+    end = project.end_date or (max(ends) if ends else None)
+    if not start or not end or start > end or total_hours <= 0:
+        return []
+
+    timesheet_rows = session.execute(
+        select(Timesheet.date, Timesheet.hours_spent)
+        .outerjoin(Task, Task.id == Timesheet.task_id)
+        .where(
+            or_(Task.project_id == project_id, Timesheet.project_id == project_id),
+            Timesheet.status != TimesheetStatus.REJECTED,
+        )
+    ).all()
+
+    def planned_remaining(as_of: date) -> Decimal:
+        done = sum((Decimal(t.estimated_hours or 0) for t in tasks if t.planned_end_date and t.planned_end_date <= as_of), Decimal("0"))
+        return _q(total_hours - done)
+
+    def actual_remaining(as_of: date) -> Decimal:
+        done = sum((Decimal(hours) for ts_date, hours in timesheet_rows if ts_date <= as_of), Decimal("0"))
+        return _q(total_hours - done)
+
+    points: list[dict] = []
+    current = start
+    while current < end:
+        points.append(
+            {"date": current, "planned_remaining_hours": planned_remaining(current), "actual_remaining_hours": actual_remaining(current)}
+        )
+        current += timedelta(days=7)
+    points.append({"date": end, "planned_remaining_hours": planned_remaining(end), "actual_remaining_hours": actual_remaining(end)})
+    return points
+
+
+def build_status_report_snapshot(session: Session, project_id: str, *, period_start: date, period_end: date) -> dict:
+    """Monta o "fechamento" congelado de um Status Report (pedido do
+    usuário: "pode implementar os 2 modelos e colocar na opção de
+    relatórios") — reaproveita os cálculos já existentes (`project_evm`,
+    `project_financials`, `project_burndown`) em vez de duplicar lógica, e
+    resolve só o que ainda não existia: tarefas concluídas no período,
+    tarefas previstas para o período seguinte (mesma duração do período
+    informado, começando no dia seguinte a `period_end` — "semana anterior
+    × próxima semana" do mockup) e o snapshot dos riscos abertos/mitigados
+    do projeto. O retorno é consumido tanto por `POST
+    /projects/{id}/status-reports` (grava como está) quanto, campo a
+    campo, pelos `Numeric`/`JSON` de `ProjectStatusReport`.
+
+    Dados financeiros (custo/margem) nunca são ocultados AQUI — quem
+    decide se o perfil pedindo pode vê-los é o router (mesmo critério de
+    `project_report`), porque o snapshot grava os dois perfis de dado na
+    MESMA linha."""
+    project = session.get(Project, project_id)
+    if not project:
+        raise ValueError("Projeto não encontrado")
+
+    evm = project_evm(session, project_id)
+
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project_id)).all())
+    hours_budgeted = sum((Decimal(t.estimated_hours or 0) for t in tasks), Decimal("0"))
+
+    financials = project_financials(session, project_id)
+    # "Custo previsto": não existe campo próprio no projeto (ver docstring
+    # de Project.margin_percentage) — derivado do valor vendido e da %
+    # margem PLANEJADA/BID, mesma relação (margem = (vendido - custo) /
+    # vendido) usada por `real_margin_percentage` em `project_financials`,
+    # só que isolando o custo em vez da margem. None sem valor vendido ou
+    # sem margem planejada informada (nada pra derivar).
+    cost_planned = None
+    if project.margin_percentage is not None and financials["sold_value"] > 0:
+        cost_planned = _q(financials["sold_value"] * (1 - Decimal(project.margin_percentage) / 100))
+
+    # Tarefas concluídas no período informado ("semana anterior" do mockup).
+    tasks_done = [
+        {
+            "id": t.id,
+            "wbs_code": t.wbs_code,
+            "name": t.name,
+            "planned_start_date": t.planned_start_date.isoformat() if t.planned_start_date else None,
+            "planned_end_date": t.planned_end_date.isoformat() if t.planned_end_date else None,
+        }
+        for t in tasks
+        if t.status in TASK_FINISHED_STATUSES and t.actual_end_date and period_start <= t.actual_end_date <= period_end
+    ]
+
+    # Tarefas previstas pro período seguinte, de mesma duração ("próxima
+    # semana" do mockup) — qualquer tarefa ainda não finalizada cuja janela
+    # planejada cruza esse intervalo (não só as que começam exatamente
+    # nele), senão uma tarefa em andamento que atravessa a virada some do
+    # relatório.
+    next_start = period_end + timedelta(days=1)
+    next_end = next_start + (period_end - period_start)
+    tasks_next = [
+        {
+            "id": t.id,
+            "wbs_code": t.wbs_code,
+            "name": t.name,
+            "planned_start_date": t.planned_start_date.isoformat() if t.planned_start_date else None,
+            "planned_end_date": t.planned_end_date.isoformat() if t.planned_end_date else None,
+        }
+        for t in tasks
+        if t.status not in TASK_FINISHED_STATUSES
+        and t.planned_start_date
+        and t.planned_start_date <= next_end
+        and (t.planned_end_date is None or t.planned_end_date >= next_start)
+    ]
+
+    # Riscos abertos/mitigados (CLOSED fica de fora — não é mais relevante
+    # pro relatório do período) — snapshot copiado, não referência viva à
+    # tabela `risks` (ver docstring de ProjectStatusReport).
+    risks = list(
+        session.scalars(select(Risk).where(Risk.project_id == project_id, Risk.status != RiskStatus.CLOSED)).all()
+    )
+    risks_snapshot = [
+        {
+            "id": r.id,
+            "description": r.description,
+            "probability": r.probability.value,
+            "impact": r.impact.value,
+            "mitigation_plan": r.mitigation_plan,
+            "status": r.status.value,
+        }
+        for r in risks
+    ]
+
+    burndown = [
+        {
+            "date": point["date"].isoformat(),
+            "planned_remaining_hours": str(point["planned_remaining_hours"]),
+            "actual_remaining_hours": str(point["actual_remaining_hours"]),
+        }
+        for point in project_burndown(session, project_id)
+    ]
+
+    # Gantt (nível 1+2, congelado) — pedido do usuário: "imprima uma imagem
+    # do GANTT [...] até o segundo nível [...] respeitando as cores
+    # conforme definido no projeto [...] quando uma atividade estiver
+    # concluída que mude de cor" — ver `_build_gantt_level2_snapshot`.
+    gantt_snapshot = _build_gantt_level2_snapshot(session, project, tasks)
+
+    return {
+        "schedule_actual_pct": evm["percent_complete"],
+        "schedule_planned_pct": evm["planned_percent_complete"],
+        "hours_consumed": _q(evm["actual_hours"]),
+        "hours_budgeted": _q(hours_budgeted) if hours_budgeted > 0 else None,
+        "cost_planned": cost_planned,
+        "cost_actual": _q(financials["real_cost"]),
+        "margin_planned_pct": project.margin_percentage,
+        "margin_actual_pct": financials["real_margin_percentage"],
+        "tasks_done": tasks_done,
+        "tasks_next": tasks_next,
+        "gantt_snapshot": gantt_snapshot,
+        "risks_snapshot": risks_snapshot,
+        "burndown": burndown,
+    }
+
+
+def suggest_status_report_rag(session: Session, project_id: str) -> dict:
+    """Sugestão automática dos 5 indicadores RAG do Status Report — pedido
+    do usuário: "os indicadores [...] venham calculados pelo sistema,
+    indicando de forma automática se tudo está dentro do prazo, mas que o
+    gerente possa modificar". Usada só pra PRÉ-PREENCHER o formulário
+    (`GET /projects/{id}/status-reports/suggested-rag`, chamado pelo
+    frontend ao abrir "Novo Status Report") — nunca grava nada sozinha, e
+    o gerente pode trocar qualquer um antes de salvar (ou depois, via
+    `PATCH`). Critérios (limiares arbitrários, mas documentados aqui —
+    ajustar se o usuário pedir outro corte):
+
+    - **Prazo**: diferença entre % concluído real e % previsto (mesma
+      base de `project_evm`, em pontos percentuais). >= -5: GOOD;
+      >= -15: WARNING; menor: CRITICAL.
+    - **Custo**: CPI (`project_evm`, EV/AC em horas). >= 0.95: GOOD;
+      >= 0.85: WARNING; menor: CRITICAL. Sem horas realizadas lançadas
+      ainda (CPI `None`): GOOD — nada pra julgar ainda, não é motivo pra
+      alarme.
+    - **Margem**: diferença entre margem realizada (`project_financials`)
+      e margem planejada (`Project.margin_percentage`), em pontos
+      percentuais. >= -3: GOOD; >= -8: WARNING; menor: CRITICAL. Sem
+      margem planejada cadastrada: GOOD.
+    - **Escopo**: quantidade de Solicitações de Mudança (`ChangeRequest`)
+      ainda `PENDING` (aguardando decisão) no projeto — 0: GOOD; 1-2:
+      WARNING; 3 ou mais: CRITICAL. Não é sobre ESCOPO ter mudado (mudança
+      aprovada é só o processo funcionando), é sobre decisão em aberto.
+    - **Risco**: pior risco ainda não fechado (`Risk.status != CLOSED`)
+      do projeto — algum HIGH/HIGH (mesmo critério de "alta prioridade" de
+      `risk_matrix`): CRITICAL; algum HIGH em probabilidade OU impacto
+      (sem ser os dois): WARNING; nenhum: GOOD.
+    """
+    evm = project_evm(session, project_id)
+    financials = project_financials(session, project_id)
+    project = session.get(Project, project_id)
+    if not project:
+        raise ValueError("Projeto não encontrado")
+
+    schedule_diff = evm["percent_complete"] - evm["planned_percent_complete"]
+    if schedule_diff >= -5:
+        rag_schedule = RagStatus.GOOD
+    elif schedule_diff >= -15:
+        rag_schedule = RagStatus.WARNING
+    else:
+        rag_schedule = RagStatus.CRITICAL
+
+    cpi = evm["cpi"]
+    if cpi is None or cpi >= Decimal("0.95"):
+        rag_cost = RagStatus.GOOD
+    elif cpi >= Decimal("0.85"):
+        rag_cost = RagStatus.WARNING
+    else:
+        rag_cost = RagStatus.CRITICAL
+
+    margin_planned = project.margin_percentage
+    margin_actual = financials["real_margin_percentage"]
+    if margin_planned is None or margin_actual is None:
+        rag_margin = RagStatus.GOOD
+    else:
+        margin_diff = Decimal(margin_actual) - Decimal(margin_planned)
+        if margin_diff >= -3:
+            rag_margin = RagStatus.GOOD
+        elif margin_diff >= -8:
+            rag_margin = RagStatus.WARNING
+        else:
+            rag_margin = RagStatus.CRITICAL
+
+    pending_changes = (
+        session.scalar(
+            select(func.count())
+            .select_from(ChangeRequest)
+            .where(ChangeRequest.project_id == project_id, ChangeRequest.status == ChangeStatus.PENDING)
+        )
+        or 0
+    )
+    if pending_changes == 0:
+        rag_scope = RagStatus.GOOD
+    elif pending_changes <= 2:
+        rag_scope = RagStatus.WARNING
+    else:
+        rag_scope = RagStatus.CRITICAL
+
+    open_risks = list(session.scalars(select(Risk).where(Risk.project_id == project_id, Risk.status != RiskStatus.CLOSED)).all())
+    if any(r.probability == RiskLevel.HIGH and r.impact == RiskLevel.HIGH for r in open_risks):
+        rag_risk = RagStatus.CRITICAL
+    elif any(r.probability == RiskLevel.HIGH or r.impact == RiskLevel.HIGH for r in open_risks):
+        rag_risk = RagStatus.WARNING
+    else:
+        rag_risk = RagStatus.GOOD
+
+    return {
+        "rag_schedule": rag_schedule,
+        "rag_cost": rag_cost,
+        "rag_margin": rag_margin,
+        "rag_scope": rag_scope,
+        "rag_risk": rag_risk,
+    }
+
+
+def resource_utilization(session: Session, *, start: date, end: date, resource_id: str | None = None) -> list[dict]:
+    """Carga de trabalho por recurso no período [start, end]:
+
+    - `capacity_hours`: dias úteis do período (pelo calendário pessoal do
+      recurso, se houver; senão segunda a sexta sem feriados) ×
+      daily_capacity_hours.
+    - `actual_hours`: soma de todos os timesheets do recurso no período
+      (vinculados a tarefa, avulsos com projeto, ou horas administrativas),
+      excluindo REJECTED.
+    - `allocated_hours`: soma de TaskAssignment.allocated_hours em TODAS as
+      tarefas do recurso — não é filtrada pelo período porque
+      TaskAssignment não tem data própria neste modelo; é o total alocado
+      no momento, não o alocado especificamente dentro de [start, end].
+    """
+    stmt = select(Resource)
+    if resource_id:
+        stmt = stmt.where(Resource.id == resource_id)
+    resources = list(session.scalars(stmt).all())
+
+    rows: list[dict] = []
+    for resource in resources:
+        cal = calendar_from_db(session, resource.calendar_id) if resource.calendar_id else BusinessCalendar()
+        working_days = 0
+        current = start
+        while current <= end:
+            if cal.is_working_day(current):
+                working_days += 1
+            current += timedelta(days=1)
+        capacity_hours = _q(Decimal(resource.daily_capacity_hours or 0) * working_days)
+
+        actual_hours = sum(
+            (
+                Decimal(h)
+                for h in session.scalars(
+                    select(Timesheet.hours_spent).where(
+                        Timesheet.resource_id == resource.id,
+                        Timesheet.date >= start,
+                        Timesheet.date <= end,
+                        Timesheet.status != TimesheetStatus.REJECTED,
+                    )
+                ).all()
+            ),
+            Decimal("0"),
+        )
+        allocated_hours = sum(
+            (Decimal(h) for h in session.scalars(select(TaskAssignment.allocated_hours).where(TaskAssignment.resource_id == resource.id)).all()),
+            Decimal("0"),
+        )
+        utilization_percentage = _q((actual_hours / capacity_hours) * 100) if capacity_hours > 0 else None
+        rows.append(
+            {
+                "resource_id": resource.id,
+                "user_id": resource.user_id,
+                "function": resource.function,
+                "level": resource.level,
+                "period_start": start,
+                "period_end": end,
+                "capacity_hours": capacity_hours,
+                "allocated_hours": _q(allocated_hours),
+                "actual_hours": _q(actual_hours),
+                "utilization_percentage": utilization_percentage,
+            }
+        )
+    return rows
+
+
+def risk_matrix(session: Session, project_id: str) -> dict:
+    """Grade probabilidade × impacto (contagem por célula) e a lista de
+    riscos HIGH/HIGH ainda não fechados, para priorização rápida."""
+    risks = list(session.scalars(select(Risk).where(Risk.project_id == project_id)).all())
+    grid: dict[str, dict[str, int]] = {p.value: {i.value: 0 for i in RiskLevel} for p in RiskLevel}
+    high_priority: list[Risk] = []
+    for risk in risks:
+        grid[risk.probability.value][risk.impact.value] += 1
+        if risk.probability == RiskLevel.HIGH and risk.impact == RiskLevel.HIGH and risk.status != RiskStatus.CLOSED:
+            high_priority.append(risk)
+    return {"project_id": project_id, "grid": grid, "high_priority": high_priority}
+
+
+def velocity_series(
+    session: Session,
+    *,
+    start: date,
+    end: date,
+    granularity: str = "week",
+    project_id: str | None = None,
+    resource_id: str | None = None,
+) -> list[dict]:
+    """"Velocity" aqui é literal, conforme decisão do usuário: horas
+    entregues por semana ou mês — não é velocidade de Scrum/story points e
+    não depende de nenhuma entidade de sprint (que este sistema não
+    modela)."""
+    stmt = (
+        select(Timesheet.date, Timesheet.hours_spent)
+        .outerjoin(Task, Task.id == Timesheet.task_id)
+        .where(Timesheet.date >= start, Timesheet.date <= end, Timesheet.status != TimesheetStatus.REJECTED)
+    )
+    if project_id:
+        stmt = stmt.where(or_(Task.project_id == project_id, Timesheet.project_id == project_id))
+    if resource_id:
+        stmt = stmt.where(Timesheet.resource_id == resource_id)
+    rows = session.execute(stmt).all()
+
+    buckets: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
+    for ts_date, hours in rows:
+        if granularity == "month":
+            period_start = ts_date.replace(day=1)
+        else:
+            period_start = ts_date - timedelta(days=ts_date.weekday())  # segunda-feira da semana
+        buckets[period_start] += Decimal(hours)
+
+    return [{"period_start": period_start, "hours_delivered": _q(hours)} for period_start, hours in sorted(buckets.items())]
+
+
+def _get_or_create_order_number(session: Session, day: date, project_id: str, resource_id: str) -> ServiceOrderNumber:
+    """Busca ou atribui o Nro. O.S./Emissão do grupo (dia, projeto,
+    consultor) — decisão confirmada com o usuário: um número sequencial
+    real, gravado na primeira vez que a OS aparece (ver ServiceOrderNumber
+    em models.py), nunca recalculado depois. `session.flush()` (não
+    `commit()`) só pra popular `number` (autoincrement) antes de devolver;
+    quem chama (`service_orders`) faz um único commit no final pro grupo
+    inteiro.
+
+    Duas requisições concorrentes vendo o mesmo grupo pela primeira vez ao
+    mesmo tempo poderiam colidir na constraint única — o retry aqui cobre
+    esse caso raro sem propagar um 500 pro usuário. Usa um SAVEPOINT
+    (`begin_nested`) em vez de um rollback da sessão inteira: só desfaz o
+    INSERT que colidiu, sem expirar os outros objetos já carregados nesta
+    mesma chamada de `service_orders` (Project/Client/Resource/User)."""
+    existing = session.scalar(
+        select(ServiceOrderNumber).where(
+            ServiceOrderNumber.date == day,
+            ServiceOrderNumber.project_id == project_id,
+            ServiceOrderNumber.resource_id == resource_id,
+        )
+    )
+    if existing:
+        return existing
+    try:
+        with session.begin_nested():
+            row = ServiceOrderNumber(date=day, project_id=project_id, resource_id=resource_id)
+            session.add(row)
+            session.flush()
+        return row
+    except IntegrityError:
+        existing = session.scalar(
+            select(ServiceOrderNumber).where(
+                ServiceOrderNumber.date == day,
+                ServiceOrderNumber.project_id == project_id,
+                ServiceOrderNumber.resource_id == resource_id,
+            )
+        )
+        if not existing:
+            raise
+        return existing
+
+
+def service_orders(
+    session: Session,
+    *,
+    start: date,
+    end: date,
+    project_id: str | None = None,
+    resource_id: str | None = None,
+    client_id: str | None = None,
+) -> list[dict]:
+    """Ordem de Serviço (Fase 3 do apontamento): agrupa os apontamentos
+    (Timesheet) em uma OS por dia + projeto + consultor — regra confirmada
+    pelo usuário ("1 OS por dia + projeto + consultor") — com uma
+    atividade por apontamento dentro do grupo. Exclui:
+    - REJECTED (mesmo critério de project_financials/velocity_series);
+    - hora administrativa interna (sem task_id nem project_id) — não tem
+      projeto/cliente pra compor o cabeçalho da OS;
+    - apontamentos antigos sem `start_time` (criados antes da Fase 2 do
+      apontamento) — a OS é sempre Hora Inicial/Final, não dá pra montar
+      essa linha sem elas.
+    """
+    project_col = func.coalesce(Task.project_id, Timesheet.project_id)
+    stmt = (
+        select(
+            Timesheet.id,
+            Timesheet.date,
+            Timesheet.resource_id,
+            project_col.label("project_id"),
+            Timesheet.task_id,
+            Task.wbs_code,
+            Task.name.label("task_name"),
+            Timesheet.start_time,
+            Timesheet.end_time,
+            Timesheet.break_minutes,
+            Timesheet.hours_spent,
+            Timesheet.description,
+            Timesheet.status,
+            Timesheet.unscheduled,
+            Timesheet.is_transit,
+            Timesheet.work_classification,
+            Timesheet.rework_reasons,
+        )
+        .outerjoin(Task, Task.id == Timesheet.task_id)
+        .where(
+            Timesheet.date >= start,
+            Timesheet.date <= end,
+            Timesheet.status != TimesheetStatus.REJECTED,
+            Timesheet.start_time.isnot(None),
+            project_col.isnot(None),
+        )
+    )
+    if project_id:
+        stmt = stmt.where(project_col == project_id)
+    if resource_id:
+        stmt = stmt.where(Timesheet.resource_id == resource_id)
+    rows = session.execute(stmt).all()
+
+    groups: dict[tuple, list[dict]] = defaultdict(list)
+    for row in rows:
+        key = (row.date, row.project_id, row.resource_id)
+        groups[key].append(
+            {
+                "id": row.id,
+                "task_id": row.task_id,
+                "wbs_code": row.wbs_code,
+                "task_name": row.task_name,
+                "start_time": row.start_time,
+                "end_time": row.end_time,
+                "break_minutes": row.break_minutes,
+                "hours": Decimal(row.hours_spent),
+                "description": row.description,
+                "status": row.status,
+                "unscheduled": row.unscheduled,
+                "is_transit": row.is_transit,
+                "work_classification": row.work_classification,
+                "rework_reasons": row.rework_reasons,
+            }
+        )
+    if not groups:
+        return []
+
+    project_ids = {key[1] for key in groups}
+    resource_ids = {key[2] for key in groups}
+    projects = {p.id: p for p in session.scalars(select(Project).where(Project.id.in_(project_ids))).all()}
+    client_ids = {p.client_id for p in projects.values()}
+    clients = {c.id: c for c in session.scalars(select(Client).where(Client.id.in_(client_ids))).all()} if client_ids else {}
+    resources = {r.id: r for r in session.scalars(select(Resource).where(Resource.id.in_(resource_ids))).all()}
+    user_ids = {r.user_id for r in resources.values()}
+    users = {u.id: u for u in session.scalars(select(User).where(User.id.in_(user_ids))).all()} if user_ids else {}
+
+    result = []
+    for (day, proj_id, res_id), activities in groups.items():
+        project = projects.get(proj_id)
+        if not project:
+            continue
+        client = clients.get(project.client_id)
+        if client_id and (not client or client.id != client_id):
+            continue
+        resource = resources.get(res_id)
+        user = users.get(resource.user_id) if resource else None
+        activities.sort(key=lambda a: a["start_time"])
+        total_hours = _q(sum((a["hours"] for a in activities), Decimal("0")))
+        # Nro. O.S./Emissão: atribuído (e gravado) na primeira vez que este
+        # grupo aparece aqui — ver _get_or_create_order_number.
+        order_number = _get_or_create_order_number(session, day, proj_id, res_id)
+        result.append(
+            {
+                "date": day,
+                "client_id": client.id if client else None,
+                "client_code": client.code if client else "—",
+                "client_name": client.legal_name if client else "—",
+                "project_id": project.id,
+                "project_code": project.code,
+                "project_name": project.name,
+                "resource_id": res_id,
+                "resource_name": user.name if user else "—",
+                "total_hours": total_hours,
+                "order_number": f"{order_number.number:06d}",
+                "emitted_at": order_number.emitted_at,
+                "activities": [{**activity, "hours": _q(activity["hours"])} for activity in activities],
+            }
+        )
+    session.commit()
+    result.sort(key=lambda r: (r["date"], r["client_code"], r["project_code"], r["resource_name"]))
+    return result
+
+
+def project_roi(session: Session, project_id: str) -> dict:
+    """ROI = margem ÷ custo real (retorno sobre o custo efetivamente
+    incorrido no projeto). Não há uma receita externa própria a medir além
+    do valor vendido do pacote (sold_value), então esta é a leitura de ROI
+    mais direta com os dados hoje modelados — assumida explicitamente aqui
+    porque a definição de "ROI" para consultoria de projetos não é única.
+    None quando ainda não há custo real lançado (divisão por zero)."""
+    project = session.get(Project, project_id)
+    if not project:
+        raise ValueError("Projeto não encontrado")
+    fin = project_financials(session, project_id)
+    real_cost = fin["real_cost"]
+    roi_percentage = _q((fin["profit_margin"] / real_cost) * 100) if real_cost > 0 else None
+    return {"project_id": project_id, "code": project.code, "sold_value": fin["sold_value"], "real_cost": real_cost, "roi_percentage": roi_percentage}

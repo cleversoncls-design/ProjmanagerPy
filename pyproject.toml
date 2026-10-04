@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+# Sem isso, o pytest (em "rootless import mode") adiciona o diretório do
+# próprio arquivo de teste ao sys.path — ou seja, "tests/", não a raiz do
+# repo — porque não existe tests/__init__.py. Resultado: "import app.*" em
+# tests/conftest.py falha com ModuleNotFoundError, mesmo com app/__init__.py
+# presente e as dependências todas instaladas. Adicionar "." ao pythonpath
+# garante que a raiz do repo (onde "app/" mora) esteja sempre no sys.path,
+# não importa de onde o pytest for invocado.
+pythonpath = ["."]
+testpaths = ["tests"]

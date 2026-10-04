@@ -1,0 +1,235 @@
+"""Tradução das mensagens de erro da API (pt-BR/es).
+
+Segue o mesmo estilo "gettext" do frontend (ver frontend/src/i18n/
+translations.js): a mensagem em PORTUGUÊS já escrita em cada
+`HTTPException(detail=...)` continua sendo a própria chave de tradução —
+não precisa inventar/manter um catálogo de slugs em paralelo ao texto real.
+`t("Projeto não encontrado", user.language)` devolve a mensagem em
+Espanhol quando `user.language == Language.ES`; em Português (padrão) ou
+para qualquer texto que não esteja no dicionário, devolve o texto
+original sem quebrar — uma mensagem nova que algum router venha a
+adicionar simplesmente aparece em Português até alguém preencher a
+tradução aqui.
+"""
+from __future__ import annotations
+
+from .models import Language
+
+# Só a tradução ES->PT-BR original faz sentido guardar — pt-BR é o próprio
+# texto que já está espalhado pelos routers.
+_ES: dict[str, str] = {
+    "Agendamento não encontrado": "Agenda no encontrada",
+    "Alocação não encontrada": "Asignación no encontrada",
+    "Apontamento fora da agenda — só Administrador, Gerente de Serviços ou Diretor Geral podem aprová-lo": (
+        "Registro de horas fuera de la agenda — solo Administrador, Gerente de Servicios o Director General pueden aprobarlo"
+    ),
+    "Apontamento não encontrado": "Registro de horas no encontrado",
+    "Ausência não pode ser marcada como Traslado ao mesmo tempo": "La ausencia no puede marcarse como Traslado al mismo tiempo",
+    "Ausência não pode ter uma tarefa vinculada": "La ausencia no puede tener una tarea vinculada",
+    "Ausência não pode ter um projeto vinculado — é sempre custo interno da empresa": (
+        "La ausencia no puede tener un proyecto vinculado — siempre es un costo interno de la empresa"
+    ),
+    "Calendário não encontrado": "Calendario no encontrado",
+    "Cliente não encontrado": "Cliente no encontrado",
+    "Cliente precisa informar project_id": "El cliente debe informar project_id",
+    "Cliente tem projeto(s) vinculado(s) — não pode ser excluído": "El cliente tiene proyecto(s) vinculado(s) — no se puede eliminar",
+    "Cliente tem usuário(s) vinculado(s) — não pode ser excluído": "El cliente tiene usuario(s) vinculado(s) — no se puede eliminar",
+    "Cliente tem solicitação(ões) de projeto vinculada(s) — não pode ser excluído": (
+        "El cliente tiene solicitud(es) de proyecto vinculada(s) — no se puede eliminar"
+    ),
+    "Cor do projeto inválida": "Color de proyecto inválido",
+    "Esta cor já está em uso por outro projeto ativo": "Este color ya está en uso por otro proyecto activo",
+    "Conflito de integridade de dados (registro duplicado ou referência inválida).": (
+        "Conflicto de integridad de datos (registro duplicado o referencia inválida)."
+    ),
+    "Credenciais inválidas": "Credenciales inválidas",
+    "Dependência não encontrada": "Dependencia no encontrada",
+    "Essa dependência já existe": "Esa dependencia ya existe",
+    "Este usuário já possui um recurso cadastrado": "Este usuario ya tiene un recurso registrado",
+    "Feriado não encontrado": "Feriado no encontrado",
+    "Fora do escopo do cliente": "Fuera del alcance del cliente",
+    # Grupos de Tarefas (pedido do usuário: agrupador reutilizável de
+    # tarefas) — ver app/routers/task_groups.py, services.apply_task_group_to_task.
+    "Grupo de tarefas não encontrado": "Grupo de tareas no encontrado",
+    "Este grupo de tarefas não tem nenhuma tarefa cadastrada": "Este grupo de tareas no tiene ninguna tarea registrada",
+    "Hora final precisa ser depois da hora inicial": "La hora final debe ser posterior a la hora inicial",
+    "Informe ao menos um filtro (project_id, task_id, resource_id, client_id, status_filter, start ou end)": (
+        "Informe al menos un filtro (project_id, task_id, resource_id, client_id, status_filter, start o end)"
+    ),
+    "Informe project_id ou task_id": "Informe project_id o task_id",
+    "Intervalo não pode ser maior ou igual ao tempo entre a hora inicial e a final": (
+        "El intervalo no puede ser mayor o igual al tiempo entre la hora inicial y la final"
+    ),
+    "Já existe um cliente com este código": "Ya existe un cliente con este código",
+    "Já existe um feriado cadastrado nesta data para este calendário": "Ya existe un feriado registrado en esta fecha para este calendario",
+    "Já existe um projeto com este código": "Ya existe un proyecto con este código",
+    "Já existe um usuário com este e-mail": "Ya existe un usuario con este correo electrónico",
+    "Já existe uma tarefa com este código WBS neste projeto": "Ya existe una tarea con este código WBS en este proyecto",
+    "Não é possível apagar uma tarefa que já tem apontamento de horas registrado.": (
+        "No es posible eliminar una tarea que ya tiene horas registradas."
+    ),
+    "Não é possível apagar uma tarefa que tem tarefas-filhas. Mova ou apague as filhas primeiro.": (
+        "No es posible eliminar una tarea que tiene tareas hijas. Mueva o elimine las hijas primero."
+    ),
+    "Perfil sem permissão de escrita": "Perfil sin permiso de escritura",
+    "Perfil sem permissão para esta operação": "Perfil sin permiso para esta operación",
+    "Perfis de cliente exigem client_id": "Los perfiles de cliente requieren client_id",
+    "Predecessora e sucessora precisam pertencer ao mesmo projeto": "La predecesora y la sucesora deben pertenecer al mismo proyecto",
+    "Projeto fora do escopo do cliente": "Proyecto fuera del alcance del cliente",
+    "Projeto não encontrado": "Proyecto no encontrado",
+    "Projeto já tem tarefas cadastradas — não pode ser excluído": "El proyecto ya tiene tareas registradas — no se puede eliminar",
+    "Projeto já tem linha(s) de base salva(s) — não pode ser excluído": "El proyecto ya tiene línea(s) de base guardada(s) — no se puede eliminar",
+    "Projeto já tem despesas lançadas — não pode ser excluído": "El proyecto ya tiene gastos registrados — no se puede eliminar",
+    "Projeto já tem riscos cadastrados — não pode ser excluído": "El proyecto ya tiene riesgos registrados — no se puede eliminar",
+    "Projeto já tem solicitações de mudança — não pode ser excluído": "El proyecto ya tiene solicitudes de cambio — no se puede eliminar",
+    "Projeto já tem apontamento de horas avulso — não pode ser excluído": "El proyecto ya tiene horas sueltas registradas — no se puede eliminar",
+    "Recurso já alocado nesta tarefa": "Recurso ya asignado a esta tarea",
+    "Recurso já tem agendamento nesse horário": "El recurso ya tiene una agenda en ese horario",
+    "Recurso está ausente nesta data e não pode ser agendado": "El recurso está ausente en esta fecha y no puede ser agendado",
+    "Recurso não encontrado": "Recurso no encontrado",
+    "Recurso não está alocado nesta tarefa nem no projeto": "El recurso no está asignado a esta tarea ni al proyecto",
+    "O recurso deste usuário está alocado em uma ou mais tarefas — remova as alocações antes de excluir": (
+        "El recurso de este usuario está asignado a una o más tareas — quite las asignaciones antes de eliminarlo"
+    ),
+    "O recurso deste usuário tem apontamento de horas em projetos/tarefas — não pode ser excluído": (
+        "El recurso de este usuario tiene horas registradas en proyectos/tareas — no se puede eliminar"
+    ),
+    "O agendamento informado não corresponde a este recurso/projeto/data": (
+        "La agenda informada no corresponde a este recurso/proyecto/fecha"
+    ),
+    "O usuário Administrador não pode ser excluído": "El usuario Administrador no se puede eliminar",
+    "Risco não encontrado": "Riesgo no encontrado",
+    "Status report não encontrado": "Informe de estado no encontrado",
+    "Solicitação de mudança não encontrada": "Solicitud de cambio no encontrada",
+    "Solicitação não encontrada": "Solicitud no encontrada",
+    "Somente o PM do cliente pode solicitar um novo projeto": "Solo el PM del cliente puede solicitar un nuevo proyecto",
+    "Só o cliente valida suas próprias tarefas": "Solo el cliente valida sus propias tareas",
+    "Só é possível apontar horas em projetos ativos": "Solo se pueden registrar horas en proyectos activos",
+    # Pedido do usuário: projeto selecionado sem tarefa e sem Traslado
+    # deixou de ser um apontamento válido ("avulso" descontinuado) — ver
+    # _resolve_task_and_project, routers/timesheets.py.
+    "Selecione uma tarefa ou marque Traslado — não é possível apontar direto no projeto": (
+        "Seleccione una tarea o marque Traslado — no es posible registrar directo en el proyecto"
+    ),
+    "Não é possível apontar horas em uma tarefa desativada": "No se pueden registrar horas en una tarea desactivada",
+    # % de Avanço da Tarefa + classificador Normal/Retrabalho (pedido do
+    # usuário) — ver _validate_rework, routers/timesheets.py.
+    "O classificador Normal/Retrabalho só é aceito em apontamento de tarefa do projeto": (
+        "El clasificador Normal/Retrabajo solo se acepta en un registro de horas de tarea del proyecto"
+    ),
+    "Motivo de retrabalho só é aceito em apontamento de tarefa do projeto": (
+        "El motivo de retrabajo solo se acepta en un registro de horas de tarea del proyecto"
+    ),
+    "% de Avanço da Tarefa só é aceito em apontamento de tarefa do projeto": (
+        "El % de Avance de la Tarea solo se acepta en un registro de horas de tarea del proyecto"
+    ),
+    "Selecione ao menos um motivo de retrabalho": "Seleccione al menos un motivo de retrabajo",
+    "Motivo de retrabalho só é aceito quando o apontamento é classificado como Retrabalho": (
+        "El motivo de retrabajo solo se acepta cuando el registro está clasificado como Retrabajo"
+    ),
+    "Não é possível apontar horas em uma tarefa que tem tarefas-filhas — aponte na tarefa-filha": (
+        "No es posible registrar horas en una tarea que tiene tareas hijas — regístrelas en la tarea hija"
+    ),
+    "Traslado não pode ter uma tarefa específica vinculada": "El traslado no puede tener una tarea específica vinculada",
+    "Traslado precisa de um projeto selecionado": "El traslado necesita un proyecto seleccionado",
+    "Tarefa já está aguardando validação do cliente": "La tarea ya está esperando la validación del cliente",
+    "Tarefa não encontrada": "Tarea no encontrada",
+    "Tarefa não está aguardando validação do cliente": "La tarea no está esperando la validación del cliente",
+    # Checklist de tarefas da Agenda (pedido do usuário) — ver
+    # _resolve_schedule_tasks, routers/schedules.py.
+    "Tarefa não pertence ao projeto do agendamento": "La tarea no pertenece al proyecto de la agenda",
+    "Não é possível vincular uma tarefa que tem tarefas-filhas na Agenda — vincule a tarefa-filha": (
+        "No es posible vincular una tarea que tiene tareas hijas en la Agenda — vincule la tarea hija"
+    ),
+    # Cruzamento Nível do recurso x Nível mínimo da tarefa na Agenda (pedido
+    # do usuário) — "{level}" é substituído por str.format() depois da
+    # tradução (ver _resolve_schedule_tasks, routers/schedules.py), por
+    # isso o placeholder precisa estar igual nas duas versões.
+    "Nível do recurso (nível {level}) é menor que o nível mínimo exigido pelas tarefas a seguir": (
+        "El nivel del recurso (nivel {level}) es menor que el nivel mínimo exigido por las siguientes tareas"
+    ),
+    # "Processo de envio de emails" (pedido do usuário) — assunto/corpo dos
+    # avisos de agendamento e do resumo de aprovações pendentes (ver
+    # app/notifications.py) + mensagens do configurador de SMTP (ver
+    # app/routers/email_settings.py). "{name}"/"{count}"/"{hours}" são
+    # substituídos por str.format() depois da tradução, mesmo critério já
+    # usado pelo cruzamento de Nível logo acima.
+    "Novo agendamento criado na sua Agenda de consultores": "Nueva agenda creada en tu Agenda de consultores",
+    "Agendamento atualizado na sua Agenda de consultores": "Agenda actualizada en tu Agenda de consultores",
+    "Olá, {name}!": "¡Hola, {name}!",
+    "Um novo bloco foi agendado para você na Agenda de consultores:": (
+        "Se agendó un nuevo bloque para usted en la Agenda de consultores:"
+    ),
+    "Um bloco da sua Agenda foi alterado:": "Se modificó un bloque de tu Agenda:",
+    "Projeto": "Proyecto",
+    "Data": "Fecha",
+    "Horário": "Horario",
+    "Tarefas vinculadas": "Tareas vinculadas",
+    "Nenhuma tarefa vinculada a este bloco": "Ninguna tarea vinculada a este bloque",
+    "Apontamentos aguardando sua aprovação": "Registros de horas esperando tu aprobación",
+    "Há {count} apontamento(s) aguardando sua aprovação, totalizando {hours}h:": (
+        "Hay {count} registro(s) de horas esperando tu aprobación, totalizando {hours}h:"
+    ),
+    "Consultor": "Consultor",
+    "Tarefa": "Tarea",
+    "Horas": "Horas",
+    "Avulso/Traslado": "Suelto/Traslado",
+    "Configuração de e-mail ainda não foi salva": "La configuración de correo aún no fue guardada",
+    "E-mail de teste — ProjmanagerPy": "Correo de prueba — ProjmanagerPy",
+    "Este é um e-mail de teste da configuração de SMTP do ProjmanagerPy.": (
+        "Este es un correo de prueba de la configuración de SMTP de ProjmanagerPy."
+    ),
+    "Token de acesso ausente": "Token de acceso ausente",
+    "Token inválido ou expirado": "Token inválido o expirado",
+    "Um apontamento não pode passar de 24 horas": "Un registro de horas no puede superar las 24 horas",
+    "Uma tarefa não pode depender de si mesma": "Una tarea no puede depender de sí misma",
+    "Usuário é gerente de um ou mais projetos — troque o gerente antes de excluir": (
+        "El usuario es gerente de uno o más proyectos — cambie el gerente antes de eliminar"
+    ),
+    "Usuário solicitou uma ou mais mudanças de escopo — não pode ser excluído": (
+        "El usuario solicitó una o más solicitudes de cambio — no se puede eliminar"
+    ),
+    "Usuário inativo ou bloqueado": "Usuario inactivo o bloqueado",
+    "Usuário inválido ou inativo": "Usuario inválido o inactivo",
+    "Usuário não encontrado": "Usuario no encontrado",
+    "Usuário não possui recurso habilitado": "El usuario no tiene un recurso habilitado",
+    "manager_id precisa ser um usuário interno (ADMIN ou INTERNAL_PM)": "manager_id debe ser un usuario interno (ADMIN o INTERNAL_PM)",
+    "parent_task_id precisa ser uma tarefa do mesmo projeto": "parent_task_id debe ser una tarea del mismo proyecto",
+    "schedule_id exige project_id ou task_id": "schedule_id requiere project_id o task_id",
+    "start precisa ser anterior ou igual a end": "start debe ser anterior o igual a end",
+    "period_start precisa ser anterior ou igual a period_end": "period_start debe ser anterior o igual a period_end",
+    "status precisa ser APPROVED ou REJECTED": "status debe ser APPROVED o REJECTED",
+    # Menu "Conhecimento" (registro de conhecimento dos consultores) —
+    # ver app/routers/knowledge.py.
+    "Sistema não encontrado": "Sistema no encontrado",
+    "Módulo não encontrado": "Módulo no encontrado",
+    "Funcionalidade não encontrada": "Funcionalidad no encontrada",
+    "Acesso restrito a perfis internos": "Acceso restringido a perfiles internos",
+    "Esta funcionalidade não está liberada para o seu perfil": "Esta funcionalidad no está habilitada para su perfil",
+    "Nenhuma autoavaliação pendente para enviar": "Ninguna autoevaluación pendiente para enviar",
+    "Envio não encontrado": "Envío no encontrado",
+    "Este envio já foi revisado": "Este envío ya fue revisado",
+    "Status inválido — use APPROVED ou REJECTED": "Estado inválido — use APPROVED o REJECTED",
+    "Você não pode revisar sua própria autoavaliação": "Usted no puede revisar su propia autoevaluación",
+    "Informe o motivo da rejeição em Comentário do revisor": "Informe el motivo del rechazo en Comentario del revisor",
+}
+
+
+def t(text: str, lang: str | Language | None) -> str:
+    """Traduz uma mensagem de erro. `lang` normalmente é `user.language`
+    (string ou o enum `Language`); aceita `None` (endpoint sem usuário
+    resolvido ainda) e cai no texto original em Português."""
+    if lang == Language.ES or lang == "es":
+        return _ES.get(text, text)
+    return text
+
+
+def request_language(request) -> str:
+    """Fallback de idioma pra mensagens de erro emitidas ANTES de
+    resolver um usuário (token ausente/inválido, ou e-mail que não bate
+    com nenhum usuário no login) — nesses casos não existe `user.language`
+    pra consultar. O frontend manda o idioma escolhido (ou o salvo no
+    navegador antes mesmo de logar) no header `X-App-Language`; sem o
+    header, cai em Português."""
+    lang = request.headers.get("x-app-language")
+    return lang if lang == "es" else Language.PT_BR
