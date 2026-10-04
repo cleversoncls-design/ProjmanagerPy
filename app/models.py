@@ -983,3 +983,185 @@ class AuditLog(Base):
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     details: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+
+
+# ---------------------------------------------------------------------------
+# Conhecimento (pedido do usuário, "NOVAS MELHORIAS": "criar um processo de
+# registro de conhecimento dos consultores") — cadastro em 3 níveis
+# (Sistema > Módulo > Funcionalidade), autoavaliação de nível de
+# conhecimento por recurso (Consultor/Gerente de Projeto) e revisão/
+# aprovação por um gestor. Decisões confirmadas com o usuário (perguntas
+# diretas): aprovação é POR ENVIO COMPLETO (todo o lote enviado pelo
+# recurso é aprovado ou rejeitado de uma vez, nunca item a item); o revisor
+# PODE AJUSTAR o nível de cada item antes de aprovar (o nível final
+# gravado é o do revisor, que pode diferir do autoavaliado); o vínculo de
+# "quem pode se autoavaliar num módulo" (perfil Consultor e/ou Gerente de
+# Projeto) fica no MÓDULO (não no Sistema nem na Funcionalidade); dentro de
+# um módulo liberado pro seu perfil, o recurso avalia DIRETO (0 a 4) as
+# funcionalidades que fazem parte do trabalho dele, sem um passo de
+# "seleção" separado — o que ele não mexer fica como "não avaliado"
+# (diferente de "Nível 0 - Não conhece", que é uma resposta explícita).
+#
+# O cálculo da "matriz de conhecimento" agregada e o cruzamento com nível
+# exigido em tarefas/projetos (mencionados pelo usuário como "futuramente")
+# NÃO fazem parte desta rodada — só o cadastro, a autoavaliação e a
+# aprovação. Ver claude/registro-conhecimento-consultores.md.
+# ---------------------------------------------------------------------------
+
+
+class KnowledgeRequirement(StrEnum):
+    """Pedido do usuário: "definir se o conhecimento é necessário ou
+    desejável" — atributo da Funcionalidade (não do Módulo/Sistema nem da
+    autoavaliação), decidido por quem cadastra o catálogo."""
+
+    REQUIRED = "REQUIRED"
+    DESIRABLE = "DESIRABLE"
+
+
+class KnowledgeStatus(StrEnum):
+    """Estado de um item de conhecimento (ResourceKnowledge) e, reaproveitado
+    igual, do envio que o agrupa (KnowledgeSubmission — nunca fica DRAFT,
+    só é criado já SUBMITTED). DRAFT: o recurso está editando, ainda não
+    enviou. SUBMITTED: enviado, aguardando revisão (todo o lote junto — ver
+    docstring da seção acima). APPROVED: revisor aprovou (o nível "oficial"
+    passa a ser `reviewed_level`, que pode ter sido ajustado pelo revisor).
+    REJECTED: revisor devolveu (com `review_notes` explicando o motivo,
+    gravado no envio) — os itens voltam pra DRAFT, soltos do envio
+    rejeitado, pro recurso editar e reenviar."""
+
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class KnowledgeSystem(Base):
+    """Nível 1 do catálogo (ex.: "ERP Protheus", "Totvs RM"). Cadastro
+    restrito a MANAGEMENT_ROLES (ver app/deps.py KNOWLEDGE_CATALOG_ROLES);
+    qualquer perfil interno (não-cliente) pode LER, pra poder se
+    autoavaliar. Excluir um Sistema apaga em cascata seus Módulos,
+    Funcionalidades e qualquer ResourceKnowledge ligado a elas — ver
+    docstring de KnowledgeModule/KnowledgeFunctionality."""
+
+    __tablename__ = "knowledge_systems"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    modules: Mapped[list["KnowledgeModule"]] = relationship(back_populates="system", cascade="all, delete-orphan", order_by="KnowledgeModule.name")
+
+
+class KnowledgeModule(Base):
+    """Nível 2 do catálogo (ex.: "Fiscal", "Financeiro") — ponto onde fica o
+    vínculo de perfil (decisão confirmada com o usuário, ver docstring da
+    seção acima): `applies_to_consultant`/`applies_to_internal_pm`
+    controlam quem enxerga este módulo (e suas Funcionalidades) na tela de
+    autoavaliação ("Registro de Funcionalidades por Consultor/Gerente").
+    Pelo menos um dos dois precisa ficar marcado (CheckConstraint) — um
+    módulo sem nenhum perfil nunca apareceria pra ninguém se autoavaliar,
+    o que não faria sentido."""
+
+    __tablename__ = "knowledge_modules"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    system_id: Mapped[str] = mapped_column(ForeignKey("knowledge_systems.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    applies_to_consultant: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    applies_to_internal_pm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    __table_args__ = (
+        CheckConstraint("applies_to_consultant OR applies_to_internal_pm", name="ck_knowledge_module_has_profile"),
+    )
+    system: Mapped[KnowledgeSystem] = relationship(back_populates="modules")
+    functionalities: Mapped[list["KnowledgeFunctionality"]] = relationship(
+        back_populates="module", cascade="all, delete-orphan", order_by="KnowledgeFunctionality.name"
+    )
+
+
+class KnowledgeFunctionality(Base):
+    """Nível 3 (folha) do catálogo. `description` é o campo pedido pelo
+    usuário: "um campo descritivo que indique quais detalhes de cada
+    funcionalidade do processo são necessários ou fazem parte daquele
+    processo". `requirement` é o outro pedido: "definir se o conhecimento
+    é necessário ou desejável"."""
+
+    __tablename__ = "knowledge_functionalities"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    module_id: Mapped[str] = mapped_column(ForeignKey("knowledge_modules.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    # String simples, não enum do Postgres — mesmo critério de
+    # ProjectStatusReport.rag_* (ver docstring de RagStatus): poucos
+    # valores fixos, política do projeto desde o bug de enum duplicado da
+    # migração 0024, mesmo quando (como aqui) não haveria risco técnico
+    # real por ser coluna única na tabela.
+    requirement: Mapped[str] = mapped_column(String(12), nullable=False, default=KnowledgeRequirement.REQUIRED.value)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    module: Mapped[KnowledgeModule] = relationship(back_populates="functionalities")
+
+
+class KnowledgeSubmission(Base):
+    """O "envio" de um recurso pro revisor — agrupa, de uma vez, todos os
+    itens (ResourceKnowledge) que estavam DRAFT no momento do envio (ver
+    docstring da seção acima: aprovação é SEMPRE do lote inteiro, nunca
+    item a item). Fica como registro histórico mesmo depois de
+    aprovado/rejeitado. Numa rejeição, os itens (`ResourceKnowledge.status`)
+    voltam pra DRAFT (editáveis de novo), mas CONTINUAM apontando pra este
+    envio (`submission_id` não é zerado na rejeição, ver
+    routers/knowledge.py review_submission) — é assim que
+    GET /knowledge/my-submissions consegue mostrar ao recurso o que foi
+    rejeitado e por quê (`review_notes`). Só quando o recurso edita algum
+    desses itens de novo (PUT /knowledge/my-ratings/{id}) é que o item solta
+    `submission_id`, começando um novo ciclo."""
+
+    __tablename__ = "knowledge_submissions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    resource_id: Mapped[str] = mapped_column(ForeignKey("resources.id", ondelete="CASCADE"), nullable=False, index=True)
+    # String simples — mesmo critério de KnowledgeFunctionality.requirement
+    # acima (ver comentário lá).
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default=KnowledgeStatus.SUBMITTED.value)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    review_notes: Mapped[str | None] = mapped_column(Text)
+    resource: Mapped[Resource] = relationship()
+    reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewed_by])
+    items: Mapped[list["ResourceKnowledge"]] = relationship(back_populates="submission")
+
+
+class ResourceKnowledge(Base):
+    """Uma linha da "matriz de conhecimento": nível autoavaliado por um
+    Recurso (Consultor/Gerente de Projeto) numa Funcionalidade.
+    `self_level`/`reviewed_level` são inteiros 0-4 (ver KNOWLEDGE_LEVEL_LABELS
+    em frontend/src/utils/labels.js: 0-Não conhece, 1-Conhece o conceito,
+    2-Implanta com apoio, 3-Implanta sem apoio, 4-Especialista). `reviewed_level` só é
+    preenchido/atualizado na aprovação (decisão confirmada com o usuário:
+    revisor pode ajustar) — é o nível "oficial" pra uso futuro (matriz
+    agregada/cruzamento com projetos, fora do escopo desta rodada).
+
+    Editar `self_level` depois de aprovado/rejeitado volta o item pra DRAFT
+    (novo ciclo) e solta `submission_id` — `reviewed_level` do ciclo
+    anterior fica como estava até uma nova aprovação sobrescrever."""
+
+    __tablename__ = "resource_knowledge"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    resource_id: Mapped[str] = mapped_column(ForeignKey("resources.id", ondelete="CASCADE"), nullable=False, index=True)
+    functionality_id: Mapped[str] = mapped_column(ForeignKey("knowledge_functionalities.id", ondelete="CASCADE"), nullable=False, index=True)
+    self_level: Mapped[int | None] = mapped_column(Integer)
+    reviewed_level: Mapped[int | None] = mapped_column(Integer)
+    # String simples — mesmo critério acima.
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default=KnowledgeStatus.DRAFT.value)
+    notes: Mapped[str | None] = mapped_column(Text)
+    submission_id: Mapped[str | None] = mapped_column(ForeignKey("knowledge_submissions.id", ondelete="SET NULL"), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    __table_args__ = (
+        UniqueConstraint("resource_id", "functionality_id", name="uq_resource_knowledge_resource_functionality"),
+        CheckConstraint("self_level IS NULL OR self_level BETWEEN 0 AND 4", name="ck_resource_knowledge_self_level_range"),
+        CheckConstraint("reviewed_level IS NULL OR reviewed_level BETWEEN 0 AND 4", name="ck_resource_knowledge_reviewed_level_range"),
+    )
+    resource: Mapped[Resource] = relationship()
+    functionality: Mapped[KnowledgeFunctionality] = relationship()
+    submission: Mapped[KnowledgeSubmission | None] = relationship(back_populates="items")

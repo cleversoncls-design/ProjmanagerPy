@@ -305,3 +305,13 @@ export const MailIcon = (props) => (
     <path d="m4 7 8 6 8-6" />
   </Icon>
 )
+
+// Menu "Conhecimento" (pedido do usuário, "NOVAS MELHORIAS": registro de
+// conhecimento dos consultores) — livro aberto, ícone padrão de
+// aprendizado/catálogo de conhecimento.
+export const BookIcon = (props) => (
+  <Icon {...props}>
+    <path d="M12 6.5c-1.8-1.3-4-2-6.5-2v12c2.5 0 4.7.7 6.5 2 1.8-1.3 4-2 6.5-2v-12c-2.5 0-4.7.7-6.5 2Z" />
+    <path d="M12 6.5v12" />
+  </Icon>
+)

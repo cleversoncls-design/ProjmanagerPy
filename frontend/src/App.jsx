@@ -21,8 +21,20 @@ import ServiceOrdersPage from './pages/ServiceOrdersPage'
 import ReportsIndexPage from './pages/ReportsIndexPage'
 import HoursBreakdownReportPage from './pages/HoursBreakdownReportPage'
 import StatusReportsPage from './pages/StatusReportsPage'
+import KnowledgeCatalogPage from './pages/KnowledgeCatalogPage'
+import KnowledgeSelfAssessmentPage from './pages/KnowledgeSelfAssessmentPage'
+import KnowledgeReviewPage from './pages/KnowledgeReviewPage'
 import NoAccessPage from './pages/NoAccessPage'
-import { ADMIN_LIKE_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, PROJECTS_VISIBLE_ROLES, STATUS_REPORT_VISIBLE_ROLES } from './utils/labels'
+import {
+  ADMIN_LIKE_ROLES,
+  INTERNAL_ROLES,
+  KNOWLEDGE_CATALOG_ROLES,
+  KNOWLEDGE_REVIEW_ROLES,
+  KNOWLEDGE_SELF_ASSESSMENT_ROLES,
+  MANAGEMENT_ROLES,
+  PROJECTS_VISIBLE_ROLES,
+  STATUS_REPORT_VISIBLE_ROLES,
+} from './utils/labels'
 
 export default function App() {
   return (
@@ -86,6 +98,20 @@ export default function App() {
                   <Route element={<ProtectedRoute roles={STATUS_REPORT_VISIBLE_ROLES} />}>
                     <Route path="/reports" element={<ReportsIndexPage />} />
                     <Route path="/reports/status-report" element={<StatusReportsPage />} />
+                  </Route>
+
+                  {/* "Conhecimento" (pedido do usuário, "NOVAS MELHORIAS":
+                      processo de registro de conhecimento dos consultores)
+                      — três rotas, três `roles` distintos, exatamente como
+                      o usuário especificou por tela (ver Sidebar.jsx). */}
+                  <Route element={<ProtectedRoute roles={KNOWLEDGE_CATALOG_ROLES} />}>
+                    <Route path="/knowledge/catalog" element={<KnowledgeCatalogPage />} />
+                  </Route>
+                  <Route element={<ProtectedRoute roles={KNOWLEDGE_SELF_ASSESSMENT_ROLES} />}>
+                    <Route path="/knowledge/self-assessment" element={<KnowledgeSelfAssessmentPage />} />
+                  </Route>
+                  <Route element={<ProtectedRoute roles={KNOWLEDGE_REVIEW_ROLES} />}>
+                    <Route path="/knowledge/review" element={<KnowledgeReviewPage />} />
                   </Route>
                 </Route>
               </Route>

@@ -4,7 +4,7 @@ import datetime as _dt
 from datetime import date, datetime, time
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from .color_palette import DEFAULT_PROJECT_COLOR
 from .models import (
@@ -14,6 +14,8 @@ from .models import (
     DependencyType,
     EmailSecurity,
     IntakeStatus,
+    KnowledgeRequirement,
+    KnowledgeStatus,
     Language,
     ProjectStatus,
     RagStatus,
@@ -1263,3 +1265,158 @@ class EmailLogRead(BaseModel):
     subject: str
     success: bool
     error_message: str | None
+
+
+# ---------------------------------------------------------------------------
+# Conhecimento (ver docstrings dos modelos em app/models.py para o
+# detalhe das decisões confirmadas com o usuário)
+# ---------------------------------------------------------------------------
+
+
+class KnowledgeFunctionalityCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    requirement: KnowledgeRequirement = KnowledgeRequirement.REQUIRED
+
+
+class KnowledgeFunctionalityRead(ORMModel):
+    id: str
+    module_id: str
+    name: str
+    description: str | None = None
+    requirement: KnowledgeRequirement
+
+
+class KnowledgeModuleCreate(BaseModel):
+    """`applies_to_consultant`/`applies_to_internal_pm`: pelo menos um
+    precisa ficar marcado (mesma regra do `CheckConstraint` em
+    KnowledgeModule — validada aqui também pra devolver um 422 amigável
+    em vez de um erro de banco)."""
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    applies_to_consultant: bool = True
+    applies_to_internal_pm: bool = True
+
+    @model_validator(mode="after")
+    def _at_least_one_profile(self) -> "KnowledgeModuleCreate":
+        if not self.applies_to_consultant and not self.applies_to_internal_pm:
+            raise ValueError("Selecione ao menos um perfil (Consultor e/ou Gerente de Projeto)")
+        return self
+
+
+class KnowledgeModuleRead(ORMModel):
+    id: str
+    system_id: str
+    name: str
+    description: str | None = None
+    applies_to_consultant: bool
+    applies_to_internal_pm: bool
+    functionalities: list[KnowledgeFunctionalityRead] = []
+
+
+class KnowledgeSystemCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+
+
+class KnowledgeSystemRead(ORMModel):
+    id: str
+    name: str
+    description: str | None = None
+    modules: list[KnowledgeModuleRead] = []
+
+
+# --- Autoavaliação ("Registro de Funcionalidades por Consultor/Gerente") ---
+
+
+class MyKnowledgeFunctionalityRead(BaseModel):
+    """Uma folha do catálogo já anotada com a autoavaliação do recurso
+    logado, se houver (`status=None` = nunca avaliada — diferente de
+    `status=DRAFT` com `self_level=0`, que é uma resposta explícita de
+    "Não conhece")."""
+
+    id: str
+    name: str
+    description: str | None = None
+    requirement: KnowledgeRequirement
+    self_level: int | None = None
+    reviewed_level: int | None = None
+    status: KnowledgeStatus | None = None
+    notes: str | None = None
+
+
+class MyKnowledgeModuleRead(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    functionalities: list[MyKnowledgeFunctionalityRead] = []
+
+
+class MyKnowledgeSystemRead(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    modules: list[MyKnowledgeModuleRead] = []
+
+
+class ResourceKnowledgeUpsert(BaseModel):
+    self_level: int = Field(ge=0, le=4)
+    notes: str | None = None
+
+
+# --- Revisão e Aprovação ---
+
+
+class KnowledgeSubmissionItemRead(BaseModel):
+    """Um item dentro do envio, já com o caminho completo do catálogo
+    (Sistema / Módulo / Funcionalidade) — a tela de revisão não precisa
+    montar isso na mão nem fazer chamadas extras."""
+
+    id: str
+    functionality_id: str
+    system_name: str
+    module_name: str
+    functionality_name: str
+    requirement: KnowledgeRequirement
+    self_level: int | None = None
+    reviewed_level: int | None = None
+    notes: str | None = None
+
+
+class KnowledgeSubmissionRead(BaseModel):
+    id: str
+    resource_id: str
+    resource_name: str
+    # Pedido do frontend (KnowledgeReviewPage.jsx): comparar com o usuário
+    # logado pra esconder os botões Aprovar/Rejeitar na própria
+    # autoavaliação — o backend já bloqueia isso com 403 (ver
+    # review_submission em routers/knowledge.py), este campo só evita que o
+    # revisor precise clicar pra descobrir.
+    resource_user_id: str
+    status: KnowledgeStatus
+    submitted_at: datetime
+    reviewed_by: str | None = None
+    reviewer_name: str | None = None
+    reviewed_at: datetime | None = None
+    review_notes: str | None = None
+    items: list[KnowledgeSubmissionItemRead] = []
+
+
+class KnowledgeSubmissionReviewItem(BaseModel):
+    functionality_id: str
+    reviewed_level: int = Field(ge=0, le=4)
+
+
+class KnowledgeSubmissionReview(BaseModel):
+    """Corpo de PATCH /knowledge/submissions/{id} — decisão confirmada com
+    o usuário: aprovação é SEMPRE do envio inteiro (nunca item a item), e
+    o revisor PODE ajustar o nível de cada item antes de aprovar (`items`
+    abaixo; qualquer funcionalidade do envio não listada aqui mantém
+    `reviewed_level = self_level`, ver review_submission em
+    routers/knowledge.py). Em uma rejeição, `review_notes` é obrigatório
+    (validado no router, não aqui, porque depende do `status`)."""
+
+    status: KnowledgeStatus
+    review_notes: str | None = None
+    items: list[KnowledgeSubmissionReviewItem] = []

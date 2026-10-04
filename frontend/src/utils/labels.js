@@ -86,6 +86,19 @@ export const PROJECTS_VISIBLE_ROLES = ['ADMIN', 'INTERNAL_PM', 'SERVICE_MANAGER'
 // app/deps.py tem leitura normal em GET /projects/{id}/status-reports.
 export const STATUS_REPORT_VISIBLE_ROLES = ['ADMIN', 'INTERNAL_PM', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR', 'CLIENT_PM']
 
+// Menu "Conhecimento" (pedido do usuário, "NOVAS MELHORIAS": processo de
+// registro de conhecimento dos consultores) — três telas, três acessos
+// DISTINTOS dos de cima, exatamente como o usuário especificou (mesmos
+// três conjuntos no backend, ver app/deps.py KNOWLEDGE_CATALOG_ROLES/
+// KNOWLEDGE_SELF_ASSESSMENT_ROLES/KNOWLEDGE_REVIEW_ROLES). Nenhum perfil
+// de cliente (EXTERNAL_ROLES) vê nada deste menu — é gestão interna de
+// equipe, não dado de projeto.
+export const KNOWLEDGE_CATALOG_ROLES = MANAGEMENT_ROLES
+export const KNOWLEDGE_SELF_ASSESSMENT_ROLES = ['CONSULTANT', 'INTERNAL_PM']
+// Revisão e Aprovação: ADMIN fica de fora de propósito (o usuário não
+// listou Administrador pra esta tela) — diferente de MANAGEMENT_ROLES.
+export const KNOWLEDGE_REVIEW_ROLES = ['INTERNAL_PM', 'SERVICE_MANAGER', 'GENERAL_DIRECTOR']
+
 // Primeira tela de cada perfil ao logar (ou ao cair em "/" depois de ser
 // barrado por ProtectedRoute em alguma rota) — precisa ser uma rota que o
 // próprio perfil tenha acesso, senão vira redirecionamento em loop.
@@ -427,6 +440,55 @@ export const RISK_STATUS_TONE = {
   CLOSED: 'good',
 }
 
+// Conhecimento (KnowledgeRequirement/KnowledgeStatus em app/models.py) —
+// cadastro de Funcionalidades, autoavaliação e Revisão/Aprovação.
+export const KNOWLEDGE_REQUIREMENT_LABELS = {
+  REQUIRED: 'Necessário',
+  DESIRABLE: 'Desejável',
+}
+
+export const KNOWLEDGE_REQUIREMENT_TONE = {
+  REQUIRED: 'critical',
+  DESIRABLE: 'warning',
+}
+
+// Escala de nível de conhecimento (pedido do usuário, com o texto exato de
+// cada nível) — usada em ResourceKnowledge.self_level/reviewed_level (0 a
+// 4). Chaves numéricas (não string) de propósito, mesmo critério de
+// RESOURCE_LEVEL_LABELS acima — comparação/indexação direta por número.
+export const KNOWLEDGE_LEVEL_LABELS = {
+  0: 'Nível 0 - Não conhece',
+  1: 'Nível 1 - Conhece o conceito',
+  2: 'Nível 2 - Conhece e implanta com apoio',
+  3: 'Nível 3 - Conhece e implanta sem apoio',
+  4: 'Nível 4 - Especialista',
+}
+
+// Versão curta (sem o "Nível N -") pra caber em colunas de tabela estreitas
+// (tela de Revisão e Aprovação, que lista Sistema/Módulo/Funcionalidade
+// junto).
+export const KNOWLEDGE_LEVEL_SHORT_LABELS = {
+  0: 'Não conhece',
+  1: 'Conhece o conceito',
+  2: 'Implanta com apoio',
+  3: 'Implanta sem apoio',
+  4: 'Especialista',
+}
+
+export const KNOWLEDGE_STATUS_LABELS = {
+  DRAFT: 'Rascunho',
+  SUBMITTED: 'Aguardando revisão',
+  APPROVED: 'Aprovado',
+  REJECTED: 'Rejeitado',
+}
+
+export const KNOWLEDGE_STATUS_TONE = {
+  DRAFT: 'warning',
+  SUBMITTED: 'warning',
+  APPROVED: 'good',
+  REJECTED: 'critical',
+}
+
 // --- Versões traduzidas dos rótulos acima (para o idioma da interface) ----
 // As constantes exportadas acima continuam sendo o texto em Português
 // (usado como chave de tradução em toda a base — ver i18n/translations.js).
@@ -461,6 +523,10 @@ export function getLabels(lang) {
     RAG_STATUS_LABELS: translateMap(RAG_STATUS_LABELS, lang),
     RISK_LEVEL_LABELS: translateMap(RISK_LEVEL_LABELS, lang),
     RISK_STATUS_LABELS: translateMap(RISK_STATUS_LABELS, lang),
+    KNOWLEDGE_REQUIREMENT_LABELS: translateMap(KNOWLEDGE_REQUIREMENT_LABELS, lang),
+    KNOWLEDGE_LEVEL_LABELS: translateMap(KNOWLEDGE_LEVEL_LABELS, lang),
+    KNOWLEDGE_LEVEL_SHORT_LABELS: translateMap(KNOWLEDGE_LEVEL_SHORT_LABELS, lang),
+    KNOWLEDGE_STATUS_LABELS: translateMap(KNOWLEDGE_STATUS_LABELS, lang),
     WEEKDAY_LABELS: WEEKDAY_LABELS.map((day) => translate(lang, day)),
     TIMESHEET_STATUS_LABELS: translateMap(TIMESHEET_STATUS_LABELS, lang),
     ABSENCE_TYPE_LABELS: translateMap(ABSENCE_TYPE_LABELS, lang),

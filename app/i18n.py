@@ -199,6 +199,19 @@ _ES: dict[str, str] = {
     "start precisa ser anterior ou igual a end": "start debe ser anterior o igual a end",
     "period_start precisa ser anterior ou igual a period_end": "period_start debe ser anterior o igual a period_end",
     "status precisa ser APPROVED ou REJECTED": "status debe ser APPROVED o REJECTED",
+    # Menu "Conhecimento" (registro de conhecimento dos consultores) —
+    # ver app/routers/knowledge.py.
+    "Sistema não encontrado": "Sistema no encontrado",
+    "Módulo não encontrado": "Módulo no encontrado",
+    "Funcionalidade não encontrada": "Funcionalidad no encontrada",
+    "Acesso restrito a perfis internos": "Acceso restringido a perfiles internos",
+    "Esta funcionalidade não está liberada para o seu perfil": "Esta funcionalidad no está habilitada para su perfil",
+    "Nenhuma autoavaliação pendente para enviar": "Ninguna autoevaluación pendiente para enviar",
+    "Envio não encontrado": "Envío no encontrado",
+    "Este envio já foi revisado": "Este envío ya fue revisado",
+    "Status inválido — use APPROVED ou REJECTED": "Estado inválido — use APPROVED o REJECTED",
+    "Você não pode revisar sua própria autoavaliação": "Usted no puede revisar su propia autoevaluación",
+    "Informe o motivo da rejeição em Comentário do revisor": "Informe el motivo del rechazo en Comentario del revisor",
 }
 
 

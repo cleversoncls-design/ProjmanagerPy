@@ -5,6 +5,12 @@
 const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
 const numberFormatter = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 })
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC' })
+// Diferente de `dateFormatter` acima (calendário puro, sempre UTC pra não
+// perder um dia por causa do fuso do navegador): um timestamp completo
+// (ex.: KnowledgeSubmission.submitted_at/reviewed_at, "Registro de
+// Conhecimento") faz mais sentido mostrado no fuso do próprio navegador —
+// por isso SEM `timeZone: 'UTC'` aqui.
+const dateTimeFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 
 export function formatCurrency(value) {
   if (value === null || value === undefined) return '—'
@@ -43,6 +49,19 @@ export function formatDate(value) {
   const date = parseApiDate(value)
   if (!date) return '—'
   return dateFormatter.format(date)
+}
+
+/** Timestamp completo (data + hora) — ex.: "quando foi enviado/revisado"
+ * no Registro de Conhecimento. A API serializa `datetime` sem sufixo "Z"
+ * (ex.: "2026-10-04T14:32:10.123456"); sem forçar UTC aqui, o `new Date()`
+ * do navegador trataria isso como HORA LOCAL (não UTC), o que estaria
+ * errado — o valor gravado é sempre UTC (ver `func.now()` no backend). */
+export function formatDateTime(value) {
+  if (!value) return '—'
+  const iso = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  return dateTimeFormatter.format(date)
 }
 
 /** SPI/CPI (índices de Earned Value) — sempre 2 casas, sem separador de

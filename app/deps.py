@@ -24,6 +24,21 @@ EXTERNAL_ROLES = {UserRole.CLIENT_PM, UserRole.CLIENT_USER}
 MANAGEMENT_ROLES = {UserRole.ADMIN, UserRole.INTERNAL_PM, UserRole.SERVICE_MANAGER, UserRole.GENERAL_DIRECTOR}
 ADMIN_LIKE_ROLES = {UserRole.ADMIN, UserRole.SERVICE_MANAGER, UserRole.GENERAL_DIRECTOR}
 
+# Menu "Conhecimento" (pedido do usuário, "NOVAS MELHORIAS": registro de
+# conhecimento dos consultores) — três conjuntos de acesso DISTINTOS dos
+# de cima, exatamente como o usuário especificou por tela:
+# - Cadastro das Funcionalidades (Sistema/Módulo/Funcionalidade): mesmo
+#   grupo de MANAGEMENT_ROLES — reaproveitado direto.
+# - Registro por Consultor/Gerente (autoavaliação): só quem de fato se
+#   autoavalia, nunca ADMIN/SERVICE_MANAGER/GENERAL_DIRECTOR.
+# - Revisão e Aprovação: Gerente de Projetos/Gerente de Serviços/Diretor
+#   Geral — ADMIN fica de fora de propósito (o usuário não listou
+#   Administrador pra esta tela), diferente de MANAGEMENT_ROLES/
+#   ADMIN_LIKE_ROLES de cima.
+KNOWLEDGE_CATALOG_ROLES = MANAGEMENT_ROLES
+KNOWLEDGE_SELF_ASSESSMENT_ROLES = {UserRole.CONSULTANT, UserRole.INTERNAL_PM}
+KNOWLEDGE_REVIEW_ROLES = {UserRole.INTERNAL_PM, UserRole.SERVICE_MANAGER, UserRole.GENERAL_DIRECTOR}
+
 
 def get_current_user(
     request: Request,

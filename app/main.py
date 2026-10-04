@@ -21,6 +21,7 @@ from .routers import (
     email_settings,
     expenses,
     intakes,
+    knowledge,
     projects,
     reports,
     resources,
@@ -119,3 +120,4 @@ app.include_router(baselines.router)
 app.include_router(audit.router)
 app.include_router(reports.router)
 app.include_router(status_reports.router)
+app.include_router(knowledge.router)

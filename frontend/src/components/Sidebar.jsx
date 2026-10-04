@@ -6,6 +6,9 @@ import {
   ADMIN_LIKE_ROLES,
   DASHBOARD_ROLES,
   INTERNAL_ROLES,
+  KNOWLEDGE_CATALOG_ROLES,
+  KNOWLEDGE_REVIEW_ROLES,
+  KNOWLEDGE_SELF_ASSESSMENT_ROLES,
   MANAGEMENT_ROLES,
   PROJECTS_VISIBLE_ROLES,
   STATUS_REPORT_VISIBLE_ROLES,
@@ -14,6 +17,7 @@ import logo from '../assets/resultar-logo.png'
 import {
   BadgeCheckIcon,
   BarChartIcon,
+  BookIcon,
   BriefcaseIcon,
   BuildingIcon,
   CalendarIcon,
@@ -60,6 +64,27 @@ const NAV_SECTIONS = [
       { to: '/timesheets', label: 'Apontamento de horas', icon: ClipboardCheckIcon, roles: INTERNAL_ROLES },
       { to: '/service-orders', label: 'Ordens de Serviço', icon: FileTextIcon, roles: INTERNAL_ROLES },
       { to: '/timesheet-approvals', label: 'Aprovações de horas', icon: BadgeCheckIcon, roles: MANAGEMENT_ROLES },
+    ],
+  },
+  // "Conhecimento" (pedido do usuário, "NOVAS MELHORIAS": processo de
+  // registro de conhecimento dos consultores) — três telas, cada uma com
+  // seu próprio `roles` exatamente como o usuário especificou (ver
+  // KNOWLEDGE_CATALOG_ROLES/KNOWLEDGE_SELF_ASSESSMENT_ROLES/
+  // KNOWLEDGE_REVIEW_ROLES em utils/labels.js); a seção some inteira pra
+  // quem não tem acesso a nenhuma das três (ex.: perfis de cliente).
+  {
+    type: 'group',
+    key: 'conhecimento',
+    label: 'Conhecimento',
+    items: [
+      { to: '/knowledge/catalog', label: 'Cadastro de Funcionalidades', icon: BookIcon, roles: KNOWLEDGE_CATALOG_ROLES },
+      {
+        to: '/knowledge/self-assessment',
+        label: 'Registro de Conhecimento',
+        icon: BadgeCheckIcon,
+        roles: KNOWLEDGE_SELF_ASSESSMENT_ROLES,
+      },
+      { to: '/knowledge/review', label: 'Revisão e Aprovação', icon: ClipboardCheckIcon, roles: KNOWLEDGE_REVIEW_ROLES },
     ],
   },
   {
