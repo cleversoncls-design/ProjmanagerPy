@@ -19,6 +19,8 @@ const EMAIL_LOG_KIND_LABELS = {
   teste: 'Teste',
   agendamento: 'Agendamento',
   resumo_aprovacoes: 'Resumo de aprovações',
+  convite_agenda: 'Convite de calendário',
+  convite_agenda_teste: 'Teste de convite',
 }
 
 const EMPTY_FORM = {

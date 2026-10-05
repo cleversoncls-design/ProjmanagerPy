@@ -634,6 +634,12 @@ class Resource(Base):
     # deste recurso — opcional; sem ele, o recálculo de cronograma usa o
     # calendário do projeto/calendar_id informado explicitamente na chamada.
     calendar_id: Mapped[str | None] = mapped_column(ForeignKey("calendars.id", ondelete="SET NULL"))
+    # Convite de calendário por e-mail (Agenda → Google Calendar): cada
+    # consultor liga/desliga pra si mesmo (menu do avatar → "Meu Google
+    # Calendar"). `calendar_invite_email` é o endereço da conta Google, quando
+    # diferente do e-mail de login; vazio = usa o e-mail do usuário.
+    calendar_invite_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    calendar_invite_email: Mapped[str | None] = mapped_column(String(255))
     __table_args__ = (CheckConstraint("level IS NULL OR level BETWEEN 1 AND 4", name="ck_resource_level_range"),)
     user: Mapped[User] = relationship(back_populates="resource")
     calendar: Mapped[Calendar | None] = relationship()
@@ -656,6 +662,10 @@ class ResourceSchedule(Base):
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
     end_time: Mapped[time] = mapped_column(Time, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    # SEQUENCE do convite de calendário (.ics): sobe a cada reenvio do mesmo
+    # evento (UID = id do agendamento) pra o Google atualizar em vez de
+    # duplicar. Ver app/ics.py e notifications.notify_resource_schedule.
+    ics_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     resource: Mapped[Resource] = relationship()
     project: Mapped[Project] = relationship()

@@ -1011,6 +1011,21 @@ export const es = {
   'Teste': 'Prueba',
   'Agendamento': 'Agenda',
   'Resumo de aprovações': 'Resumen de aprobaciones',
+  'Convite de calendário': 'Invitación de calendario',
+  'Teste de convite': 'Prueba de invitación',
+  'Meu Google Calendar': 'Mi Google Calendar',
+  'Convite de teste enviado para {email}. Confira sua caixa de entrada e o Google Calendar (evento de amanhã às 09:00).':
+    'Invitación de prueba enviada a {email}. Revise su bandeja de entrada y Google Calendar (evento de mañana a las 09:00).',
+  'Receba os seus agendamentos da Agenda de consultores no Google Calendar: o sistema envia um convite por e-mail, e remarcar ou excluir o agendamento atualiza ou cancela o evento.':
+    'Reciba sus agendamientos de la Agenda de consultores en Google Calendar: el sistema envía una invitación por correo, y reprogramar o eliminar el agendamiento actualiza o cancela el evento.',
+  'O envio de e-mails do sistema está desativado. Peça ao administrador para ativá-lo em Configurações > E-mail.':
+    'El envío de correos del sistema está desactivado. Pida al administrador que lo active en Configuraciones > Correo.',
+  'Receber meus agendamentos no Google Calendar': 'Recibir mis agendamientos en Google Calendar',
+  'E-mail da conta Google': 'Correo de la cuenta Google',
+  'Deixe em branco para usar o e-mail de login: {email}': 'Déjelo en blanco para usar el correo de inicio de sesión: {email}',
+  'Vale só para agendamentos novos ou alterados a partir de agora; os que já existem não são reenviados.':
+    'Vale solo para agendamientos nuevos o modificados a partir de ahora; los que ya existen no se reenvían.',
+  'Enviar convite de teste': 'Enviar invitación de prueba',
   'Limpar log': 'Limpiar registro',
   'Limpando…': 'Limpiando…',
   'Tem certeza? Essa ação não pode ser desfeita.': '¿Está seguro? Esta acción no se puede deshacer.',

@@ -3777,3 +3777,257 @@ def test_send_pending_approval_digests_groups_by_project_manager(client, setup, 
     dry_summaries = send_pending_approval_digests(db_session, dry_run=True)
     assert len(dry_summaries) == 2
     assert sent == []
+
+
+# ---------------------------------------------------------------------------
+# Convite de calendário (Agenda de consultores → Google Calendar, via .ics)
+# ---------------------------------------------------------------------------
+
+
+def _calendar_parts(raw_message: str) -> dict:
+    """Decodifica a mensagem MIME mandada ao SMTP fake e devolve o texto da
+    parte text/calendar (com o `method`) e se há o anexo invite.ics."""
+    import email as email_lib
+
+    message = email_lib.message_from_string(raw_message)
+    result = {"calendar": None, "method": None, "attachment": False, "to": message["To"], "subject": message["Subject"]}
+    for part in message.walk():
+        if part.get_content_type() == "text/calendar":
+            result["calendar"] = part.get_payload(decode=True).decode("utf-8")
+            result["method"] = part.get_param("method")
+        if part.get_content_type() == "application/ics" and part.get_filename() == "invite.ics":
+            result["attachment"] = True
+    return result
+
+
+def _enable_smtp(client, admin_headers):
+    response = client.put(
+        "/email-settings",
+        json={
+            "enabled": True,
+            "smtp_host": "smtp.exemplo.com",
+            "smtp_port": 587,
+            "security": "STARTTLS",
+            "smtp_username": "no-reply@exemplo.com",
+            "smtp_password": "senha-smtp",
+            "from_email": "no-reply@exemplo.com",
+            "from_name": "Resultar",
+        },
+        headers=admin_headers,
+    )
+    assert response.status_code == 200
+
+
+def test_ics_builder_uses_utc_and_asuncion_timezone():
+    from datetime import date, datetime, time, timezone
+
+    from app.ics import build_invite_ics, wall_clock_to_utc
+
+    # America/Asuncion é UTC-3 o ano todo desde out/2024 (sem horário de verão).
+    assert wall_clock_to_utc(date(2026, 10, 6), time(9, 0)) == datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
+    assert wall_clock_to_utc(date(2026, 7, 15), time(9, 0)) == datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+
+    ics = build_invite_ics(
+        method="REQUEST",
+        uid="abc@projmanagerpy",
+        sequence=3,
+        start_utc=wall_clock_to_utc(date(2026, 10, 6), time(9, 0)),
+        end_utc=wall_clock_to_utc(date(2026, 10, 6), time(12, 30)),
+        summary="Projeto; A, B",
+        description="Linha 1\nLinha 2 " + "x" * 120,
+        organizer_email="no-reply@exemplo.com",
+        organizer_name="Resultar",
+        attendee_email="consultor@exemplo.com",
+        attendee_name="Consultor",
+    )
+    assert "METHOD:REQUEST" in ics
+    assert "UID:abc@projmanagerpy" in ics
+    assert "SEQUENCE:3" in ics
+    assert "DTSTART:20261006T120000Z" in ics
+    assert "DTEND:20261006T153000Z" in ics
+    assert "SUMMARY:Projeto\\; A\\, B" in ics
+    assert "mailto:no-reply@exemplo.com" in ics
+    assert "mailto:consultor@exemplo.com" in ics
+    assert all(len(line.encode("utf-8")) <= 75 for line in ics.split("\r\n"))
+
+    cancel = build_invite_ics(
+        method="CANCEL",
+        uid="abc@projmanagerpy",
+        sequence=4,
+        start_utc=wall_clock_to_utc(date(2026, 10, 6), time(9, 0)),
+        end_utc=wall_clock_to_utc(date(2026, 10, 6), time(12, 30)),
+        summary="Projeto",
+        description="",
+        organizer_email="no-reply@exemplo.com",
+        organizer_name=None,
+        attendee_email="consultor@exemplo.com",
+        attendee_name=None,
+    )
+    assert "METHOD:CANCEL" in cancel
+    assert "STATUS:CANCELLED" in cancel
+
+
+def test_calendar_invite_settings_are_self_service_and_need_a_resource(client, setup):
+    admin_headers = setup["admin_headers"]
+    client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    )
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    current = client.get("/resources/me/calendar-invite", headers=consultant_headers)
+    assert current.status_code == 200
+    assert current.json() == {
+        "enabled": False,
+        "email": None,
+        "default_email": setup["consultant"].email,
+        "email_service_ready": False,
+    }
+
+    updated = client.put(
+        "/resources/me/calendar-invite",
+        json={"enabled": True, "email": "consultor@empresa.com"},
+        headers=consultant_headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["enabled"] is True
+    assert updated.json()["email"] == "consultor@empresa.com"
+
+    # E-mail igual ao de login não é guardado (usa o de login).
+    same = client.put(
+        "/resources/me/calendar-invite",
+        json={"enabled": True, "email": setup["consultant"].email},
+        headers=consultant_headers,
+    )
+    assert same.json()["email"] is None
+
+    # Quem não tem recurso vinculado (aqui, o PM do cliente) recebe 404.
+    client_pm_headers = auth_headers(client, setup["client_pm_a"].email)
+    assert client.get("/resources/me/calendar-invite", headers=client_pm_headers).status_code == 404
+    assert client.get("/resources/me/calendar-invite").status_code == 401
+
+
+def test_schedule_invite_is_sent_updated_and_cancelled(client, setup, monkeypatch):
+    admin_headers = setup["admin_headers"]
+    _enable_smtp(client, admin_headers)
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+    client.put(
+        "/resources/me/calendar-invite",
+        json={"enabled": True, "email": "consultor@empresa.com"},
+        headers=consultant_headers,
+    )
+
+    _FakeSmtpConnection.instances = []
+    monkeypatch.setattr("app.email_service.smtplib.SMTP", _FakeSmtpConnection)
+
+    created = client.post(
+        "/resource-schedules",
+        json={
+            "resource_id": resource["id"],
+            "project_id": setup["project_a"].id,
+            "date": "2026-10-06",
+            "start_time": "09:00",
+            "end_time": "12:30",
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    schedule_id = created.json()["id"]
+
+    assert len(_FakeSmtpConnection.instances) == 1
+    sent = _FakeSmtpConnection.instances[0]
+    assert sent.sent[1] == ["consultor@empresa.com"]
+    parts = _calendar_parts(sent.sent[2])
+    assert parts["method"] == "REQUEST"
+    assert parts["attachment"] is True
+    assert f"UID:{schedule_id}@projmanagerpy" in parts["calendar"]
+    assert "SEQUENCE:0" in parts["calendar"]
+    assert "DTSTART:20261006T120000Z" in parts["calendar"]
+
+    # Remarcar reenvia o MESMO UID com SEQUENCE maior (o Google atualiza).
+    _FakeSmtpConnection.instances = []
+    rescheduled = client.patch(
+        f"/resource-schedules/{schedule_id}", json={"start_time": "10:00", "end_time": "13:00"}, headers=admin_headers
+    )
+    assert rescheduled.status_code == 200
+    assert len(_FakeSmtpConnection.instances) == 1
+    updated_parts = _calendar_parts(_FakeSmtpConnection.instances[0].sent[2])
+    assert updated_parts["method"] == "REQUEST"
+    assert f"UID:{schedule_id}@projmanagerpy" in updated_parts["calendar"]
+    assert "SEQUENCE:1" in updated_parts["calendar"]
+    assert "DTSTART:20261006T130000Z" in updated_parts["calendar"]
+
+    # Excluir manda o cancelamento (METHOD:CANCEL) pro mesmo UID.
+    _FakeSmtpConnection.instances = []
+    deleted = client.delete(f"/resource-schedules/{schedule_id}", headers=admin_headers)
+    assert deleted.status_code == 204
+    assert len(_FakeSmtpConnection.instances) == 1
+    cancel_parts = _calendar_parts(_FakeSmtpConnection.instances[0].sent[2])
+    assert cancel_parts["method"] == "CANCEL"
+    assert f"UID:{schedule_id}@projmanagerpy" in cancel_parts["calendar"]
+    assert "STATUS:CANCELLED" in cancel_parts["calendar"]
+    assert "SEQUENCE:2" in cancel_parts["calendar"]
+
+
+def test_schedule_without_invite_keeps_plain_email_and_no_cancel(client, setup, monkeypatch):
+    admin_headers = setup["admin_headers"]
+    _enable_smtp(client, admin_headers)
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+
+    _FakeSmtpConnection.instances = []
+    monkeypatch.setattr("app.email_service.smtplib.SMTP", _FakeSmtpConnection)
+
+    created = client.post(
+        "/resource-schedules",
+        json={
+            "resource_id": resource["id"],
+            "project_id": setup["project_a"].id,
+            "date": "2026-10-07",
+            "start_time": "08:00",
+            "end_time": "12:00",
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    # Convite desligado: o e-mail de aviso de sempre, sem parte de calendário.
+    assert len(_FakeSmtpConnection.instances) == 1
+    assert _calendar_parts(_FakeSmtpConnection.instances[0].sent[2])["calendar"] is None
+
+    _FakeSmtpConnection.instances = []
+    assert client.delete(f"/resource-schedules/{created.json()['id']}", headers=admin_headers).status_code == 204
+    assert _FakeSmtpConnection.instances == []
+
+
+def test_calendar_invite_test_endpoint_sends_a_real_invite(client, setup, monkeypatch):
+    admin_headers = setup["admin_headers"]
+    client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    )
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    # Envio de e-mails desligado/não configurado: 400 com mensagem clara.
+    refused = client.post("/resources/me/calendar-invite/test", headers=consultant_headers)
+    assert refused.status_code == 400
+
+    _enable_smtp(client, admin_headers)
+    _FakeSmtpConnection.instances = []
+    monkeypatch.setattr("app.email_service.smtplib.SMTP", _FakeSmtpConnection)
+    ok = client.post("/resources/me/calendar-invite/test", headers=consultant_headers)
+    assert ok.status_code == 204
+    assert len(_FakeSmtpConnection.instances) == 1
+    parts = _calendar_parts(_FakeSmtpConnection.instances[0].sent[2])
+    assert parts["method"] == "REQUEST"
+    assert parts["attachment"] is True
+    assert _FakeSmtpConnection.instances[0].sent[1] == [setup["consultant"].email]

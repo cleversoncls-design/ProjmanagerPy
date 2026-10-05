@@ -10,7 +10,7 @@ from ..database import get_db
 from ..deps import INTERNAL_ROLES, MANAGEMENT_ROLES, require_roles
 from ..i18n import t as translate
 from ..models import Project, Resource, ResourceSchedule, ResourceScheduleTask, Task, Timesheet, TimesheetStatus, User
-from ..notifications import notify_resource_schedule
+from ..notifications import notify_resource_schedule, notify_resource_schedule_cancelled, snapshot_schedule_for_cancel
 from ..schemas import ResourceScheduleCreate, ResourceScheduleRead, ResourceScheduleUpdate
 
 router = APIRouter(prefix="/resource-schedules", tags=["resource-schedules"])
@@ -235,11 +235,17 @@ def update_schedule(
 @router.delete("/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_schedule(
     schedule_id: str,
+    background_tasks: BackgroundTasks,
     user: User = Depends(require_roles(*_MANAGE_ROLES)),
     db: Session = Depends(get_db),
 ) -> None:
     schedule = db.get(ResourceSchedule, schedule_id)
     if not schedule:
         raise HTTPException(status_code=404, detail=translate("Agendamento não encontrado", user.language))
+    # Consultor com convite de calendário ligado: foto antes de apagar, pra
+    # mandar o cancelamento (METHOD:CANCEL) que tira o evento da agenda dele.
+    cancel_snapshot = snapshot_schedule_for_cancel(schedule)
     db.delete(schedule)
     db.commit()
+    if cancel_snapshot:
+        background_tasks.add_task(notify_resource_schedule_cancelled, cancel_snapshot)

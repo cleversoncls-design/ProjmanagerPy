@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 import smtplib
+from email import encoders
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr, formatdate, make_msgid
@@ -42,6 +44,8 @@ def send_raw_email(
     html_body: str,
     text_body: str | None = None,
     kind: str = "outro",
+    ics_method: str | None = None,
+    ics_content: str | None = None,
 ) -> tuple[bool, str | None]:
     """Conecta no SMTP configurado e manda o e-mail, SEM checar
     `settings.enabled` — usado pelo botão "Enviar e-mail de teste" (ver
@@ -59,7 +63,13 @@ def send_raw_email(
     try:
         password = decrypt_secret(settings.smtp_password_encrypted) if settings.smtp_password_encrypted else None
 
-        message = MIMEMultipart("alternative")
+        # Convite de calendário (ver app/ics.py): estrutura que o Google
+        # Calendar/Outlook reconhecem — multipart/mixed contendo um
+        # multipart/alternative (texto, HTML e a parte text/calendar com o
+        # `method`) mais o mesmo .ics anexado. Sem convite, continua o
+        # multipart/alternative simples de sempre.
+        body = MIMEMultipart("alternative")
+        message = MIMEMultipart("mixed") if ics_content else body
         message["Subject"] = subject
         message["From"] = formataddr((settings.from_name or "", settings.from_email))
         message["To"] = formataddr((to_name or "", to_email))
@@ -78,8 +88,19 @@ def send_raw_email(
         message["Date"] = formatdate(localtime=True)
         message["Message-ID"] = make_msgid(domain=(settings.from_email.split("@", 1)[-1] or None))
         if text_body:
-            message.attach(MIMEText(text_body, "plain", "utf-8"))
-        message.attach(MIMEText(html_body, "html", "utf-8"))
+            body.attach(MIMEText(text_body, "plain", "utf-8"))
+        body.attach(MIMEText(html_body, "html", "utf-8"))
+        if ics_content:
+            method = ics_method or "REQUEST"
+            calendar_part = MIMEText(ics_content, "calendar", "utf-8")
+            calendar_part.replace_header("Content-Type", f'text/calendar; charset="UTF-8"; method={method}')
+            body.attach(calendar_part)
+            message.attach(body)
+            attachment = MIMEBase("application", "ics", name="invite.ics")
+            attachment.set_payload(ics_content.encode("utf-8"))
+            encoders.encode_base64(attachment)
+            attachment.add_header("Content-Disposition", "attachment", filename="invite.ics")
+            message.attach(attachment)
 
         if settings.security == EmailSecurity.SSL:
             server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=15)
@@ -121,6 +142,8 @@ def send_email(
     html_body: str,
     text_body: str | None = None,
     kind: str = "outro",
+    ics_method: str | None = None,
+    ics_content: str | None = None,
 ) -> tuple[bool, str | None]:
     """Manda um e-mail "de negócio" usando a configuração salva em
     `EmailSettings`. Retorna `(ok, erro)` — nunca levanta exceção (ver
@@ -135,5 +158,14 @@ def send_email(
     if not settings or not settings.enabled:
         return False, None
     return send_raw_email(
-        db, settings, to_email=to_email, to_name=to_name, subject=subject, html_body=html_body, text_body=text_body, kind=kind
+        db,
+        settings,
+        to_email=to_email,
+        to_name=to_name,
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body,
+        kind=kind,
+        ics_method=ics_method,
+        ics_content=ics_content,
     )

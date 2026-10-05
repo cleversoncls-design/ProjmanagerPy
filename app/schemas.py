@@ -1036,6 +1036,23 @@ class StatusReportRead(ORMModel):
     burndown: list[BurndownPoint]
 
 
+class CalendarInviteSettingsRead(BaseModel):
+    """Estado do convite de calendário do PRÓPRIO consultor (menu do avatar →
+    "Meu Google Calendar"). `email` é o endereço salvo (None = usa o e-mail
+    de login, `default_email`); `email_service_ready` avisa a tela quando o
+    envio de e-mails do sistema (Configurações > E-mail) está desligado."""
+
+    enabled: bool
+    email: str | None
+    default_email: str
+    email_service_ready: bool
+
+
+class CalendarInviteSettingsUpdate(BaseModel):
+    enabled: bool
+    email: EmailStr | None = None
+
+
 class ResourceUtilizationRow(BaseModel):
     resource_id: str
     user_id: str

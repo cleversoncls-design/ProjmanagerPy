@@ -33,6 +33,9 @@ services:
       # fato for salvar uma senha de SMTP na tela Configurações > E-mail
       # (ver app/crypto.py) — até lá, o sistema sobe normalmente sem ela.
       EMAIL_CREDENTIALS_ENCRYPTION_KEY: ${EMAIL_CREDENTIALS_ENCRYPTION_KEY:-}
+      # Fuso em que valem os horários da Agenda de consultores nos convites de
+      # calendário (.ics) — padrão America/Asuncion (ver app/ics.py).
+      APP_TIMEZONE: ${APP_TIMEZONE:-America/Asuncion}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-0}
       RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}

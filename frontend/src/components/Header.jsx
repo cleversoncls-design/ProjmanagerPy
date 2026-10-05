@@ -5,7 +5,9 @@ import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { useLanguage } from '../context/LanguageContext'
 import ChangePasswordModal from './ChangePasswordModal'
-import { BellIcon, ChevronDownIcon, KeyIcon, LogoutIcon, MoonIcon, SunIcon } from './icons'
+import CalendarInviteModal from './CalendarInviteModal'
+import * as resourcesApi from '../api/resources'
+import { BellIcon, CalendarIcon, ChevronDownIcon, KeyIcon, LogoutIcon, MoonIcon, SunIcon } from './icons'
 
 const HEADING_BY_PREFIX = [
   { prefix: '/projects/', crumb: 'Projetos', title: 'Detalhe do projeto' },
@@ -43,6 +45,22 @@ export default function Header() {
   const { crumb, title } = usePageHeading()
   const [menuOpen, setMenuOpen] = useState(false)
   const [changingPassword, setChangingPassword] = useState(false)
+  // Convite de calendário (Agenda → Google Calendar): null enquanto carrega
+  // ou quando o usuário não tem recurso vinculado (404) — nesse caso o item
+  // "Meu Google Calendar" não aparece no menu.
+  const [calendarInvite, setCalendarInvite] = useState(null)
+  const [editingCalendarInvite, setEditingCalendarInvite] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    resourcesApi
+      .getMyCalendarInvite()
+      .then((data) => active && setCalendarInvite(data))
+      .catch(() => active && setCalendarInvite(null))
+    return () => {
+      active = false
+    }
+  }, [user?.id])
   const menuRef = useRef(null)
   const dropdownRef = useRef(null)
   const [menuPos, setMenuPos] = useState({ top: 0, right: 0 })
@@ -154,6 +172,20 @@ export default function Header() {
                 <KeyIcon size={15} />
                 {t('Alterar senha')}
               </button>
+              {calendarInvite && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    setEditingCalendarInvite(true)
+                  }}
+                  className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[12.5px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--page)] hover:text-[var(--text-primary)]"
+                >
+                  <CalendarIcon size={15} />
+                  {t('Meu Google Calendar')}
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"
@@ -180,6 +212,9 @@ export default function Header() {
         </button>
       </div>
       {changingPassword && <ChangePasswordModal onClose={() => setChangingPassword(false)} />}
+      {editingCalendarInvite && calendarInvite && (
+        <CalendarInviteModal initial={calendarInvite} onClose={() => setEditingCalendarInvite(false)} onSaved={setCalendarInvite} />
+      )}
     </header>
   )
 }

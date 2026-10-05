@@ -19,7 +19,8 @@ from html import escape as h
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .email_service import send_email
+from .email_service import get_email_settings, send_email
+from .ics import build_invite_ics, wall_clock_to_utc
 from .i18n import t as translate
 from .models import Project, Resource, ResourceSchedule, Task, Timesheet, TimesheetStatus, User
 
@@ -72,12 +73,34 @@ def _schedule_email_content(schedule: ResourceSchedule, user: User, *, created: 
     return subject, html_body, text_body
 
 
+def _invite_recipient(resource: Resource, user: User) -> str | None:
+    """Endereço que recebe o convite de calendário, ou None se o consultor
+    não ligou a opção (menu do avatar → "Meu Google Calendar")."""
+    if not resource.calendar_invite_enabled:
+        return None
+    return resource.calendar_invite_email or user.email or None
+
+
+def _invite_description(schedule_tasks: list[str], note: str | None, lang) -> str:
+    parts: list[str] = []
+    if note:
+        parts.append(note)
+    if schedule_tasks:
+        parts.append(translate("Tarefas vinculadas", lang) + ":\n" + "\n".join(f"- {task}" for task in schedule_tasks))
+    return "\n\n".join(parts)
+
+
 def notify_resource_schedule(schedule_id: str, *, created: bool) -> None:
     """Dispara o aviso de agendamento (pedido do usuário, caso 1: "Agendas
     definidas para consultores"). Chamada em segundo plano a partir de
     create_schedule/update_schedule (app/routers/schedules.py) — nunca
     bloqueia a resposta da API, e uma falha de envio nunca desfaz o
-    agendamento (mesma regra da integração com Google Calendar)."""
+    agendamento (mesma regra da integração com Google Calendar).
+
+    Se o consultor ligou o convite de calendário, o MESMO e-mail segue pro
+    endereço da conta Google dele com o `.ics` (METHOD:REQUEST) anexado — um
+    e-mail só, não dois. Reenvios do mesmo agendamento mantêm o UID e sobem
+    o SEQUENCE, então o Google atualiza o evento em vez de duplicar."""
     from .database import get_session_factory
 
     session = get_session_factory()()
@@ -90,11 +113,173 @@ def notify_resource_schedule(schedule_id: str, *, created: bool) -> None:
         if not user or not user.email:
             return
         subject, html_body, text_body = _schedule_email_content(schedule, user, created=created)
+        invite_to = _invite_recipient(resource, user)
+        settings = get_email_settings(session) if invite_to else None
+        if not invite_to or not settings:
+            send_email(
+                session, to_email=user.email, to_name=user.name, subject=subject, html_body=html_body, text_body=text_body, kind="agendamento"
+            )
+            return
+        if not created:
+            schedule.ics_sequence = (schedule.ics_sequence or 0) + 1
+            session.commit()
+        lang = user.language
+        note = translate(
+            "Este e-mail traz um convite de calendário: ele é adicionado ao seu Google Calendar (ou fica pendente de aceite).", lang
+        )
+        html_body += f"<p><em>{h(note)}</em></p>"
+        text_body += f"\n{note}\n"
+        project = schedule.project
+        ics = build_invite_ics(
+            method="REQUEST",
+            uid=f"{schedule.id}@projmanagerpy",
+            sequence=schedule.ics_sequence or 0,
+            start_utc=wall_clock_to_utc(schedule.date, schedule.start_time),
+            end_utc=wall_clock_to_utc(schedule.date, schedule.end_time),
+            summary=project.name if project else "Agenda",
+            description=_invite_description([f"{task.wbs_code} — {task.name}" for task in schedule.tasks], schedule.description, lang),
+            organizer_email=settings.from_email,
+            organizer_name=settings.from_name,
+            attendee_email=invite_to,
+            attendee_name=user.name,
+        )
         send_email(
-            session, to_email=user.email, to_name=user.name, subject=subject, html_body=html_body, text_body=text_body, kind="agendamento"
+            session,
+            to_email=invite_to,
+            to_name=user.name,
+            subject=subject,
+            html_body=html_body,
+            text_body=text_body,
+            kind="convite_agenda",
+            ics_method="REQUEST",
+            ics_content=ics,
         )
     finally:
         session.close()
+
+
+def snapshot_schedule_for_cancel(schedule: ResourceSchedule) -> dict | None:
+    """Foto do agendamento ANTES de ser excluído (depois o registro não
+    existe mais). Devolve None quando o consultor não usa convite de
+    calendário — nesse caso excluir continua sem aviso, como sempre foi."""
+    resource = schedule.resource
+    user = resource.user if resource else None
+    if not resource or not user:
+        return None
+    invite_to = _invite_recipient(resource, user)
+    if not invite_to:
+        return None
+    return {
+        "uid": f"{schedule.id}@projmanagerpy",
+        "sequence": (schedule.ics_sequence or 0) + 1,
+        "date": schedule.date,
+        "start_time": schedule.start_time,
+        "end_time": schedule.end_time,
+        "project_name": schedule.project.name if schedule.project else "Agenda",
+        "to_email": invite_to,
+        "to_name": user.name,
+        "lang": user.language,
+    }
+
+
+def notify_resource_schedule_cancelled(snapshot: dict) -> None:
+    """Cancelamento do convite (METHOD:CANCEL) quando o agendamento é
+    excluído — remove o evento da agenda do consultor. Roda em segundo plano
+    com a foto tirada por `snapshot_schedule_for_cancel`."""
+    from .database import get_session_factory
+
+    session = get_session_factory()()
+    try:
+        settings = get_email_settings(session)
+        if not settings:
+            return
+        lang = snapshot["lang"]
+        subject = translate("Agendamento cancelado na sua Agenda de consultores", lang)
+        greeting = translate("Olá, {name}!", lang).format(name=snapshot["to_name"])
+        intro = translate("Um bloco da sua Agenda foi cancelado:", lang)
+        date_str = snapshot["date"].strftime("%d/%m/%Y")
+        time_str = f"{snapshot['start_time'].strftime('%H:%M')} - {snapshot['end_time'].strftime('%H:%M')}"
+        html_body = (
+            f"<p>{h(greeting)}</p><p>{h(intro)}</p><ul>"
+            f"<li><strong>{h(translate('Projeto', lang))}:</strong> {h(snapshot['project_name'])}</li>"
+            f"<li><strong>{h(translate('Data', lang))}:</strong> {h(date_str)}</li>"
+            f"<li><strong>{h(translate('Horário', lang))}:</strong> {h(time_str)}</li></ul>"
+        )
+        text_body = (
+            f"{greeting}\n\n{intro}\n\n{translate('Projeto', lang)}: {snapshot['project_name']}\n"
+            f"{translate('Data', lang)}: {date_str}\n{translate('Horário', lang)}: {time_str}\n"
+        )
+        ics = build_invite_ics(
+            method="CANCEL",
+            uid=snapshot["uid"],
+            sequence=snapshot["sequence"],
+            start_utc=wall_clock_to_utc(snapshot["date"], snapshot["start_time"]),
+            end_utc=wall_clock_to_utc(snapshot["date"], snapshot["end_time"]),
+            summary=snapshot["project_name"],
+            description="",
+            organizer_email=settings.from_email,
+            organizer_name=settings.from_name,
+            attendee_email=snapshot["to_email"],
+            attendee_name=snapshot["to_name"],
+        )
+        send_email(
+            session,
+            to_email=snapshot["to_email"],
+            to_name=snapshot["to_name"],
+            subject=subject,
+            html_body=html_body,
+            text_body=text_body,
+            kind="convite_agenda",
+            ics_method="CANCEL",
+            ics_content=ics,
+        )
+    finally:
+        session.close()
+
+
+def send_calendar_invite_test(session: Session, resource: Resource, user: User) -> tuple[bool, str | None]:
+    """Botão "Enviar convite de teste" do modal "Meu Google Calendar": manda
+    um convite real, amanhã às 09:00–09:30 (fuso da aplicação), pro endereço
+    configurado — o jeito de o consultor (e o administrador) conferirem que
+    o Google aceita os convites desse remetente (SPF/DKIM) antes de depender
+    deles. O consultor apaga o evento de teste na própria agenda depois."""
+    import uuid
+    from datetime import datetime as _dt, time as _time, timedelta
+
+    from .ics import app_timezone
+
+    settings = get_email_settings(session)
+    if not settings or not settings.enabled:
+        return False, translate("O envio de e-mails do sistema está desativado ou não configurado", user.language)
+    invite_to = resource.calendar_invite_email or user.email
+    tomorrow = (_dt.now(app_timezone()) + timedelta(days=1)).date()
+    lang = user.language
+    subject = translate("Teste de convite — Agenda de consultores", lang)
+    note = translate("Este é um convite de teste. Se ele apareceu na sua agenda, a integração está funcionando; pode excluí-lo.", lang)
+    ics = build_invite_ics(
+        method="REQUEST",
+        uid=f"teste-{uuid.uuid4()}@projmanagerpy",
+        sequence=0,
+        start_utc=wall_clock_to_utc(tomorrow, _time(9, 0)),
+        end_utc=wall_clock_to_utc(tomorrow, _time(9, 30)),
+        summary=subject,
+        description=note,
+        organizer_email=settings.from_email,
+        organizer_name=settings.from_name,
+        attendee_email=invite_to,
+        attendee_name=user.name,
+    )
+    return send_email(
+        session,
+        to_email=invite_to,
+        to_name=user.name,
+        subject=subject,
+        html_body=f"<p>{h(translate('Olá, {name}!', lang).format(name=user.name))}</p><p>{h(note)}</p>",
+        text_body=f"{translate('Olá, {name}!', lang).format(name=user.name)}\n\n{note}\n",
+        kind="convite_agenda_teste",
+        ics_method="REQUEST",
+        ics_content=ics,
+    )
 
 
 def _digest_email_content(manager_name: str, lang, rows: list[dict], total_hours: Decimal) -> tuple[str, str, str]:
