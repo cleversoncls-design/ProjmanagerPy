@@ -99,7 +99,7 @@ CORS_ORIGINS=https://app.exemplo.com,https://admin.exemplo.com
 
 | Domínio | Rotas |
 |---|---|
-| Autenticação | `POST /auth/login` |
+| Autenticação | `POST /auth/login`, `POST /auth/change-password` (qualquer perfil troca a própria senha; exige a senha atual, devolve token novo e encerra as outras sessões) |
 | Usuários | `POST /users` (ADMIN), `GET /users/me`, `GET /users?role=&client_id=` (ADMIN/INTERNAL_PM) |
 | Clientes | `POST /clients`, `GET /clients`, `GET /clients/{id}` |
 | Solicitações de projeto | `POST /clients/{client_id}/intakes`, `GET /clients/{client_id}/intakes`, `PATCH /intakes/{id}/status` |

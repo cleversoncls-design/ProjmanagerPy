@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -292,6 +293,17 @@ class User(Base):
         nullable=False,
         default=Language.PT_BR,
     )
+    # Troca de senha pelo próprio usuário (pedido do usuário):
+    # - `must_change_password`: True quando o ADMIN cria o usuário ou redefine
+    #   a senha dele (a senha provisória só vale pra entrar e trocar a
+    #   própria senha); enquanto True, a API só libera /users/me e
+    #   /auth/change-password (ver deps.get_current_user). Usuários que já
+    #   existiam antes desta funcionalidade nascem com False (server_default).
+    # - `token_version`: entra no JWT ("tv"); trocar/redefinir a senha
+    #   incrementa o valor e, com isso, invalida qualquer token emitido antes
+    #   ("encerra as outras sessões"). Tokens antigos, sem "tv", valem como 0.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     client: Mapped[Client | None] = relationship(back_populates="users")

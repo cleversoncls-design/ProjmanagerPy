@@ -1,11 +1,26 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Header from './Header'
+import ChangePasswordModal from './ChangePasswordModal'
+import { useAuth } from '../context/AuthContext'
 
 /** Casca da aplicação autenticada: faixa de destaque no topo + menu lateral
  * fixo + cabeçalho + conteúdo da rota — estrutura portada do app de
  * referência Resultar Servicios (components/desktop-route-shell.tsx). */
 export default function Layout() {
+  const { user } = useAuth()
+
+  // Senha provisória (usuário recém-criado ou senha redefinida pelo ADMIN):
+  // a API recusa tudo com 403 até a troca (ver deps.get_current_user), então
+  // nem montamos o app — só a tela de troca obrigatória.
+  if (user?.must_change_password) {
+    return (
+      <div className="min-h-screen bg-[var(--page)] print:hidden">
+        <ChangePasswordModal forced />
+      </div>
+    )
+  }
+
   return (
     // print:hidden aqui (não só nos filhos) — sem isso, o `min-h-screen`
     // deste div força pelo menos uma página inteira de espaço em branco

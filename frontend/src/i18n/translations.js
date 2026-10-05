@@ -343,6 +343,18 @@ export const es = {
   'Nome fantasia': 'Nombre comercial',
   'Nova predecessora': 'Nueva predecesora',
   'Nova senha': 'Nueva contraseña',
+  'Alterar senha': 'Cambiar contraseña',
+  'Senha atual': 'Contraseña actual',
+  'Senha provisória (atual)': 'Contraseña provisoria (actual)',
+  'Confirmar nova senha': 'Confirmar nueva contraseña',
+  'Defina sua nova senha': 'Defina su nueva contraseña',
+  'Você está usando uma senha provisória. Por segurança, defina uma nova senha para continuar.':
+    'Está usando una contraseña provisoria. Por seguridad, defina una nueva contraseña para continuar.',
+  'A nova senha deve ter no mínimo 8 caracteres.': 'La nueva contraseña debe tener al menos 8 caracteres.',
+  'A confirmação não confere com a nova senha.': 'La confirmación no coincide con la nueva contraseña.',
+  'A nova senha deve ser diferente da senha atual.': 'La nueva contraseña debe ser diferente de la contraseña actual.',
+  'Senha alterada com sucesso. Suas outras sessões abertas foram encerradas.':
+    'Contraseña cambiada con éxito. Sus otras sesiones abiertas fueron cerradas.',
   'Nova tarefa pai': 'Nueva tarea padre',
   'Novo calendário': 'Nuevo calendario',
   'Novo cliente': 'Nuevo cliente',

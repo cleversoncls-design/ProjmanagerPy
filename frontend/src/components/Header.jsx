@@ -1,8 +1,10 @@
+import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { useLanguage } from '../context/LanguageContext'
-import { BellIcon, LogoutIcon, MoonIcon, SunIcon } from './icons'
+import ChangePasswordModal from './ChangePasswordModal'
+import { BellIcon, KeyIcon, LogoutIcon, MoonIcon, SunIcon } from './icons'
 
 const HEADING_BY_PREFIX = [
   { prefix: '/projects/', crumb: 'Projetos', title: 'Detalhe do projeto' },
@@ -38,6 +40,26 @@ export default function Header() {
   const { theme, toggleTheme } = useTheme()
   const { language, setLanguage, t } = useLanguage()
   const { crumb, title } = usePageHeading()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
+  const menuRef = useRef(null)
+
+  // Fecha o menu do usuário ao clicar fora ou apertar Esc.
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    const onPointerDown = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpen(false)
+    }
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
 
   return (
     <header
@@ -74,14 +96,51 @@ export default function Header() {
           <BellIcon size={17} />
         </button>
         <div className="hidden h-7 w-px shrink-0 bg-[var(--border)] sm:block" />
-        <div className="flex shrink-0 items-center gap-2.5">
-          <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-[var(--text-primary)]">
-            <span className="text-xs font-extrabold text-[var(--page)]">{initialsOf(user?.name)}</span>
-          </div>
-          <div className="hidden sm:block">
-            <p className="max-w-[160px] truncate text-[12.5px] font-bold text-[var(--text-primary)]">{user?.name || t('Usuário autenticado')}</p>
-            <p className="max-w-[160px] truncate text-[11px] text-[var(--text-muted)]">{user?.email || ''}</p>
-          </div>
+        {/* Menu do usuário: qualquer perfil troca a PRÓPRIA senha por aqui. */}
+        <div ref={menuRef} className="relative shrink-0">
+          <button
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+            className="flex shrink-0 items-center gap-2.5 rounded-[10px] px-1.5 py-1 text-left transition-colors hover:bg-[var(--page)]"
+          >
+            <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-[var(--text-primary)]">
+              <span className="text-xs font-extrabold text-[var(--page)]">{initialsOf(user?.name)}</span>
+            </div>
+            <div className="hidden sm:block">
+              <p className="max-w-[160px] truncate text-[12.5px] font-bold text-[var(--text-primary)]">{user?.name || t('Usuário autenticado')}</p>
+              <p className="max-w-[160px] truncate text-[11px] text-[var(--text-muted)]">{user?.email || ''}</p>
+            </div>
+          </button>
+          {menuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-full z-40 mt-2 w-48 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-xl"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false)
+                  setChangingPassword(true)
+                }}
+                className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[12.5px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--page)] hover:text-[var(--text-primary)]"
+              >
+                <KeyIcon size={15} />
+                {t('Alterar senha')}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={logout}
+                className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[12.5px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--page)] hover:text-[var(--text-primary)]"
+              >
+                <LogoutIcon size={15} />
+                {t('Sair')}
+              </button>
+            </div>
+          )}
         </div>
         <div className="hidden h-7 w-px shrink-0 bg-[var(--border)] sm:block" />
         <button
@@ -95,6 +154,7 @@ export default function Header() {
           <span className="hidden sm:inline">{t('Sair')}</span>
         </button>
       </div>
+      {changingPassword && <ChangePasswordModal onClose={() => setChangingPassword(false)} />}
     </header>
   )
 }

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..audit import record_audit
 from ..database import get_db
-from ..deps import MANAGEMENT_ROLES, get_current_user, require_roles
+from ..deps import MANAGEMENT_ROLES, get_current_user, get_current_user_allow_pending_password, require_roles
 from ..i18n import t as translate
 from ..models import AuditAction, ChangeRequest, Client, Project, Resource, TaskAssignment, Timesheet, User, UserRole
 from ..schemas import UserCreate, UserPasswordReset, UserRead, UserSelfUpdate, UserUpdate
@@ -36,6 +36,9 @@ def create_user(
         name=data.name,
         email=data.email,
         password_hash=hash_password(data.password),
+        # Senha provisória definida pelo ADMIN: o usuário é obrigado a trocar
+        # no primeiro acesso (ver deps.get_current_user).
+        must_change_password=True,
         role=data.role,
         client_id=data.client_id,
     )
@@ -46,14 +49,14 @@ def create_user(
 
 
 @router.get("/users/me", response_model=UserRead)
-def read_current_user(current_user: User = Depends(get_current_user)) -> User:
+def read_current_user(current_user: User = Depends(get_current_user_allow_pending_password)) -> User:
     return current_user
 
 
 @router.patch("/users/me", response_model=UserRead)
 def update_my_language(
     data: UserSelfUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_allow_pending_password),
     db: Session = Depends(get_db),
 ) -> User:
     """Autoatendimento de idioma — qualquer usuário logado pode trocar,
@@ -187,6 +190,10 @@ def reset_user_password(
     if not user:
         raise HTTPException(status_code=404, detail=translate("Usuário não encontrado", current_user.language))
     user.password_hash = hash_password(data.new_password)
+    # Senha redefinida pelo ADMIN é provisória: força nova troca no próximo
+    # acesso e derruba as sessões abertas com a senha antiga.
+    user.must_change_password = True
+    user.token_version = (user.token_version or 0) + 1
     record_audit(db, entity_type="user", entity_id=user.id, action=AuditAction.UPDATE, user_id=current_user.id, details={"action": "password_reset"})
     db.commit()
     return None

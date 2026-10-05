@@ -66,6 +66,7 @@ class UserRead(ORMModel):
     role: UserRole
     status: UserStatus
     language: Language
+    must_change_password: bool = False
     created_at: datetime
 
 
@@ -94,6 +95,15 @@ class UserSelfUpdate(BaseModel):
 
 
 class UserPasswordReset(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class PasswordChange(BaseModel):
+    """Troca da PRÓPRIA senha (POST /auth/change-password) — qualquer perfil.
+    A confirmação da nova senha é conferida no frontend; a API exige a senha
+    atual e aplica o mesmo mínimo de 8 caracteres da criação de usuário."""
+
+    current_password: str = Field(min_length=1, max_length=128)
     new_password: str = Field(min_length=8, max_length=128)
 
 

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from .database import get_db
 from .i18n import request_language, t
 from .models import Project, User, UserRole, UserStatus
-from .security import decode_access_token
+from .security import decode_access_token_with_version
 
 # Gerente de Serviços/Diretor Geral (pedido do usuário) têm acessos
 # equivalentes ao Administrador, exceto cadastrar/editar/excluir usuário
@@ -40,7 +40,7 @@ KNOWLEDGE_SELF_ASSESSMENT_ROLES = {UserRole.CONSULTANT, UserRole.INTERNAL_PM}
 KNOWLEDGE_REVIEW_ROLES = {UserRole.INTERNAL_PM, UserRole.SERVICE_MANAGER, UserRole.GENERAL_DIRECTOR}
 
 
-def get_current_user(
+def get_current_user_allow_pending_password(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
     db: Session = Depends(get_db),
@@ -50,6 +50,10 @@ def get_current_user(
     Substitui o antigo adaptador de demonstração baseado no header
     `X-User-Id` (que aceitava qualquer identidade informada pelo cliente,
     sem nenhuma verificação de senha ou assinatura).
+
+    Variante que NÃO bloqueia quem ainda precisa trocar a senha
+    (`must_change_password`) — usada só por GET/PATCH /users/me e
+    POST /auth/change-password; todo o resto da API usa `get_current_user`.
     """
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
@@ -59,7 +63,7 @@ def get_current_user(
         )
     token = authorization.split(" ", 1)[1].strip()
     try:
-        user_id = decode_access_token(token)
+        user_id, token_version = decode_access_token_with_version(token)
     except jwt.PyJWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -70,6 +74,24 @@ def get_current_user(
     if not user or user.status != UserStatus.ACTIVE:
         lang = user.language if user else request_language(request)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=t("Usuário inválido ou inativo", lang))
+    if token_version != user.token_version:
+        # Senha trocada/redefinida depois da emissão deste token: a sessão
+        # antiga deixa de valer (o frontend limpa o token em qualquer 401).
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=t("Sessão encerrada: a senha foi alterada. Entre novamente.", user.language),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+
+def get_current_user(user: User = Depends(get_current_user_allow_pending_password)) -> User:
+    """Usuário autenticado que já definiu a própria senha. Enquanto
+    `must_change_password` for True (usuário recém-criado ou com senha
+    redefinida pelo ADMIN), a API recusa tudo com 403 — exceto as rotas que
+    usam `get_current_user_allow_pending_password`."""
+    if user.must_change_password:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=t("É necessário trocar a senha provisória antes de continuar", user.language))
     return user
 
 

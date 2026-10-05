@@ -31,9 +31,12 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_access_token(user_id: str, expires_minutes: int | None = None) -> str:
+def create_access_token(user_id: str, expires_minutes: int | None = None, token_version: int = 0) -> str:
+    """`token_version` (claim "tv") espelha `User.token_version`: trocar ou
+    redefinir a senha incrementa o valor no banco e invalida todo token
+    emitido antes (ver deps.get_current_user)."""
     expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes or JWT_EXPIRE_MINUTES_DEFAULT)
-    payload = {"sub": user_id, "exp": expire}
+    payload = {"sub": user_id, "exp": expire, "tv": token_version}
     return jwt.encode(payload, _secret_key(), algorithm=JWT_ALGORITHM)
 
 
@@ -41,3 +44,11 @@ def decode_access_token(token: str) -> str:
     """Retorna o `sub` (user_id) do token. Levanta jwt.PyJWTError se inválido/expirado."""
     payload = jwt.decode(token, _secret_key(), algorithms=[JWT_ALGORITHM])
     return payload["sub"]
+
+
+def decode_access_token_with_version(token: str) -> tuple[str, int]:
+    """Como `decode_access_token`, mas devolve também a versão do token.
+    Tokens emitidos antes da troca de senha existir não têm "tv" e valem
+    como versão 0 (igual ao default de `User.token_version`)."""
+    payload = jwt.decode(token, _secret_key(), algorithms=[JWT_ALGORITHM])
+    return payload["sub"], int(payload.get("tv", 0))

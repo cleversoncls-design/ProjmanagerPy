@@ -1978,6 +1978,121 @@ def test_admin_can_reset_user_password(client, setup):
     assert new_login.status_code == 200
 
 
+def test_reset_password_forces_change_and_ends_old_sessions(client, setup):
+    admin_headers = setup["admin_headers"]
+    consultant = setup["consultant"]
+    old_headers = auth_headers(client, consultant.email)
+    assert client.get("/projects", headers=old_headers).status_code == 200
+
+    reset = client.post(f"/users/{consultant.id}/reset-password", json={"new_password": "provisoria-123"}, headers=admin_headers)
+    assert reset.status_code == 204
+
+    # A sessão aberta com a senha antiga deixa de valer.
+    assert client.get("/users/me", headers=old_headers).status_code == 401
+
+    login = client.post("/auth/login", data={"username": consultant.email, "password": "provisoria-123"})
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    me = client.get("/users/me", headers=headers)
+    assert me.status_code == 200
+    assert me.json()["must_change_password"] is True
+
+
+def test_user_can_change_own_password(client, setup):
+    consultant = setup["consultant"]
+    headers = auth_headers(client, consultant.email)
+    other_session = auth_headers(client, consultant.email)
+
+    response = client.post(
+        "/auth/change-password",
+        json={"current_password": PASSWORD, "new_password": "nova-senha-456"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    new_headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+    # O token novo mantém a sessão atual; os anteriores (inclusive de outro
+    # dispositivo) são encerrados.
+    assert client.get("/users/me", headers=new_headers).status_code == 200
+    assert client.get("/users/me", headers=headers).status_code == 401
+    assert client.get("/users/me", headers=other_session).status_code == 401
+
+    assert client.post("/auth/login", data={"username": consultant.email, "password": PASSWORD}).status_code == 401
+    assert client.post("/auth/login", data={"username": consultant.email, "password": "nova-senha-456"}).status_code == 200
+
+
+@pytest.mark.parametrize("role_key", ["admin", "pm", "consultant", "client_pm_a", "client_user_a"])
+def test_every_role_can_change_own_password(client, setup, role_key):
+    user = setup[role_key]
+    headers = auth_headers(client, user.email)
+    response = client.post(
+        "/auth/change-password",
+        json={"current_password": PASSWORD, "new_password": "outra-senha-789"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+
+
+def test_change_password_rejects_wrong_current_and_same_password(client, setup):
+    headers = auth_headers(client, setup["consultant"].email)
+
+    wrong = client.post(
+        "/auth/change-password",
+        json={"current_password": "senha-errada-000", "new_password": "nova-senha-456"},
+        headers=headers,
+    )
+    # 400 (e não 401): o frontend descarta o token em qualquer 401.
+    assert wrong.status_code == 400
+    assert client.get("/users/me", headers=headers).status_code == 200
+
+    same = client.post(
+        "/auth/change-password",
+        json={"current_password": PASSWORD, "new_password": PASSWORD},
+        headers=headers,
+    )
+    assert same.status_code == 400
+
+    too_short = client.post(
+        "/auth/change-password",
+        json={"current_password": PASSWORD, "new_password": "curta"},
+        headers=headers,
+    )
+    assert too_short.status_code == 422
+
+
+def test_change_password_requires_authentication(client, setup):
+    response = client.post("/auth/change-password", json={"current_password": PASSWORD, "new_password": "nova-senha-456"})
+    assert response.status_code == 401
+
+
+def test_new_user_must_change_password_before_using_the_api(client, setup):
+    created = client.post(
+        "/users",
+        json={"name": "Novo", "email": "novo@example.com", "password": "provisoria-123", "role": "CONSULTANT"},
+        headers=setup["admin_headers"],
+    )
+    assert created.status_code == 201
+    assert created.json()["must_change_password"] is True
+
+    login = client.post("/auth/login", data={"username": "novo@example.com", "password": "provisoria-123"})
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    # Bloqueado em tudo, exceto ler o próprio perfil e trocar a senha.
+    assert client.get("/projects", headers=headers).status_code == 403
+    assert client.get("/users/me", headers=headers).status_code == 200
+
+    changed = client.post(
+        "/auth/change-password",
+        json={"current_password": "provisoria-123", "new_password": "definitiva-123"},
+        headers=headers,
+    )
+    assert changed.status_code == 200
+    new_headers = {"Authorization": f"Bearer {changed.json()['access_token']}"}
+    assert client.get("/projects", headers=new_headers).status_code == 200
+    assert client.get("/users/me", headers=new_headers).json()["must_change_password"] is False
+
+
 def test_closed_task_blocks_new_timesheet(client, setup):
     """Pedido do usuário ("MELHORIAS DO PROJETO"): opção de ativar/
     desativar tarefas, com um estado "Finalizada/Cerrada" — uma tarefa

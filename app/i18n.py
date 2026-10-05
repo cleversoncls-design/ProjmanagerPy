@@ -43,6 +43,10 @@ _ES: dict[str, str] = {
         "Conflicto de integridad de datos (registro duplicado o referencia inválida)."
     ),
     "Credenciais inválidas": "Credenciales inválidas",
+    "Senha atual incorreta": "Contraseña actual incorrecta",
+    "A nova senha deve ser diferente da senha atual": "La nueva contraseña debe ser diferente de la contraseña actual",
+    "Sessão encerrada: a senha foi alterada. Entre novamente.": "Sesión finalizada: la contraseña fue cambiada. Ingrese nuevamente.",
+    "É necessário trocar a senha provisória antes de continuar": "Es necesario cambiar la contraseña provisoria antes de continuar",
     "Dependência não encontrada": "Dependencia no encontrada",
     "Essa dependência já existe": "Esa dependencia ya existe",
     "Este usuário já possui um recurso cadastrado": "Este usuario ya tiene un recurso registrado",
