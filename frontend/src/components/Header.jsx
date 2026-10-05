@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { useLanguage } from '../context/LanguageContext'
 import ChangePasswordModal from './ChangePasswordModal'
-import { BellIcon, KeyIcon, LogoutIcon, MoonIcon, SunIcon } from './icons'
+import { BellIcon, ChevronDownIcon, KeyIcon, LogoutIcon, MoonIcon, SunIcon } from './icons'
 
 const HEADING_BY_PREFIX = [
   { prefix: '/projects/', crumb: 'Projetos', title: 'Detalhe do projeto' },
@@ -43,12 +44,30 @@ export default function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [changingPassword, setChangingPassword] = useState(false)
   const menuRef = useRef(null)
+  const dropdownRef = useRef(null)
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 0 })
 
-  // Fecha o menu do usuário ao clicar fora ou apertar Esc.
+  // O <header> tem overflow-x-auto (vira overflow:auto nos dois eixos) e
+  // cortaria um menu `absolute` pendurado nele — por isso o menu é renderizado
+  // num portal em document.body, com posição `fixed` calculada a partir do
+  // botão do avatar.
+  function toggleMenu() {
+    if (!menuOpen && menuRef.current) {
+      const rect = menuRef.current.getBoundingClientRect()
+      setMenuPos({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right) })
+    }
+    setMenuOpen((open) => !open)
+  }
+
+  // Fecha o menu do usuário ao clicar fora, apertar Esc, rolar ou redimensionar.
   useEffect(() => {
     if (!menuOpen) return undefined
+    const close = () => setMenuOpen(false)
+    window.addEventListener('resize', close)
     const onPointerDown = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpen(false)
+      const inButton = menuRef.current && menuRef.current.contains(event.target)
+      const inMenu = dropdownRef.current && dropdownRef.current.contains(event.target)
+      if (!inButton && !inMenu) setMenuOpen(false)
     }
     const onKeyDown = (event) => {
       if (event.key === 'Escape') setMenuOpen(false)
@@ -56,6 +75,7 @@ export default function Header() {
     document.addEventListener('mousedown', onPointerDown)
     document.addEventListener('keydown', onKeyDown)
     return () => {
+      window.removeEventListener('resize', close)
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
@@ -102,7 +122,7 @@ export default function Header() {
             type="button"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((open) => !open)}
+            onClick={toggleMenu}
             className="flex shrink-0 items-center gap-2.5 rounded-[10px] px-1.5 py-1 text-left transition-colors hover:bg-[var(--page)]"
           >
             <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-[var(--text-primary)]">
@@ -112,11 +132,15 @@ export default function Header() {
               <p className="max-w-[160px] truncate text-[12.5px] font-bold text-[var(--text-primary)]">{user?.name || t('Usuário autenticado')}</p>
               <p className="max-w-[160px] truncate text-[11px] text-[var(--text-muted)]">{user?.email || ''}</p>
             </div>
+            <ChevronDownIcon size={14} className="shrink-0 text-[var(--text-muted)]" />
           </button>
-          {menuOpen && (
+          {menuOpen &&
+            createPortal(
             <div
+              ref={dropdownRef}
               role="menu"
-              className="absolute right-0 top-full z-40 mt-2 w-48 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-xl"
+              style={{ position: 'fixed', top: menuPos.top, right: menuPos.right }}
+              className="z-40 w-48 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-xl print:hidden"
             >
               <button
                 type="button"
@@ -139,7 +163,8 @@ export default function Header() {
                 <LogoutIcon size={15} />
                 {t('Sair')}
               </button>
-            </div>
+            </div>,
+            document.body,
           )}
         </div>
         <div className="hidden h-7 w-px shrink-0 bg-[var(--border)] sm:block" />
