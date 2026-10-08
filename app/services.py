@@ -660,18 +660,66 @@ def move_task(session: Session, task_id: str, *, new_parent_id: str | None, befo
     return task
 
 
+def derive_leaf_status(task: Task, status_date: date) -> TaskStatus:
+    """Status que uma tarefa FOLHA deveria ter na `status_date` — a Data de
+    status (Tarefas → "Data de status" / Editar projeto) é quem manda, o
+    campo Status gravado só "acompanha" (ver `sync_task_statuses`). Regras
+    (pedido do usuário: tarefas ficavam "Não iniciada" mesmo com a data de
+    status já depois do início):
+
+    - Concluída/Encerrada ficam como estão; 100% de avanço = Concluída.
+    - Fim planejado anterior à data de status (e não finalizada) = Atrasada.
+    - "Não iniciada" passa a "Em andamento" quando já há avanço (>0%) ou o
+      Início planejado é a própria data de status, e a "Atrasada" quando o
+      Início planejado já ficou pra trás sem nenhum avanço.
+    - Nunca "volta atrás": Em andamento/Atrasada sem fim vencido seguem como
+      o usuário marcou (voltar a data de status não desfaz nada)."""
+    status = task.status
+    if status in TASK_FINISHED_STATUSES:
+        return status
+    progress = Decimal(task.progress_percentage or 0)
+    if progress >= 100:
+        return TaskStatus.COMPLETED
+    if task.planned_end_date and task.planned_end_date < status_date:
+        return TaskStatus.DELAYED
+    if status == TaskStatus.NOT_STARTED:
+        if task.planned_start_date and task.planned_start_date < status_date and progress <= 0:
+            return TaskStatus.DELAYED
+        if progress > 0 or (task.planned_start_date and task.planned_start_date <= status_date):
+            return TaskStatus.IN_PROGRESS
+    return status
+
+
 def _leaf_status_dot(task: Task, status_date: date) -> str:
     """Bolinha de status de uma tarefa FOLHA (sem filhas) — regras
-    combinadas com o usuário: branca=por iniciar, vermelha=atrasada
-    (marcada DELAYED, ou planned_end_date já passou da status_date e ainda
-    não está 100% concluída), verde=dentro do prazo (inclui concluída)."""
-    if task.status == TaskStatus.NOT_STARTED:
+    combinadas com o usuário: branca=por iniciar, vermelha=atrasada,
+    verde=dentro do prazo (inclui concluída). Calculada sobre o status
+    "efetivo" na data de status (`derive_leaf_status`), então a bolinha já
+    reflete a data mesmo antes de o Status gravado ser sincronizado."""
+    effective = derive_leaf_status(task, status_date)
+    if effective == TaskStatus.NOT_STARTED:
         return "white"
-    if task.status == TaskStatus.DELAYED:
-        return "red"
-    if task.status not in TASK_FINISHED_STATUSES and task.planned_end_date and task.planned_end_date < status_date:
+    if effective == TaskStatus.DELAYED:
         return "red"
     return "green"
+
+
+def sync_task_statuses(session: Session, project: Project, status_date: date) -> int:
+    """Grava em Task.status o que `derive_leaf_status` calcula pra data de
+    status informada — chamado ao aplicar uma nova Data de status no projeto
+    (PATCH /projects/{id}). Só tarefas-folha (o pai não tem status próprio
+    que importe: a bolinha dele agrega as filhas). Retorna quantas mudaram."""
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project.id)).all())
+    parent_ids = {t.parent_task_id for t in tasks if t.parent_task_id}
+    changed = 0
+    for task in tasks:
+        if task.id in parent_ids:
+            continue
+        new_status = derive_leaf_status(task, status_date)
+        if new_status != task.status:
+            task.status = new_status
+            changed += 1
+    return changed
 
 
 def task_dot_colors(tasks: list[Task], status_date: date) -> dict[str, str]:

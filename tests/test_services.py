@@ -44,6 +44,8 @@ from app.services import (
     reschedule_cascade,
     resource_utilization,
     risk_matrix,
+    derive_leaf_status,
+    sync_task_statuses,
     task_dot_colors,
     task_schedule_rows,
     velocity_series,
@@ -806,3 +808,45 @@ def test_task_schedule_rows_rolls_up_parent_from_children():
     # Uma folha não tem rollup — os campos próprios (herdados de TaskRead
     # na resposta real da API) é que valem.
     assert rows_by_id[child_a.id]["rollup_start_date"] is None
+
+
+def test_derive_leaf_status_follows_status_date():
+    status_date = date(2026, 9, 1)
+
+    def task(**kwargs):
+        return Task(project_id="x", name="T", wbs_code="1", **kwargs)
+
+    # Início ainda no futuro, sem avanço: segue Não iniciada (bolinha branca).
+    assert derive_leaf_status(task(status=TaskStatus.NOT_STARTED, planned_start_date=date(2026, 9, 10), planned_end_date=date(2026, 9, 20)), status_date) == TaskStatus.NOT_STARTED
+    # Início é a própria data de status: Em andamento.
+    assert derive_leaf_status(task(status=TaskStatus.NOT_STARTED, planned_start_date=date(2026, 9, 1), planned_end_date=date(2026, 9, 20)), status_date) == TaskStatus.IN_PROGRESS
+    # Início já passou sem nenhum avanço: Atrasada.
+    assert derive_leaf_status(task(status=TaskStatus.NOT_STARTED, planned_start_date=date(2026, 8, 20), planned_end_date=date(2026, 9, 20)), status_date) == TaskStatus.DELAYED
+    # Início passou mas já tem avanço: Em andamento.
+    assert derive_leaf_status(task(status=TaskStatus.NOT_STARTED, planned_start_date=date(2026, 8, 20), planned_end_date=date(2026, 9, 20), progress_percentage=Decimal("30")), status_date) == TaskStatus.IN_PROGRESS
+    # Fim vencido e não finalizada: Atrasada; 100% = Concluída; Encerrada não muda.
+    assert derive_leaf_status(task(status=TaskStatus.IN_PROGRESS, planned_end_date=date(2026, 8, 20)), status_date) == TaskStatus.DELAYED
+    assert derive_leaf_status(task(status=TaskStatus.IN_PROGRESS, planned_end_date=date(2026, 8, 20), progress_percentage=Decimal("100")), status_date) == TaskStatus.COMPLETED
+    assert derive_leaf_status(task(status=TaskStatus.CLOSED, planned_end_date=date(2026, 8, 20)), status_date) == TaskStatus.CLOSED
+    # Nunca volta atrás: Atrasada sem fim vencido continua como está.
+    assert derive_leaf_status(task(status=TaskStatus.DELAYED, planned_end_date=date(2026, 9, 20)), status_date) == TaskStatus.DELAYED
+
+
+def test_sync_task_statuses_updates_only_leaf_tasks():
+    db = session()
+    project = _make_project(db, code="PRJ-SYNC")
+    parent = Task(project_id=project.id, name="Fase", wbs_code="1")
+    db.add(parent)
+    db.flush()
+    leaf = Task(
+        project_id=project.id, name="Folha", wbs_code="1.1", parent_task_id=parent.id,
+        status=TaskStatus.NOT_STARTED, planned_start_date=date(2026, 8, 20), planned_end_date=date(2026, 9, 20),
+    )
+    db.add(leaf)
+    db.commit()
+
+    assert sync_task_statuses(db, project, date(2026, 9, 1)) == 1
+    db.refresh(leaf)
+    db.refresh(parent)
+    assert leaf.status == TaskStatus.DELAYED
+    assert parent.status == TaskStatus.NOT_STARTED

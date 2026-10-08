@@ -27,7 +27,7 @@ from ..models import (
     UserRole,
 )
 from ..schemas import ProjectCreate, ProjectDetail, ProjectResourceCreate, ProjectResourceRead, ProjectSummary, ProjectUpdate
-from ..services import project_financials
+from ..services import project_financials, sync_task_statuses
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -46,6 +46,8 @@ _EXTERNAL_HIDDEN_FIELDS = _FINANCIAL_FIELDS + ("margin_percentage",)
 # global entre todos os clientes.
 _COLOR_POOL_EXCLUDED_STATUSES = {ProjectStatus.COMPLETED, ProjectStatus.CANCELLED, ProjectStatus.MODELO}
 _STRIPED_STATUSES = {ProjectStatus.COMPLETED, ProjectStatus.CANCELLED}
+# Projetos cujas tarefas NÃO acompanham a Data de status (ver sync_task_statuses).
+_STATUS_SYNC_EXCLUDED = {ProjectStatus.COMPLETED, ProjectStatus.CANCELLED, ProjectStatus.MODELO}
 
 
 def _ensure_color_available(db: Session, color: str, language: str, *, exclude_project_id: str | None = None) -> None:
@@ -196,8 +198,14 @@ def update_project(
         setattr(project, field, value)
     if any(field in changes for field in _FINANCIAL_FIELDS):
         _recompute_sold_value(project)
+    audit_details: dict = {"fields": sorted(changes.keys())}
+    if changes.get("status_date") and project.status not in _STATUS_SYNC_EXCLUDED:
+        # Nova Data de status: o Status gravado das tarefas acompanha a data
+        # (Não iniciada → Em andamento/Atrasada etc., ver services.
+        # derive_leaf_status). Projeto Modelo/finalizado não é mexido.
+        audit_details["task_statuses_synced"] = sync_task_statuses(db, project, changes["status_date"])
     if changes:
-        record_audit(db, entity_type="project", entity_id=project.id, action=AuditAction.UPDATE, user_id=user.id, details={"fields": sorted(changes.keys())})
+        record_audit(db, entity_type="project", entity_id=project.id, action=AuditAction.UPDATE, user_id=user.id, details=audit_details)
     db.commit()
     db.refresh(project)
     return project

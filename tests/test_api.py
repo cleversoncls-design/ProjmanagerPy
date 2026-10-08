@@ -4150,3 +4150,25 @@ def test_schedule_parent_task_progress_is_rolled_up_from_children(client, setup)
     assert client.patch(f"/tasks/{child_b['id']}", json={"progress_percentage": "100"}, headers=headers).status_code == 200
     rows = {t["id"]: t for t in client.get(f"/projects/{project_id}/schedule", headers=headers).json()["tasks"]}
     assert float(rows[parent["id"]]["rollup_progress_percentage"]) == 100.0
+
+
+def test_applying_status_date_syncs_task_statuses(client, setup):
+    headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+    future = _create_task(client, headers, project_id, wbs_code="1", planned_start_date="2026-09-10", duration_days="2")
+    starting = _create_task(client, headers, project_id, wbs_code="2", planned_start_date="2026-09-01", duration_days="5")
+    overdue_start = _create_task(client, headers, project_id, wbs_code="3", planned_start_date="2026-08-31", duration_days="10")
+    long_done = _create_task(client, headers, project_id, wbs_code="4", planned_start_date="2026-08-03", duration_days="1")
+
+    assert client.patch(f"/projects/{project_id}", json={"status_date": "2026-09-01"}, headers=headers).status_code == 200
+
+    statuses = {t["id"]: t["status"] for t in client.get(f"/projects/{project_id}/tasks", headers=headers).json()}
+    assert statuses[future["id"]] == "NOT_STARTED"
+    assert statuses[starting["id"]] == "IN_PROGRESS"
+    assert statuses[overdue_start["id"]] == "DELAYED"
+    assert statuses[long_done["id"]] == "DELAYED"
+
+    rows = {t["id"]: t["status_dot"] for t in client.get(f"/projects/{project_id}/schedule", headers=headers).json()["tasks"]}
+    assert rows[future["id"]] == "white"
+    assert rows[starting["id"]] == "green"
+    assert rows[overdue_start["id"]] == "red"
