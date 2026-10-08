@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..audit import record_audit
@@ -20,16 +20,40 @@ from ..models import (
     ProjectResource,
     ProjectStatus,
     Resource,
+    ResourceFunction,
     Risk,
     Task,
     Timesheet,
     User,
     UserRole,
 )
-from ..schemas import ProjectCreate, ProjectDetail, ProjectResourceCreate, ProjectResourceRead, ProjectSummary, ProjectUpdate
+from ..schemas import ProjectCreate, ProjectManagerOption, ProjectDetail, ProjectResourceCreate, ProjectResourceRead, ProjectSummary, ProjectUpdate
 from ..services import project_financials, sync_task_statuses
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+_MANAGER_ERROR = "manager_id precisa ser Administrador, Gerente de Projetos ou Gerente de Serviços com função Gerente de Projetos"
+
+
+def _is_eligible_project_manager(db: Session, candidate: User | None) -> bool:
+    """Quem pode ser Project.manager_id: Administrador e Gerente de Projetos
+    sempre; Gerente de Serviços (SERVICE_MANAGER) quando o Recurso dele está
+    com a Função "Gerente de Projetos" (pedido do usuário — ele passa a poder
+    gerenciar projetos também). Diretor Geral continua de fora, e o acesso
+    dele/do Gerente de Serviços aos projetos em si não muda (já veem todos)."""
+    if candidate is None:
+        return False
+    if candidate.role in {UserRole.ADMIN, UserRole.INTERNAL_PM}:
+        return True
+    if candidate.role == UserRole.SERVICE_MANAGER:
+        return (
+            db.scalar(
+                select(Resource.id).where(Resource.user_id == candidate.id, Resource.function == ResourceFunction.PROJECT_MANAGER)
+            )
+            is not None
+        )
+    return False
+
 
 _FINANCIAL_FIELDS = ("management_hours", "management_rate", "consulting_hours", "consulting_rate")
 # Campos financeiros escondidos de perfil externo (CLIENT_PM/CLIENT_USER) —
@@ -85,14 +109,10 @@ def create_project(
 ) -> Project:
     if not db.get(Client, data.client_id):
         raise HTTPException(status_code=404, detail=translate("Cliente não encontrado", user.language))
-    manager = db.get(User, data.manager_id)
-    # De propósito NÃO ampliado pros novos perfis (Gerente de Serviços/
-    # Diretor Geral) — "quem pode ser gerente de projeto" é uma regra de
-    # negócio à parte de "quem tem acesso equivalente ao Administrador"; se
-    # o usuário quiser que esses perfis também possam ser escolhidos como
-    # gerente de projeto, é um pedido separado.
-    if not manager or manager.role not in {UserRole.ADMIN, UserRole.INTERNAL_PM}:
-        raise HTTPException(status_code=422, detail=translate("manager_id precisa ser um usuário interno (ADMIN ou INTERNAL_PM)", user.language))
+    # "Quem pode ser gerente de projeto" é regra à parte de "quem tem acesso
+    # equivalente ao Administrador" — ver _is_eligible_project_manager.
+    if not _is_eligible_project_manager(db, db.get(User, data.manager_id)):
+        raise HTTPException(status_code=422, detail=translate(_MANAGER_ERROR, user.language))
     if db.scalar(select(Project).where(Project.code == data.code)):
         raise HTTPException(status_code=409, detail=translate("Já existe um projeto com este código", user.language))
     if data.calendar_id and not db.get(Calendar, data.calendar_id):
@@ -114,6 +134,29 @@ def create_project(
     db.commit()
     db.refresh(project)
     return project
+
+
+@router.get("/eligible-managers", response_model=list[ProjectManagerOption])
+def list_eligible_managers(
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
+    db: Session = Depends(get_db),
+) -> list[User]:
+    """Usuários que podem ser escolhidos como gerente de projeto (seletor de
+    "Novo projeto"/"Editar projeto" e filtro "Gerente") — ver
+    _is_eligible_project_manager. Rota estática: precisa vir ANTES de
+    GET /projects/{project_id}."""
+    pm_function_user_ids = select(Resource.user_id).where(Resource.function == ResourceFunction.PROJECT_MANAGER)
+    stmt = (
+        select(User)
+        .where(
+            or_(
+                User.role.in_([UserRole.ADMIN, UserRole.INTERNAL_PM]),
+                (User.role == UserRole.SERVICE_MANAGER) & User.id.in_(pm_function_user_ids),
+            )
+        )
+        .order_by(User.name)
+    )
+    return list(db.scalars(stmt).all())
 
 
 @router.get("", response_model=list[ProjectSummary])
@@ -163,9 +206,8 @@ def update_project(
     require_project_access(project, user, write=True, allow_consultant_write=False)
     changes = data.model_dump(exclude_unset=True)
     if "manager_id" in changes:
-        manager = db.get(User, changes["manager_id"])
-        if not manager or manager.role not in {UserRole.ADMIN, UserRole.INTERNAL_PM}:
-            raise HTTPException(status_code=422, detail=translate("manager_id precisa ser um usuário interno (ADMIN ou INTERNAL_PM)", user.language))
+        if not _is_eligible_project_manager(db, db.get(User, changes["manager_id"])):
+            raise HTTPException(status_code=422, detail=translate(_MANAGER_ERROR, user.language))
     if changes.get("calendar_id") and not db.get(Calendar, changes["calendar_id"]):
         raise HTTPException(status_code=404, detail=translate("Calendário não encontrado", user.language))
     if "color" in changes:

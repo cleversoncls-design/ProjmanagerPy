@@ -70,6 +70,15 @@ class UserRead(ORMModel):
     created_at: datetime
 
 
+class ProjectManagerOption(ORMModel):
+    """Usuário elegível a gerente de projeto (GET /projects/eligible-managers)."""
+
+    id: str
+    name: str
+    email: str
+    role: UserRole
+
+
 class UserUpdate(BaseModel):
     """Edição de usuário (só ADMIN — ver require_roles no router). Trocar
     `status` para BLOCKED impede login imediatamente (checado em

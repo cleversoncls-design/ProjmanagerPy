@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import * as reportsApi from '../api/reports'
 import * as projectsApi from '../api/projects'
 import * as clientsApi from '../api/clients'
-import * as usersApi from '../api/users'
 import { useAuth } from '../context/AuthContext'
 import PageHeader from '../components/PageHeader'
 import Card from '../components/Card'
@@ -109,9 +108,9 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     if (!canCreate) return
-    usersApi
-      .listUsers({ role: 'INTERNAL_PM' })
-      .then((internalPms) => usersApi.listUsers({ role: 'ADMIN' }).then((admins) => setManagers([...admins, ...internalPms])))
+    projectsApi
+      .listEligibleManagers()
+      .then(setManagers)
       .catch(() => {})
   }, [canCreate])
 

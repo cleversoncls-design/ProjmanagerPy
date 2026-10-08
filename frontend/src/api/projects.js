@@ -33,3 +33,9 @@ export function addProjectResource(projectId, payload) {
 export function removeProjectResource(projectId, resourceId) {
   return api.del(`/projects/${projectId}/resources/${resourceId}`)
 }
+
+// Usuários que podem ser gerente de projeto (Administrador, Gerente de Projetos
+// e Gerente de Serviços com função "Gerente de Projetos" no Recurso).
+export function listEligibleManagers() {
+  return api.get('/projects/eligible-managers')
+}

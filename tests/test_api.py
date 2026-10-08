@@ -4172,3 +4172,44 @@ def test_applying_status_date_syncs_task_statuses(client, setup):
     assert rows[future["id"]] == "white"
     assert rows[starting["id"]] == "green"
     assert rows[overdue_start["id"]] == "red"
+
+
+def test_service_manager_with_project_manager_function_can_be_project_manager(client, setup, db_session):
+    headers = setup["admin_headers"]
+    service_manager = make_user(db_session, role=UserRole.SERVICE_MANAGER, email="gerente.servicos@example.com")
+    director = make_user(db_session, role=UserRole.GENERAL_DIRECTOR, email="diretor@example.com")
+
+    def new_project(manager_id, code):
+        return client.post(
+            "/projects",
+            json={"client_id": setup["client_a"].id, "manager_id": manager_id, "code": code, "name": "Projeto", "color": "#800000"},
+            headers=headers,
+        )
+
+    # Sem Recurso com função "Gerente de Projetos": não pode.
+    assert new_project(service_manager.id, "PRJ-SM-1").status_code == 422
+    eligible = {u["email"] for u in client.get("/projects/eligible-managers", headers=headers).json()}
+    assert "gerente.servicos@example.com" not in eligible
+    assert {"admin@example.com", "pm@example.com"} <= eligible
+
+    # Com Recurso de função Gerente de Projetos: pode — na criação e na troca de gerente.
+    resource = client.post(
+        "/resources",
+        json={"user_id": service_manager.id, "function": "PROJECT_MANAGER", "level": 4, "internal_cost_per_hour": "30", "billing_rate_per_hour": "60"},
+        headers=headers,
+    )
+    assert resource.status_code == 201, resource.text
+    created = new_project(service_manager.id, "PRJ-SM-2")
+    assert created.status_code == 201, created.text
+    assert created.json()["manager_id"] == service_manager.id
+    eligible = {u["email"] for u in client.get("/projects/eligible-managers", headers=headers).json()}
+    assert "gerente.servicos@example.com" in eligible
+
+    other = client.patch(f"/projects/{setup['project_a'].id}", json={"manager_id": service_manager.id}, headers=headers)
+    assert other.status_code == 200
+    assert other.json()["manager_id"] == service_manager.id
+
+    # Outra função no Recurso tira a elegibilidade; Diretor Geral continua de fora.
+    assert client.patch(f"/resources/{resource.json()['id']}", json={"function": "CONSULTANT"}, headers=headers).status_code == 200
+    assert new_project(service_manager.id, "PRJ-SM-3").status_code == 422
+    assert new_project(director.id, "PRJ-GD-1").status_code == 422

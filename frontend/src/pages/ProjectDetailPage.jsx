@@ -423,9 +423,9 @@ function ProjectEditModal({ project, onClose, onSaved }) {
   const [usedColors, setUsedColors] = useState(new Map())
 
   useEffect(() => {
-    usersApi
-      .listUsers({ role: 'INTERNAL_PM' })
-      .then((internalPms) => usersApi.listUsers({ role: 'ADMIN' }).then((admins) => setManagers([...admins, ...internalPms])))
+    projectsApi
+      .listEligibleManagers()
+      .then(setManagers)
       .catch(() => {})
     calendarsApi.listCalendars().then(setCalendars).catch(() => {})
     projectsApi

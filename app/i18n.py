@@ -210,7 +210,7 @@ _ES: dict[str, str] = {
     "Usuário inválido ou inativo": "Usuario inválido o inactivo",
     "Usuário não encontrado": "Usuario no encontrado",
     "Usuário não possui recurso habilitado": "El usuario no tiene un recurso habilitado",
-    "manager_id precisa ser um usuário interno (ADMIN ou INTERNAL_PM)": "manager_id debe ser un usuario interno (ADMIN o INTERNAL_PM)",
+    "manager_id precisa ser Administrador, Gerente de Projetos ou Gerente de Serviços com função Gerente de Projetos": "manager_id debe ser Administrador, Gerente de Proyectos o Gerente de Servicios con función Gerente de Proyectos",
     "parent_task_id precisa ser uma tarefa do mesmo projeto": "parent_task_id debe ser una tarea del mismo proyecto",
     "schedule_id exige project_id ou task_id": "schedule_id requiere project_id o task_id",
     "start precisa ser anterior ou igual a end": "start debe ser anterior o igual a end",
