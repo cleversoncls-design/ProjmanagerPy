@@ -1451,6 +1451,15 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
       key: 'resources',
       header: t('Recursos'),
       render: (row) => {
+        if (row.is_client_activity) {
+          const names = (row.client_user_ids || []).map((id) => userById[id]?.name).filter(Boolean)
+          return (
+            <span>
+              <span className="text-[var(--text-muted)]">{t('Cliente')}</span>
+              {names.length > 0 ? `: ${names.join(', ')}` : ''}
+            </span>
+          )
+        }
         const assignments = assignmentsByTask[row.id] || []
         if (assignments.length === 0) return <span className="text-[var(--text-muted)]">—</span>
         return assignments.map((a) => resourceLabel(a.resource_id)).join(', ')
@@ -1761,6 +1770,9 @@ const EMPTY_TASK_FORM = {
   // Onde a tarefa pode ser executada (pedido do usuário, "melhorias parte
   // 5") — default BOTH ("Ambos"), mesmo default do backend.
   modality: 'BOTH',
+  // "Atividade do cliente": executada por usuários do cliente do projeto
+  // (sem Nível mínimo nem Recurso alocado).
+  is_client_activity: false,
 }
 
 /** Sugestão de Código WBS pra "Nova tarefa" — mesma convenção de
@@ -1797,6 +1809,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           notes: task.notes || '',
           min_level: task.min_level,
           modality: task.modality,
+          is_client_activity: Boolean(task.is_client_activity),
         }
       : { ...EMPTY_TASK_FORM, wbs_code: suggestWbsCode(allTasks, '') },
   )
@@ -1816,6 +1829,21 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
   const [assignments, setAssignments] = useState(initialAssignments)
   const [depForm, setDepForm] = useState({ predecessor_task_id: '', dependency_type: 'FS', lag_days: '0' })
   const [assignForm, setAssignForm] = useState({ resource_id: '', allocated_hours: '' })
+  // "Atividade do cliente": candidatos (usuários do cliente do projeto) e
+  // seleção. Diferente de Recursos alocados, a seleção só é gravada no
+  // "Salvar" (syncClientUsers) — o backend só aceita usuário do cliente
+  // numa tarefa que JÁ está marcada como atividade do cliente, e a marca em
+  // si só é gravada no Salvar.
+  const [clientCandidates, setClientCandidates] = useState([])
+  const [clientUserIds, setClientUserIds] = useState(() => (isEdit ? task.client_user_ids || [] : []))
+  const [persistedClientIds, setPersistedClientIds] = useState(() => (isEdit ? task.client_user_ids || [] : []))
+  const [clientUserSelect, setClientUserSelect] = useState('')
+  useEffect(() => {
+    tasksApi
+      .listProjectClientUsers(projectId)
+      .then(setClientCandidates)
+      .catch(() => setClientCandidates([]))
+  }, [projectId])
   const [depError, setDepError] = useState('')
   const [assignError, setAssignError] = useState('')
   // "Nova tarefa": ainda não existe task.id quando o usuário monta
@@ -1850,10 +1878,38 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
         }
         return next
       })
+      if (field === 'is_client_activity' && !value) setClientUserIds([])
       if (field === 'duration_days') setEffortField('duration')
       if (field === 'estimated_hours') setEffortField('hours')
       if (field === 'wbs_code') setWbsTouched(true)
     }
+  }
+
+  // Grava no backend a diferença entre a seleção atual de usuários do
+  // cliente e o que já estava gravado. Só roda em atividade do cliente —
+  // desmarcar a opção faz o próprio backend soltar os usuários (PATCH).
+  async function syncClientUsers(taskId) {
+    if (!form.is_client_activity) return
+    const toAdd = clientUserIds.filter((id) => !persistedClientIds.includes(id))
+    const toRemove = persistedClientIds.filter((id) => !clientUserIds.includes(id))
+    for (const id of toAdd) {
+      await tasksApi.assignClientUser(taskId, { user_id: id })
+      setPersistedClientIds((prev) => [...prev, id])
+    }
+    for (const id of toRemove) {
+      await tasksApi.removeClientUser(taskId, id)
+      setPersistedClientIds((prev) => prev.filter((x) => x !== id))
+    }
+  }
+
+  function clientUserName(id) {
+    return clientCandidates.find((u) => u.id === id)?.name || '—'
+  }
+
+  function handleAddClientUser() {
+    if (!clientUserSelect) return
+    setClientUserIds((prev) => (prev.includes(clientUserSelect) ? prev : [...prev, clientUserSelect]))
+    setClientUserSelect('')
   }
 
   async function handleSubmit(event) {
@@ -1875,12 +1931,14 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           status: form.status,
           is_milestone: form.is_milestone,
           notes: form.notes || null,
-          min_level: Number(form.min_level),
+          min_level: form.is_client_activity ? 1 : Number(form.min_level),
           modality: form.modality,
+          is_client_activity: form.is_client_activity,
         }
         if (effortField === 'duration') payload.duration_days = form.duration_days
         if (effortField === 'hours') payload.estimated_hours = form.estimated_hours
         await tasksApi.updateTask(task.id, payload)
+        await syncClientUsers(task.id)
       } else {
         let newTaskId = createdTaskId
         if (!newTaskId) {
@@ -1889,8 +1947,9 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
             wbs_code: form.wbs_code,
             task_type: form.task_type,
             is_milestone: form.is_milestone,
-            min_level: Number(form.min_level),
+            min_level: form.is_client_activity ? 1 : Number(form.min_level),
             modality: form.modality,
+            is_client_activity: form.is_client_activity,
           }
           if (form.notes) payload.notes = form.notes
           if (form.parent_task_id) payload.parent_task_id = form.parent_task_id
@@ -1924,6 +1983,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           })
           setAssignments((prev) => prev.map((x) => (x.id === a.id ? createdAssignment : x)))
         }
+        await syncClientUsers(newTaskId)
       }
       onSaved()
     } catch (err) {
@@ -2119,18 +2179,20 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           </FormField>
         )}
         <div className="grid grid-cols-2 gap-4">
-          <FormField
-            label={t('Nível mínimo')}
-            hint={t('Filtra o seletor de Recurso abaixo — recursos sem nível definido continuam aparecendo.')}
-          >
-            <Select value={form.min_level} onChange={updateField('min_level')}>
-              {Object.entries(labels.RESOURCE_LEVEL_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-          </FormField>
+          {!form.is_client_activity && (
+            <FormField
+              label={t('Nível mínimo')}
+              hint={t('Filtra o seletor de Recurso abaixo — recursos sem nível definido continuam aparecendo.')}
+            >
+              <Select value={form.min_level} onChange={updateField('min_level')}>
+                {Object.entries(labels.RESOURCE_LEVEL_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          )}
           <FormField label={t('Modalidade')} hint={t('Onde a tarefa pode ser executada.')}>
             <Select value={form.modality} onChange={updateField('modality')}>
               {Object.entries(labels.TASK_MODALITY_LABELS).map(([value, label]) => (
@@ -2148,6 +2210,22 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
           <input type="checkbox" checked={form.is_milestone} onChange={updateField('is_milestone')} />
           {t('É um marco (milestone)')}
         </label>
+        <div>
+          <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+            <input
+              type="checkbox"
+              checked={form.is_client_activity}
+              disabled={!form.is_client_activity && assignments.length > 0}
+              onChange={updateField('is_client_activity')}
+            />
+            {t('Atividade do cliente')}
+          </label>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            {!form.is_client_activity && assignments.length > 0
+              ? t('Remova os recursos alocados abaixo para marcar como atividade do cliente.')
+              : t('Executada por pessoas do cliente: sem Nível mínimo e sem Recurso — o responsável é escolhido entre os usuários do cliente do projeto.')}
+          </p>
+        </div>
 
         <ErrorBanner message={error} />
 
@@ -2225,6 +2303,50 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
             <ErrorBanner message={depError} />
           </div>
 
+          {form.is_client_activity ? (
+          <div>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{t('Usuários do cliente')}</h3>
+            {clientUserIds.length === 0 ? (
+              <p className="text-sm text-[var(--text-muted)]">{t('Nenhum usuário do cliente selecionado.')}</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {clientUserIds.map((id) => (
+                  <li key={id} className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm">
+                    <span>{clientUserName(id)}</span>
+                    <button
+                      type="button"
+                      onClick={() => setClientUserIds((prev) => prev.filter((x) => x !== id))}
+                      className="text-xs text-[var(--status-critical)] hover:underline"
+                    >
+                      {t('Remover')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <FormField label={t('Usuário do cliente')}>
+                <Select value={clientUserSelect} onChange={(event) => setClientUserSelect(event.target.value)}>
+                  <option value="">{t('Selecione…')}</option>
+                  {clientCandidates
+                    .filter((u) => !clientUserIds.includes(u.id))
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                </Select>
+              </FormField>
+              <Button type="button" variant="secondary" onClick={handleAddClientUser}>
+                {t('Adicionar')}
+              </Button>
+            </div>
+            {clientCandidates.length === 0 && (
+              <p className="mt-2 text-xs text-[var(--text-muted)]">{t('Este cliente ainda não tem usuários ativos cadastrados.')}</p>
+            )}
+            <p className="mt-2 text-xs text-[var(--text-muted)]">{t('Salvo ao clicar em "Salvar".')}</p>
+          </div>
+          ) : (
           <div>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">{t('Recursos alocados')}</h3>
             {assignments.length === 0 ? (
@@ -2274,6 +2396,7 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
             </form>
             <ErrorBanner message={assignError} />
           </div>
+          )}
       </div>
     </Modal>
   )

@@ -4031,3 +4031,100 @@ def test_calendar_invite_test_endpoint_sends_a_real_invite(client, setup, monkey
     assert parts["method"] == "REQUEST"
     assert parts["attachment"] is True
     assert _FakeSmtpConnection.instances[0].sent[1] == [setup["consultant"].email]
+
+
+# ---------------------------------------------------------------------------
+# Atividade do cliente (tarefa executada por usuários do cliente do projeto)
+# ---------------------------------------------------------------------------
+
+
+def _create_task(client, headers, project_id, **extra):
+    payload = {"name": "Tarefa", "wbs_code": "1", **extra}
+    response = client.post(f"/projects/{project_id}/tasks", json=payload, headers=headers)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_client_activity_forces_min_level_and_lists_only_project_client_users(client, setup, db_session):
+    headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+    # Usuário de OUTRO cliente e um usuário bloqueado do mesmo cliente: não entram na lista.
+    make_user(db_session, role=UserRole.CLIENT_USER, client_id=setup["client_b"].id, email="user.cliente.b@example.com")
+
+    task = _create_task(client, headers, project_id, is_client_activity=True, min_level=3)
+    assert task["is_client_activity"] is True
+    assert task["min_level"] == 1
+    assert task["client_user_ids"] == []
+
+    candidates = client.get(f"/projects/{project_id}/client-users", headers=headers)
+    assert candidates.status_code == 200
+    emails = {u["email"] for u in candidates.json()}
+    assert emails == {"pm.cliente@example.com", "user.cliente@example.com"}
+
+
+def test_client_activity_assign_and_remove_client_users(client, setup, db_session):
+    headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+    task = _create_task(client, headers, project_id, is_client_activity=True)
+
+    ok = client.post(f"/tasks/{task['id']}/client-users", json={"user_id": setup["client_user_a"].id}, headers=headers)
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["client_user_ids"] == [setup["client_user_a"].id]
+
+    dup = client.post(f"/tasks/{task['id']}/client-users", json={"user_id": setup["client_user_a"].id}, headers=headers)
+    assert dup.status_code == 409
+
+    # usuário de outro cliente, e usuário interno, são recusados
+    other = make_user(db_session, role=UserRole.CLIENT_USER, client_id=setup["client_b"].id, email="user.cliente.b@example.com")
+    assert client.post(f"/tasks/{task['id']}/client-users", json={"user_id": other.id}, headers=headers).status_code == 422
+    assert client.post(f"/tasks/{task['id']}/client-users", json={"user_id": setup["consultant"].id}, headers=headers).status_code == 422
+
+    # aparece no cronograma
+    schedule = client.get(f"/projects/{project_id}/schedule", headers=headers)
+    assert schedule.status_code == 200
+    row = next(t for t in schedule.json()["tasks"] if t["id"] == task["id"])
+    assert row["client_user_ids"] == [setup["client_user_a"].id]
+
+    removed = client.delete(f"/tasks/{task['id']}/client-users/{setup['client_user_a'].id}", headers=headers)
+    assert removed.status_code == 200
+    assert removed.json()["client_user_ids"] == []
+    assert client.delete(f"/tasks/{task['id']}/client-users/{setup['client_user_a'].id}", headers=headers).status_code == 404
+
+
+def test_client_users_only_on_client_activity_and_no_resource_mix(client, setup):
+    headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+    normal = _create_task(client, headers, project_id)
+    assert client.post(f"/tasks/{normal['id']}/client-users", json={"user_id": setup["client_user_a"].id}, headers=headers).status_code == 409
+
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=headers,
+    ).json()
+    assigned = client.post(f"/tasks/{normal['id']}/assignments", json={"resource_id": resource["id"], "allocated_hours": "8"}, headers=headers)
+    assert assigned.status_code == 201
+    # tarefa com recurso alocado não vira atividade do cliente...
+    assert client.patch(f"/tasks/{normal['id']}", json={"is_client_activity": True}, headers=headers).status_code == 409
+
+    # ...e atividade do cliente não aceita recurso.
+    other = _create_task(client, headers, project_id, wbs_code="2", is_client_activity=True)
+    refused = client.post(f"/tasks/{other['id']}/assignments", json={"resource_id": resource["id"], "allocated_hours": "8"}, headers=headers)
+    assert refused.status_code == 409
+
+
+def test_turning_off_client_activity_releases_client_users_and_client_roles_cannot_write(client, setup):
+    headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+    task = _create_task(client, headers, project_id, is_client_activity=True)
+    assert client.post(f"/tasks/{task['id']}/client-users", json={"user_id": setup["client_user_a"].id}, headers=headers).status_code == 201
+
+    # perfil do cliente só lê
+    client_headers = auth_headers(client, setup["client_pm_a"].email)
+    assert client.post(f"/tasks/{task['id']}/client-users", json={"user_id": setup["client_pm_a"].id}, headers=client_headers).status_code == 403
+    assert client.get(f"/projects/{project_id}/client-users", headers=client_headers).status_code == 200
+
+    updated = client.patch(f"/tasks/{task['id']}", json={"is_client_activity": False}, headers=headers)
+    assert updated.status_code == 200
+    assert updated.json()["is_client_activity"] is False
+    assert updated.json()["client_user_ids"] == []

@@ -538,6 +538,13 @@ class Task(Base):
     modality: Mapped[TaskModality] = mapped_column(
         SqlEnum(TaskModality, name="task_modality"), nullable=False, default=TaskModality.BOTH
     )
+    # "Atividade do cliente" (pedido do usuário): tarefa executada por
+    # pessoas do CLIENTE, não por consultores — por isso não tem "Nível
+    # mínimo" (fica sempre 1) nem alocação de Recurso (custo/valor/hora);
+    # em vez disso recebe usuários do cliente do projeto direto, ver
+    # TaskClientAssignment. Nenhuma hora dessas pessoas entra em custo ou
+    # apontamento.
+    is_client_activity: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     __table_args__ = (
         UniqueConstraint("project_id", "wbs_code", name="uq_task_project_wbs"),
         CheckConstraint("min_level BETWEEN 1 AND 4", name="ck_task_min_level_range"),
@@ -547,6 +554,14 @@ class Task(Base):
     children: Mapped[list[Task]] = relationship(back_populates="parent")
     assignments: Mapped[list[TaskAssignment]] = relationship(back_populates="task", cascade="all, delete-orphan")
     timesheets: Mapped[list[Timesheet]] = relationship(back_populates="task", cascade="all, delete-orphan")
+    client_assignments: Mapped[list[TaskClientAssignment]] = relationship(back_populates="task", cascade="all, delete-orphan")
+
+    @property
+    def client_user_ids(self) -> list[str]:
+        """Ids dos usuários do cliente alocados (só faz sentido quando
+        `is_client_activity`) — exposto em TaskRead pra a tela de tarefas
+        não precisar de uma chamada extra por tarefa."""
+        return [a.user_id for a in self.client_assignments]
 
 
 class TaskGroup(Base):
@@ -714,6 +729,20 @@ class TaskAssignment(Base):
     allocated_hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     __table_args__ = (UniqueConstraint("task_id", "resource_id", name="uq_task_resource"),)
     task: Mapped[Task] = relationship(back_populates="assignments")
+
+
+class TaskClientAssignment(Base):
+    """Usuário do CLIENTE responsável por uma "atividade do cliente"
+    (Task.is_client_activity). Sem horas alocadas, custo ou nível — é só
+    "quem do cliente faz isto". O usuário precisa ser CLIENT_PM/CLIENT_USER
+    do mesmo cliente do projeto (validado em routers/tasks.py)."""
+
+    __tablename__ = "task_client_assignments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    __table_args__ = (UniqueConstraint("task_id", "user_id", name="uq_task_client_user"),)
+    task: Mapped[Task] = relationship(back_populates="client_assignments")
 
 
 class ProjectResource(Base):

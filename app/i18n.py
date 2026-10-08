@@ -20,6 +20,11 @@ from .models import Language
 _ES: dict[str, str] = {
     "Agendamento não encontrado": "Agenda no encontrada",
     "Alocação não encontrada": "Asignación no encontrada",
+    "Atividade do cliente não aceita recurso alocado — use os usuários do cliente": "Una actividad del cliente no acepta recursos asignados: use los usuarios del cliente",
+    "Remova os recursos alocados antes de marcar a tarefa como atividade do cliente": "Quite los recursos asignados antes de marcar la tarea como actividad del cliente",
+    "A tarefa não é uma atividade do cliente": "La tarea no es una actividad del cliente",
+    "O usuário precisa ser um usuário ativo do cliente deste projeto": "El usuario debe ser un usuario activo del cliente de este proyecto",
+    "Usuário já alocado nesta tarefa": "Usuario ya asignado a esta tarea",
     "Apontamento fora da agenda — só Administrador, Gerente de Serviços ou Diretor Geral podem aprová-lo": (
         "Registro de horas fuera de la agenda — solo Administrador, Gerente de Servicios o Director General pueden aprobarlo"
     ),

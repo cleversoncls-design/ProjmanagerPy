@@ -167,6 +167,14 @@ export const es = {
   '% Margem Real': '% Margen Real',
   '% Realizado': '% Completado',
   'Nível mínimo': 'Nivel mínimo',
+  'Atividade do cliente': 'Actividad del cliente',
+  'Remova os recursos alocados abaixo para marcar como atividade do cliente.': 'Quite los recursos asignados de abajo para marcar como actividad del cliente.',
+  'Executada por pessoas do cliente: sem Nível mínimo e sem Recurso — o responsável é escolhido entre os usuários do cliente do projeto.': 'Ejecutada por personas del cliente: sin Nivel mínimo y sin Recurso — el responsable se elige entre los usuarios del cliente del proyecto.',
+  'Usuários do cliente': 'Usuarios del cliente',
+  'Usuário do cliente': 'Usuario del cliente',
+  'Nenhum usuário do cliente selecionado.': 'Ningún usuario del cliente seleccionado.',
+  'Este cliente ainda não tem usuários ativos cadastrados.': 'Este cliente aún no tiene usuarios activos registrados.',
+  'Salvo ao clicar em "Salvar".': 'Se guarda al hacer clic en "Guardar".',
   'Filtra o seletor de Recurso abaixo — recursos sem nível definido continuam aparecendo.':
     'Filtra el selector de Recurso abajo — los recursos sin nivel definido siguen apareciendo.',
   // Mesmo campo do "Editar tarefa" de um projeto, só que no item do Grupo

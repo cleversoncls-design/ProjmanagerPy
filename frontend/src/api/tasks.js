@@ -63,3 +63,17 @@ export function assignResource(taskId, payload) {
 export function removeAssignment(taskId, assignmentId) {
   return api.del(`/tasks/${taskId}/assignments/${assignmentId}`)
 }
+
+// "Atividade do cliente": usuários do cliente do projeto (candidatos) e
+// alocação deles na tarefa — ver routers/tasks.py.
+export function listProjectClientUsers(projectId) {
+  return api.get(`/projects/${projectId}/client-users`)
+}
+
+export function assignClientUser(taskId, payload) {
+  return api.post(`/tasks/${taskId}/client-users`, payload)
+}
+
+export function removeClientUser(taskId, userId) {
+  return api.del(`/tasks/${taskId}/client-users/${userId}`)
+}

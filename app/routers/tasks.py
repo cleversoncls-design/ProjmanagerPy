@@ -18,16 +18,21 @@ from ..models import (
     Task,
     TaskApprovalStatus,
     TaskAssignment,
+    TaskClientAssignment,
     TaskDependency,
     TaskStatus,
     Timesheet,
     User,
+    UserRole,
+    UserStatus,
 )
 from ..schemas import (
+    ClientUserRead,
     RescheduleRequest,
     TaskAssignmentCreate,
     TaskAssignmentRead,
     TaskClientApprovalUpdate,
+    TaskClientAssignmentCreate,
     TaskCreate,
     TaskDependencyCreate,
     TaskDependencyRead,
@@ -88,6 +93,9 @@ def create_task(
     if db.scalar(select(Task).where(Task.project_id == project_id, Task.wbs_code == data.wbs_code)):
         raise HTTPException(status_code=409, detail=translate("Já existe uma tarefa com este código WBS neste projeto", user.language))
     fields = data.model_dump(exclude={"duration_days", "estimated_hours"})
+    if data.is_client_activity:
+        # Atividade do cliente não tem nível mínimo (ver models.Task).
+        fields["min_level"] = 1
     task = Task(project_id=project_id, **fields)
     # Sem nenhum recurso alocado ainda nesta hora (a tarefa acabou de ser
     # criada), então o effort-driven usa a FTE genérica de 8h/dia — ver
@@ -164,6 +172,27 @@ def update_task(
         or "planned_start_date" in changes
         or "planned_end_date" in changes
     )
+    # "Atividade do cliente": ligar exige que a tarefa ainda não tenha
+    # Recurso alocado (os dois modelos de alocação não se misturam); desligar
+    # solta os usuários do cliente que estavam nela. Enquanto for atividade
+    # do cliente, o nível mínimo fica sempre 1.
+    if changes.get("is_client_activity") is None:
+        changes.pop("is_client_activity", None)
+    if "is_client_activity" in changes:
+        turning_on = changes["is_client_activity"] and not task.is_client_activity
+        turning_off = (not changes["is_client_activity"]) and task.is_client_activity
+        if turning_on and db.scalar(select(TaskAssignment.id).where(TaskAssignment.task_id == task.id).limit(1)):
+            raise HTTPException(
+                status_code=409,
+                detail=translate("Remova os recursos alocados antes de marcar a tarefa como atividade do cliente", user.language),
+            )
+        if turning_off:
+            for link in list(task.client_assignments):
+                db.delete(link)
+            db.flush()
+            db.refresh(task)
+    if changes.get("is_client_activity", task.is_client_activity) and ("min_level" in changes or "is_client_activity" in changes):
+        changes["min_level"] = 1
     previous_status = task.status
     for field, value in changes.items():
         setattr(task, field, value)
@@ -428,6 +457,11 @@ def assign_resource(
 ) -> TaskAssignment:
     task = _get_task_or_404(db, task_id, user.language)
     require_project_access(task.project, user, write=True, allow_consultant_write=False)
+    if task.is_client_activity:
+        raise HTTPException(
+            status_code=409,
+            detail=translate("Atividade do cliente não aceita recurso alocado — use os usuários do cliente", user.language),
+        )
     resource = db.get(Resource, data.resource_id)
     if not resource:
         raise HTTPException(status_code=404, detail=translate("Recurso não encontrado", user.language))
@@ -485,6 +519,84 @@ def remove_assignment(
     record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.UPDATE, user_id=user.id, details={"assignment_removed": assignment_id})
     db.commit()
     return None
+
+
+@router.get("/projects/{project_id}/client-users", response_model=list[ClientUserRead])
+def list_project_client_users(
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[User]:
+    """Usuários ativos do cliente do projeto (CLIENT_PM/CLIENT_USER) —
+    lista usada pelo seletor de "Atividade do cliente" no cadastro de
+    tarefa. GET /users é restrito a perfis internos e não filtra por
+    cliente, por isso a rota própria."""
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
+    require_project_access(project, user)
+    return list(
+        db.scalars(
+            select(User)
+            .where(
+                User.client_id == project.client_id,
+                User.role.in_([UserRole.CLIENT_PM, UserRole.CLIENT_USER]),
+                User.status == UserStatus.ACTIVE,
+            )
+            .order_by(User.name)
+        ).all()
+    )
+
+
+@router.post("/tasks/{task_id}/client-users", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
+def assign_client_user(
+    task_id: str,
+    data: TaskClientAssignmentCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Task:
+    task = _get_task_or_404(db, task_id, user.language)
+    require_project_access(task.project, user, write=True, allow_consultant_write=False)
+    if not task.is_client_activity:
+        raise HTTPException(status_code=409, detail=translate("A tarefa não é uma atividade do cliente", user.language))
+    target = db.get(User, data.user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail=translate("Usuário não encontrado", user.language))
+    if (
+        target.client_id != task.project.client_id
+        or target.role not in (UserRole.CLIENT_PM, UserRole.CLIENT_USER)
+        or target.status != UserStatus.ACTIVE
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=translate("O usuário precisa ser um usuário ativo do cliente deste projeto", user.language),
+        )
+    if data.user_id in task.client_user_ids:
+        raise HTTPException(status_code=409, detail=translate("Usuário já alocado nesta tarefa", user.language))
+    db.add(TaskClientAssignment(task_id=task_id, user_id=data.user_id))
+    record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.UPDATE, user_id=user.id, details={"client_user_added": data.user_id})
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+@router.delete("/tasks/{task_id}/client-users/{user_id}", response_model=TaskRead)
+def remove_client_user(
+    task_id: str,
+    user_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Task:
+    task = _get_task_or_404(db, task_id, user.language)
+    require_project_access(task.project, user, write=True, allow_consultant_write=False)
+    link = db.scalar(select(TaskClientAssignment).where(TaskClientAssignment.task_id == task_id, TaskClientAssignment.user_id == user_id))
+    if not link:
+        raise HTTPException(status_code=404, detail=translate("Alocação não encontrada", user.language))
+    db.delete(link)
+    record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.UPDATE, user_id=user.id, details={"client_user_removed": user_id})
+    db.commit()
+    db.refresh(task)
+    return task
 
 
 @router.post("/projects/{project_id}/tasks/recalculate-wbs", response_model=WbsRecalculateResponse)

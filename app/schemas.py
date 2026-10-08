@@ -293,6 +293,9 @@ class TaskCreate(BaseModel):
     # Onde a tarefa pode ser executada (pedido do usuário, "melhorias parte
     # 5") — ver models.TaskModality. Puramente informativo.
     modality: TaskModality = TaskModality.BOTH
+    # "Atividade do cliente" — ver models.Task.is_client_activity. Quando
+    # verdadeiro, min_level é forçado a 1 no backend.
+    is_client_activity: bool = False
 
 
 class TaskUpdate(BaseModel):
@@ -311,6 +314,7 @@ class TaskUpdate(BaseModel):
     notes: str | None = None
     min_level: int | None = Field(default=None, ge=1, le=4)
     modality: TaskModality | None = None
+    is_client_activity: bool | None = None
 
 
 class TaskClientApprovalUpdate(BaseModel):
@@ -341,6 +345,9 @@ class TaskRead(ORMModel):
     notes: str | None = None
     min_level: int
     modality: TaskModality
+    is_client_activity: bool = False
+    # Usuários do cliente alocados (só preenchido em atividade do cliente).
+    client_user_ids: list[str] = []
 
 
 class TaskMoveRequest(BaseModel):
@@ -490,6 +497,20 @@ class TaskAssignmentRead(ORMModel):
     task_id: str
     resource_id: str
     allocated_hours: Decimal
+
+
+class TaskClientAssignmentCreate(BaseModel):
+    user_id: str
+
+
+class ClientUserRead(ORMModel):
+    """Usuário do cliente do projeto, candidato a uma "atividade do cliente"
+    (GET /projects/{id}/client-users)."""
+
+    id: str
+    name: str
+    email: str
+    role: UserRole
 
 
 # ---------------------------------------------------------------------------

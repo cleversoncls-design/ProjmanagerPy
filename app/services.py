@@ -376,6 +376,9 @@ def copy_project_tasks(session: Session, source_project_id: str, target_project:
             planned_end_date=new_end,
             is_milestone=source.is_milestone,
             notes=source.notes,
+            # A marca "atividade do cliente" vai junto; os usuários do cliente
+            # não (outro projeto, normalmente outro cliente).
+            is_client_activity=source.is_client_activity,
         )
         session.add(new_task)
         old_to_new[source.id] = new_task

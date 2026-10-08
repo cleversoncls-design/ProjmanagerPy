@@ -390,6 +390,7 @@ def project_schedule(project_id: str, user: User = Depends(get_current_user), db
         tasks_payload.append(
             {
                 **{c.name: getattr(t, c.name) for c in t.__table__.columns},
+                "client_user_ids": t.client_user_ids,
                 "status_dot": row["status_dot"],
                 "rollup_start_date": row["rollup_start_date"],
                 "rollup_end_date": row["rollup_end_date"],
