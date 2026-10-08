@@ -2095,7 +2095,23 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
     }
   }
 
-  const predecessorOptions = allTasks.filter((t) => t.id !== task?.id)
+  // Tarefa-pai pode ser predecessora (vale o intervalo das filhas), mas não da
+  // própria tarefa-filha nem do contrário — o backend recusa (dependência
+  // circular), então esses itens nem aparecem na lista.
+  const taskParentById = new Map(allTasks.map((t) => [t.id, t.parent_task_id]))
+  function ancestorIdsOf(taskId) {
+    const ids = new Set()
+    let current = taskParentById.get(taskId)
+    while (current && !ids.has(current)) {
+      ids.add(current)
+      current = taskParentById.get(current)
+    }
+    return ids
+  }
+  const ownAncestorIds = task ? ancestorIdsOf(task.id) : new Set(form.parent_task_id ? [form.parent_task_id, ...ancestorIdsOf(form.parent_task_id)] : [])
+  const predecessorOptions = allTasks.filter(
+    (t) => t.id !== task?.id && !ownAncestorIds.has(t.id) && !(task && ancestorIdsOf(t.id).has(task.id)),
+  )
   const assignedResourceIds = new Set(assignments.map((a) => a.resource_id))
   // "Nível mínimo" da tarefa (pedido do usuário, "melhorias parte 4") só
   // FILTRA este seletor — um recurso sem nível definido continua aparecendo

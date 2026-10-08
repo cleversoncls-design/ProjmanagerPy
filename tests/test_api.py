@@ -4213,3 +4213,34 @@ def test_service_manager_with_project_manager_function_can_be_project_manager(cl
     assert client.patch(f"/resources/{resource.json()['id']}", json={"function": "CONSULTANT"}, headers=headers).status_code == 200
     assert new_project(service_manager.id, "PRJ-SM-3").status_code == 422
     assert new_project(director.id, "PRJ-GD-1").status_code == 422
+
+
+def test_parent_task_can_be_predecessor_and_cascades_to_successor(client, setup):
+    headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+    parent = _create_task(client, headers, project_id, name="Fase", wbs_code="1")
+    child_a = _create_task(client, headers, project_id, name="A", wbs_code="1.1", parent_task_id=parent["id"], planned_start_date="2026-08-24", duration_days="2")
+    child_b = _create_task(client, headers, project_id, name="B", wbs_code="1.2", parent_task_id=parent["id"], planned_start_date="2026-08-26", duration_days="3")
+    nxt = _create_task(client, headers, project_id, name="Próxima", wbs_code="2", planned_start_date="2026-08-24", duration_days="2")
+
+    dep = client.post(
+        "/task-dependencies",
+        json={"predecessor_task_id": parent["id"], "successor_task_id": nxt["id"], "dependency_type": "FS", "lag_days": 0},
+        headers=headers,
+    )
+    assert dep.status_code == 201, dep.text
+    # B termina na sexta 28/08 (último fim entre as filhas) -> próxima começa na segunda 31/08.
+    assert client.get(f"/tasks/{nxt['id']}", headers=headers).json()["planned_start_date"] == "2026-08-31"
+
+    # Estender uma filha (B passa a terminar em 01/09) empurra a sucessora do pai para 02/09.
+    assert client.patch(f"/tasks/{child_b['id']}", json={"duration_days": "5"}, headers=headers).status_code == 200
+    assert client.get(f"/tasks/{nxt['id']}", headers=headers).json()["planned_start_date"] == "2026-09-02"
+
+    # Pai nunca pode depender de uma filha dele, nem o contrário.
+    for pred, succ in ((parent["id"], child_a["id"]), (child_a["id"], parent["id"])):
+        refused = client.post(
+            "/task-dependencies",
+            json={"predecessor_task_id": pred, "successor_task_id": succ, "dependency_type": "FS", "lag_days": 0},
+            headers=headers,
+        )
+        assert refused.status_code == 422

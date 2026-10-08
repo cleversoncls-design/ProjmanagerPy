@@ -129,9 +129,80 @@ def end_date_from_duration(cal: BusinessCalendar, start: date, duration_days: De
     return _end_date_from_duration(cal, start, duration_days)
 
 
-def _successor_start(cal: BusinessCalendar, predecessor: Task, successor: Task, dependency: TaskDependency) -> date:
-    pred_start = predecessor.planned_start_date or predecessor.planned_end_date
-    pred_end = predecessor.planned_end_date or predecessor.planned_start_date
+class _ScheduleGraph:
+    """Tarefas + dependências de UM projeto em memória, já com as
+    dependências cuja predecessora é uma tarefa-PAI (concentradora)
+    "expandidas" para as folhas dela.
+
+    Uma tarefa-pai nunca tem datas próprias gravadas (ver `_task_rollups`:
+    o motor só escreve em folhas) — o intervalo "de verdade" dela é o
+    agregado das folhas descendentes (menor início, maior fim). Por isso
+    usar uma tarefa-pai como predecessora (pedido do usuário) é calculado em
+    cima desse intervalo, e, para a ordenação topológica e para a cascata,
+    cada dependência "pai → sucessora" vira uma aresta "folha → sucessora"
+    para cada folha descendente: quando qualquer folha se move, as
+    sucessoras do pai são recalculadas depois dela."""
+
+    def __init__(self, tasks: list[Task], deps: list[TaskDependency]):
+        self.tasks_by_id = {t.id: t for t in tasks}
+        self.children: dict[str, list[str]] = defaultdict(list)
+        for t in tasks:
+            if t.parent_task_id and t.parent_task_id in self.tasks_by_id:
+                self.children[t.parent_task_id].append(t.id)
+        self.deps = [d for d in deps if d.predecessor_task_id in self.tasks_by_id and d.successor_task_id in self.tasks_by_id]
+        self._leaves: dict[str, list[str]] = {}
+        self.deps_by_successor: dict[str, list[TaskDependency]] = defaultdict(list)
+        # Arestas expandidas (fonte folha/tarefa → sucessora), uma por (dep, fonte).
+        self.edges: list[tuple[str, str]] = []
+        for d in self.deps:
+            self.deps_by_successor[d.successor_task_id].append(d)
+            for source in self.leaves(d.predecessor_task_id):
+                if source != d.successor_task_id and not self.is_descendant(source, d.successor_task_id):
+                    self.edges.append((source, d.successor_task_id))
+
+    def leaves(self, task_id: str) -> list[str]:
+        """Folhas descendentes (a própria tarefa, se ela for folha)."""
+        if task_id not in self._leaves:
+            kids = self.children.get(task_id, [])
+            if not kids:
+                self._leaves[task_id] = [task_id]
+            else:
+                found: list[str] = []
+                for kid in kids:
+                    found.extend(self.leaves(kid))
+                self._leaves[task_id] = found
+        return self._leaves[task_id]
+
+    def is_descendant(self, task_id: str, ancestor_id: str) -> bool:
+        current = self.tasks_by_id[task_id].parent_task_id
+        while current:
+            if current == ancestor_id:
+                return True
+            parent = self.tasks_by_id.get(current)
+            current = parent.parent_task_id if parent else None
+        return False
+
+    def span(self, task_id: str) -> tuple[date, date] | None:
+        """(início, fim) efetivos — próprios numa folha, agregado das folhas
+        descendentes numa tarefa-pai. None quando não há datas suficientes."""
+        starts: list[date] = []
+        ends: list[date] = []
+        for leaf_id in self.leaves(task_id):
+            leaf = self.tasks_by_id[leaf_id]
+            if leaf.planned_start_date and leaf.planned_end_date:
+                starts.append(leaf.planned_start_date)
+                ends.append(leaf.planned_end_date)
+        if not starts:
+            return None
+        return min(starts), max(ends)
+
+
+def _successor_start(cal: BusinessCalendar, predecessor: Task, successor: Task, dependency: TaskDependency, span: tuple[date, date] | None = None) -> date:
+    if span is not None:
+        pred_start, pred_end = span
+    else:
+        pred_start = predecessor.planned_start_date or predecessor.planned_end_date
+        pred_end = predecessor.planned_end_date or predecessor.planned_start_date
     if not pred_start or not pred_end:
         raise ValueError("Predecessora precisa ter datas planejadas")
     lagged_end = cal.add_working_days(pred_end, dependency.lag_days)
@@ -146,92 +217,62 @@ def _successor_start(cal: BusinessCalendar, predecessor: Task, successor: Task, 
     return cal.add_working_days(lagged_start, -(_whole_days(successor.duration_days) - 1))
 
 
-def reschedule_cascade(session: Session, changed_task_id: str, cal: BusinessCalendar) -> list[Task]:
-    """Recalcula as sucessoras a partir da tarefa alterada.
+def _load_schedule_graph(session: Session, project_id: str) -> _ScheduleGraph:
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project_id)).all())
+    task_ids = [t.id for t in tasks]
+    deps = (
+        list(
+            session.scalars(
+                select(TaskDependency).where(
+                    TaskDependency.predecessor_task_id.in_(task_ids),
+                    TaskDependency.successor_task_id.in_(task_ids),
+                )
+            ).all()
+        )
+        if task_ids
+        else []
+    )
+    return _ScheduleGraph(tasks, deps)
 
-    Duas propriedades importantes que a versão anterior (DFS recursivo) não
-    garantia:
 
-    1. Uma sucessora com MÚLTIPLAS predecessoras precisa respeitar a mais
-       restritiva (a que empurra o início mais tarde) entre todas elas, não
-       apenas a última visitada — por isso o grafo afetado é processado em
-       ordem topológica e a data final de cada sucessora é o `max()` dos
-       candidatos calculados a partir de cada uma de suas predecessoras.
-    2. A travessia é iterativa (fila de Kahn), então uma EAP muito profunda
-       não esbarra no limite de recursão do Python.
-
-    Ciclos no grafo de dependências continuam sendo rejeitados com
-    ValueError.
-    """
-    changed = session.get(Task, changed_task_id)
-    if not changed:
-        raise ValueError("Tarefa não encontrada")
-
-    # 1) BFS a partir da tarefa alterada para descobrir todas as sucessoras
-    #    potencialmente afetadas (direta ou transitivamente).
-    affected: set[str] = set()
-    frontier = [changed_task_id]
-    while frontier:
-        current_id = frontier.pop()
-        deps = session.scalars(
-            select(TaskDependency).where(TaskDependency.predecessor_task_id == current_id)
-        ).all()
-        for dep in deps:
-            if dep.successor_task_id not in affected:
-                affected.add(dep.successor_task_id)
-                frontier.append(dep.successor_task_id)
-
-    if not affected:
-        session.flush()
-        return []
-
-    # 2) Para cada sucessora afetada, carrega TODAS as suas dependências de
-    #    predecessora (inclusive as que não mudaram nesta cascata), porque a
-    #    data final precisa respeitar todas elas, não só o caminho que
-    #    disparou a mudança.
-    deps_by_successor: dict[str, list[TaskDependency]] = {}
+def _reschedule(graph: _ScheduleGraph, cal: BusinessCalendar, affected: set[str]) -> list[Task]:
+    """Recalcula as tarefas em `affected` em ordem topológica (Kahn) sobre as
+    arestas expandidas. Cada sucessora respeita a predecessora mais
+    restritiva (max dos candidatos) entre TODAS as suas dependências, afetadas
+    ou não. Levanta ValueError se houver ciclo."""
     in_degree: dict[str, int] = {tid: 0 for tid in affected}
-    successors_by_predecessor: dict[str, list[str]] = defaultdict(list)
-    for tid in affected:
-        deps = session.scalars(
-            select(TaskDependency).where(TaskDependency.successor_task_id == tid)
-        ).all()
-        deps_by_successor[tid] = deps
-        for dep in deps:
-            if dep.predecessor_task_id in affected:
-                in_degree[tid] += 1
-                successors_by_predecessor[dep.predecessor_task_id].append(tid)
+    successors_by_source: dict[str, list[str]] = defaultdict(list)
+    for source, target in graph.edges:
+        if target in affected and source in affected:
+            in_degree[target] += 1
+            successors_by_source[source].append(target)
 
-    # 3) Ordenação topológica (Kahn) do subconjunto afetado: uma sucessora só
-    #    é processada depois que todas as suas predecessoras afetadas já
-    #    tiverem sido recalculadas.
     queue = [tid for tid, degree in in_degree.items() if degree == 0]
     order: list[str] = []
     remaining = dict(in_degree)
     while queue:
         node = queue.pop()
         order.append(node)
-        for succ in successors_by_predecessor.get(node, []):
+        for succ in successors_by_source.get(node, []):
             remaining[succ] -= 1
             if remaining[succ] == 0:
                 queue.append(succ)
-
     if len(order) != len(affected):
         raise ValueError("Ciclo detectado nas dependências")
 
-    # 4) Recalcula cada sucessora, tomando a data mais tardia entre todas as
-    #    suas predecessoras (afetadas ou não).
     updated: list[Task] = []
     for successor_id in order:
-        successor = session.get(Task, successor_id)
-        if not successor:
-            continue
+        deps_here = graph.deps_by_successor.get(successor_id)
+        if not deps_here:
+            continue  # sem predecessora: início manual, não recalcula
+        successor = graph.tasks_by_id[successor_id]
         candidate_starts: list[date] = []
-        for dep in deps_by_successor[successor_id]:
-            predecessor = session.get(Task, dep.predecessor_task_id)
-            if not predecessor or not predecessor.planned_start_date or not predecessor.planned_end_date:
+        for dep in deps_here:
+            predecessor = graph.tasks_by_id[dep.predecessor_task_id]
+            span = graph.span(predecessor.id)
+            if span is None:
                 continue
-            candidate_starts.append(_successor_start(cal, predecessor, successor, dep))
+            candidate_starts.append(_successor_start(cal, predecessor, successor, dep, span))
         if not candidate_starts:
             continue
         new_start = max(candidate_starts)
@@ -240,7 +281,58 @@ def reschedule_cascade(session: Session, changed_task_id: str, cal: BusinessCale
         successor.planned_end_date = _end_date_from_duration(cal, new_start, successor.duration_days)
         if successor.planned_start_date != old_start:
             updated.append(successor)
+    return updated
 
+
+def reschedule_cascade(session: Session, changed_task_id: str, cal: BusinessCalendar) -> list[Task]:
+    """Recalcula as sucessoras a partir da tarefa alterada.
+
+    Propriedades importantes:
+
+    1. Uma sucessora com MÚLTIPLAS predecessoras respeita a mais restritiva
+       (a que empurra o início mais tarde) entre todas elas — o grafo
+       afetado é processado em ordem topológica e a data de cada sucessora
+       é o `max()` dos candidatos de cada predecessora.
+    2. A travessia é iterativa (fila de Kahn), então uma EAP muito profunda
+       não esbarra no limite de recursão do Python.
+    3. Predecessora pode ser uma tarefa-PAI (concentradora): vale o
+       intervalo agregado das folhas dela (ver `_ScheduleGraph`), e mover
+       qualquer folha recalcula as sucessoras do pai.
+
+    Ciclos no grafo de dependências continuam sendo rejeitados com
+    ValueError."""
+    changed = session.get(Task, changed_task_id)
+    if not changed:
+        raise ValueError("Tarefa não encontrada")
+    graph = _load_schedule_graph(session, changed.project_id)
+
+    # BFS a partir da tarefa alterada (e, se for pai, das folhas dela) para
+    # descobrir as sucessoras potencialmente afetadas, direta ou
+    # transitivamente.
+    successors_by_source: dict[str, list[str]] = defaultdict(list)
+    for source, target in graph.edges:
+        successors_by_source[source].append(target)
+    affected: set[str] = set()
+    frontier = list(graph.leaves(changed_task_id)) + [changed_task_id]
+    seen = set(frontier)
+    while frontier:
+        current = frontier.pop()
+        for target in successors_by_source.get(current, []):
+            if target not in affected:
+                affected.add(target)
+            if target not in seen:
+                seen.add(target)
+                frontier.append(target)
+                # Sucessora que é pai: as folhas dela também "mudam" junto.
+                for leaf in graph.leaves(target):
+                    if leaf not in seen:
+                        seen.add(leaf)
+                        frontier.append(leaf)
+
+    if not affected:
+        session.flush()
+        return []
+    updated = _reschedule(graph, cal, affected)
     session.flush()
     return updated
 
@@ -256,62 +348,10 @@ def recalculate_schedule(session: Session, project_id: str, cal: BusinessCalenda
     início delas é sempre informação manual (mesma regra de
     `reschedule_cascade`, só que aplicada ao projeto inteiro de uma vez).
     """
-    tasks = list(session.scalars(select(Task).where(Task.project_id == project_id)).all())
-    task_ids = {t.id for t in tasks}
-    tasks_by_id = {t.id: t for t in tasks}
-    if not task_ids:
+    graph = _load_schedule_graph(session, project_id)
+    if not graph.tasks_by_id:
         return []
-
-    deps = list(
-        session.scalars(
-            select(TaskDependency).where(
-                TaskDependency.predecessor_task_id.in_(task_ids),
-                TaskDependency.successor_task_id.in_(task_ids),
-            )
-        ).all()
-    )
-    deps_by_successor: dict[str, list[TaskDependency]] = defaultdict(list)
-    in_degree: dict[str, int] = {tid: 0 for tid in task_ids}
-    successors_by_predecessor: dict[str, list[str]] = defaultdict(list)
-    for dep in deps:
-        deps_by_successor[dep.successor_task_id].append(dep)
-        in_degree[dep.successor_task_id] += 1
-        successors_by_predecessor[dep.predecessor_task_id].append(dep.successor_task_id)
-
-    queue = [tid for tid, degree in in_degree.items() if degree == 0]
-    order: list[str] = []
-    remaining = dict(in_degree)
-    while queue:
-        node = queue.pop()
-        order.append(node)
-        for succ in successors_by_predecessor.get(node, []):
-            remaining[succ] -= 1
-            if remaining[succ] == 0:
-                queue.append(succ)
-    if len(order) != len(task_ids):
-        raise ValueError("Ciclo detectado nas dependências")
-
-    updated: list[Task] = []
-    for tid in order:
-        deps_here = deps_by_successor.get(tid)
-        if not deps_here:
-            continue  # sem predecessora: início manual, não recalcula
-        successor = tasks_by_id[tid]
-        candidate_starts: list[date] = []
-        for dep in deps_here:
-            predecessor = tasks_by_id.get(dep.predecessor_task_id)
-            if not predecessor or not predecessor.planned_start_date or not predecessor.planned_end_date:
-                continue
-            candidate_starts.append(_successor_start(cal, predecessor, successor, dep))
-        if not candidate_starts:
-            continue
-        new_start = max(candidate_starts)
-        old_start = successor.planned_start_date
-        successor.planned_start_date = new_start
-        successor.planned_end_date = _end_date_from_duration(cal, new_start, successor.duration_days)
-        if successor.planned_start_date != old_start:
-            updated.append(successor)
-
+    updated = _reschedule(graph, cal, set(graph.tasks_by_id))
     session.flush()
     return updated
 

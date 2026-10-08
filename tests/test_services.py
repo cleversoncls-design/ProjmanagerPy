@@ -850,3 +850,64 @@ def test_sync_task_statuses_updates_only_leaf_tasks():
     db.refresh(parent)
     assert leaf.status == TaskStatus.DELAYED
     assert parent.status == TaskStatus.NOT_STARTED
+
+
+def test_parent_task_as_predecessor_uses_children_span():
+    """Tarefa-pai (concentradora) como predecessora: vale o intervalo
+    agregado das folhas (menor início, maior fim) — o pai nunca tem datas
+    próprias gravadas."""
+    db = session()
+    project = _make_project(db, code="PRJ-PARENT-PRED")
+    parent = Task(project_id=project.id, name="Fase", wbs_code="1")
+    db.add(parent)
+    db.flush()
+    child_a = Task(project_id=project.id, name="A", wbs_code="1.1", parent_task_id=parent.id, planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 25))
+    child_b = Task(project_id=project.id, name="B", wbs_code="1.2", parent_task_id=parent.id, planned_start_date=date(2026, 8, 26), planned_end_date=date(2026, 8, 28))
+    succ = Task(project_id=project.id, name="Próxima", wbs_code="2", planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 24), duration_days=Decimal("2"))
+    db.add_all([child_a, child_b, succ])
+    db.flush()
+    db.add(TaskDependency(predecessor_task_id=parent.id, successor_task_id=succ.id))
+    db.commit()
+
+    # Criar a dependência (cascata a partir do pai) já posiciona a sucessora:
+    # o pai termina em 28/08 (sexta) -> FS começa na segunda 31/08.
+    updated = reschedule_cascade(db, parent.id, BusinessCalendar())
+    assert [t.id for t in updated] == [succ.id]
+    assert succ.planned_start_date == date(2026, 8, 31)
+    assert succ.planned_end_date == date(2026, 9, 1)
+
+    # Mover uma filha (alterar a data dela) recalcula a sucessora do pai.
+    child_b.planned_end_date = date(2026, 9, 2)
+    db.commit()
+    updated = reschedule_cascade(db, child_b.id, BusinessCalendar())
+    assert [t.id for t in updated] == [succ.id]
+    assert succ.planned_start_date == date(2026, 9, 3)
+
+    # "Recalcular tudo" chega no mesmo resultado.
+    assert recalculate_schedule(db, project.id, BusinessCalendar()) == []
+    assert succ.planned_start_date == date(2026, 9, 3)
+
+
+def test_parent_task_as_predecessor_ss_uses_earliest_child_start_and_chains():
+    db = session()
+    project = _make_project(db, code="PRJ-PARENT-SS")
+    parent = Task(project_id=project.id, name="Fase", wbs_code="1")
+    db.add(parent)
+    db.flush()
+    child_a = Task(project_id=project.id, name="A", wbs_code="1.1", parent_task_id=parent.id, planned_start_date=date(2026, 8, 25), planned_end_date=date(2026, 8, 25))
+    child_b = Task(project_id=project.id, name="B", wbs_code="1.2", parent_task_id=parent.id, planned_start_date=date(2026, 8, 24), planned_end_date=date(2026, 8, 26))
+    mid = Task(project_id=project.id, name="Meio", wbs_code="2", planned_start_date=date(2026, 9, 10), planned_end_date=date(2026, 9, 10))
+    last = Task(project_id=project.id, name="Fim", wbs_code="3", planned_start_date=date(2026, 9, 10), planned_end_date=date(2026, 9, 10))
+    db.add_all([child_a, child_b, mid, last])
+    db.flush()
+    db.add_all([
+        TaskDependency(predecessor_task_id=parent.id, successor_task_id=mid.id, dependency_type=DependencyType.SS),
+        TaskDependency(predecessor_task_id=mid.id, successor_task_id=last.id),
+    ])
+    db.commit()
+
+    updated = recalculate_schedule(db, project.id, BusinessCalendar())
+    assert {t.id for t in updated} == {mid.id, last.id}
+    # SS: começa junto com o menor início das filhas (24/08); a seguinte vem logo depois.
+    assert mid.planned_start_date == date(2026, 8, 24)
+    assert last.planned_start_date == date(2026, 8, 25)

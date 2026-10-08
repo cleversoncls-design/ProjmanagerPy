@@ -20,6 +20,7 @@ from .models import Language
 _ES: dict[str, str] = {
     "Agendamento não encontrado": "Agenda no encontrada",
     "Alocação não encontrada": "Asignación no encontrada",
+    "Uma tarefa não pode depender da própria tarefa-pai nem de uma tarefa-filha dela": "Una tarea no puede depender de su propia tarea padre ni de una tarea hija suya",
     "Atividade do cliente não aceita recurso alocado — use os usuários do cliente": "Una actividad del cliente no acepta recursos asignados: use los usuarios del cliente",
     "Remova os recursos alocados antes de marcar a tarefa como atividade do cliente": "Quite los recursos asignados antes de marcar la tarea como actividad del cliente",
     "A tarefa não é uma atividade do cliente": "La tarea no es una actividad del cliente",

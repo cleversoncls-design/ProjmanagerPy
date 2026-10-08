@@ -123,6 +123,10 @@ def create_task(
         task.planned_end_date = end_date_from_duration(cal, task.planned_start_date, task.duration_days)
     db.add(task)
     db.flush()
+    if task.parent_task_id and task.planned_start_date:
+        # Tarefa nova dentro de um pai que é predecessora de outra: o intervalo
+        # do pai muda, então as sucessoras dele precisam ser recalculadas.
+        reschedule_cascade(db, task.id, calendar_for_project(db, project))
     record_audit(db, entity_type="task", entity_id=task.id, action=AuditAction.CREATE, user_id=user.id)
     db.commit()
     db.refresh(task)
@@ -347,6 +351,18 @@ def review_task_client_approval(
     return task
 
 
+def _is_ancestor(db: Session, ancestor_id: str, task_id: str) -> bool:
+    """True se `ancestor_id` está acima de `task_id` na hierarquia da EAP."""
+    current = db.get(Task, task_id)
+    guard = 0
+    while current is not None and current.parent_task_id and guard < 1000:
+        if current.parent_task_id == ancestor_id:
+            return True
+        current = db.get(Task, current.parent_task_id)
+        guard += 1
+    return False
+
+
 @router.post("/task-dependencies", response_model=TaskDependencyRead, status_code=status.HTTP_201_CREATED)
 def create_dependency(
     data: TaskDependencyCreate,
@@ -360,6 +376,14 @@ def create_dependency(
     if predecessor.id == successor.id:
         raise HTTPException(status_code=422, detail=translate("Uma tarefa não pode depender de si mesma", user.language))
     require_project_access(predecessor.project, user, write=True, allow_consultant_write=False)
+    # Tarefa-pai pode ser predecessora de outra tarefa (vale o intervalo
+    # agregado das filhas), mas nunca de uma das próprias filhas/ancestrais:
+    # as datas do pai dependem das filhas, então seria uma dependência circular.
+    if _is_ancestor(db, predecessor.id, successor.id) or _is_ancestor(db, successor.id, predecessor.id):
+        raise HTTPException(
+            status_code=422,
+            detail=translate("Uma tarefa não pode depender da própria tarefa-pai nem de uma tarefa-filha dela", user.language),
+        )
     if db.scalar(
         select(TaskDependency).where(
             TaskDependency.predecessor_task_id == predecessor.id,
