@@ -11,7 +11,7 @@ from ..database import get_db
 from ..deps import ADMIN_LIKE_ROLES, EXTERNAL_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, get_current_user, require_project_access, require_roles
 from ..exports import build_service_orders_workbook, build_tasks_workbook
 from ..i18n import t as translate
-from ..models import TASK_FINISHED_STATUSES, Client, Project, ProjectStatus, Resource, Task, TaskDependency, TaskStatus, User, UserRole
+from ..models import TASK_FINISHED_STATUSES, Client, Project, ProjectStatus, ProjectType, Resource, Task, TaskDependency, TaskStatus, User, UserRole
 from ..schemas import (
     DashboardResponse,
     EvmMetrics,
@@ -147,6 +147,7 @@ def portfolio(
     client_id: str | None = None,
     manager_id: str | None = None,
     status: ProjectStatus | None = None,
+    project_type: ProjectType | None = None,
     include_modelo: bool = False,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -173,6 +174,8 @@ def portfolio(
         projects = [p for p in projects if p.manager_id == manager_id]
     if status:
         projects = [p for p in projects if p.status == status]
+    if project_type:
+        projects = [p for p in projects if p.project_type == project_type.value]
     return portfolio_rows(db, projects, include_financials=user.role not in EXTERNAL_ROLES)
 
 

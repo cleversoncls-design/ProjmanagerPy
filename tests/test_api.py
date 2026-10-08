@@ -4244,3 +4244,178 @@ def test_parent_task_can_be_predecessor_and_cascades_to_successor(client, setup)
             headers=headers,
         )
         assert refused.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Consumo anterior (sistema legado) + tipo de projeto
+# ---------------------------------------------------------------------------
+
+
+def _legacy_payload(**extra):
+    payload = {"reference_date": "2026-01-31", "hours": "100", "cost_per_hour": "50.50", "description": "Jan/2026 - sistema anterior"}
+    payload.update(extra)
+    return payload
+
+
+def _xlsx_bytes(rows):
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    for row in rows:
+        ws.append(row)
+    buffer = BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_LEGACY_HEADER = ["Código do projeto", "Data", "Horas", "Custo médio/hora", "Descrição"]
+
+
+def test_legacy_consumption_crud_and_totals(client, setup):
+    """Lançamentos de consumo anterior: vários por projeto, total = horas x
+    custo médio; entram no custo real, nas horas do EVM e na quebra LEGACY."""
+    headers = setup["admin_headers"]
+    pid = setup["project_a"].id
+
+    first = client.post(f"/projects/{pid}/legacy-consumption", json=_legacy_payload(), headers=headers)
+    assert first.status_code == 201, first.text
+    assert float(first.json()["total_cost"]) == 5050.0
+    second = client.post(
+        f"/projects/{pid}/legacy-consumption",
+        json=_legacy_payload(reference_date="2026-02-28", hours="20", cost_per_hour="100"),
+        headers=headers,
+    )
+    assert second.status_code == 201
+
+    listed = client.get(f"/projects/{pid}/legacy-consumption", headers=headers).json()
+    assert len(listed) == 2
+
+    project = client.get(f"/projects/{pid}", headers=headers).json()
+    financials = project["financials"]
+    assert float(financials["legacy_hours"]) == 120.0
+    assert float(financials["legacy_cost"]) == 7050.0
+    assert float(financials["real_cost"]) == 7050.0
+
+    report = client.get(f"/projects/{pid}/report", headers=headers).json()
+    assert float(report["financials_by_task_type"]["LEGACY"]["hours"]) == 120.0
+    assert float(report["financials_by_task_type"]["LEGACY"]["cost"]) == 7050.0
+
+    evm = client.get(f"/projects/{pid}/report.evm", headers=headers).json()
+    assert float(evm["actual_hours"]) >= 120.0
+
+    patched = client.patch(
+        f"/projects/{pid}/legacy-consumption/{second.json()['id']}", json={"hours": "30"}, headers=headers
+    )
+    assert patched.status_code == 200
+    assert float(patched.json()["total_cost"]) == 3000.0
+
+    deleted = client.delete(f"/projects/{pid}/legacy-consumption/{first.json()['id']}", headers=headers)
+    assert deleted.status_code == 204
+    financials = client.get(f"/projects/{pid}", headers=headers).json()["financials"]
+    assert float(financials["legacy_cost"]) == 3000.0
+
+
+def test_legacy_consumption_no_bucket_without_entries(client, setup):
+    report = client.get(f"/projects/{setup['project_a'].id}/report", headers=setup["admin_headers"]).json()
+    assert "LEGACY" not in report["financials_by_task_type"]
+
+
+def test_legacy_consumption_validation(client, setup):
+    headers = setup["admin_headers"]
+    pid = setup["project_a"].id
+    assert client.post(f"/projects/{pid}/legacy-consumption", json=_legacy_payload(hours="0"), headers=headers).status_code == 422
+    assert client.post(f"/projects/{pid}/legacy-consumption", json=_legacy_payload(cost_per_hour="-1"), headers=headers).status_code == 422
+    missing = client.patch(f"/projects/{pid}/legacy-consumption/nao-existe", json={"hours": "1"}, headers=headers)
+    assert missing.status_code == 404
+
+
+def test_legacy_consumption_restricted_to_management_roles(client, setup):
+    pid = setup["project_a"].id
+    for email in (setup["consultant"].email, setup["client_pm_a"].email, setup["client_user_a"].email):
+        denied_headers = auth_headers(client, email)
+        assert client.get(f"/projects/{pid}/legacy-consumption", headers=denied_headers).status_code == 403
+        assert client.post(f"/projects/{pid}/legacy-consumption", json=_legacy_payload(), headers=denied_headers).status_code == 403
+        assert client.get("/legacy-consumption/template.xlsx", headers=denied_headers).status_code == 403
+    # Gerente de Projetos do projeto pode lançar.
+    pm_headers = auth_headers(client, setup["pm"].email)
+    assert client.post(f"/projects/{pid}/legacy-consumption", json=_legacy_payload(), headers=pm_headers).status_code == 201
+
+
+def test_legacy_consumption_import_success_and_template(client, setup):
+    headers = setup["admin_headers"]
+    content = _xlsx_bytes(
+        [
+            _LEGACY_HEADER,
+            ["PRJ-A", "31/01/2026", 100, "50,50", "Jan"],
+            ["prj-a", "2026-02-28", "20", 100, None],
+            ["PRJ-B", "2026-03-31", 10, 80, "Mar"],
+        ]
+    )
+    response = client.post("/legacy-consumption/import", files={"file": ("consumos.xlsx", content, _XLSX_MIME)}, headers=headers)
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["created"] == 3
+    assert body["projects"] == 2
+    assert float(body["total_hours"]) == 130.0
+    assert float(body["total_cost"]) == 5050.0 + 2000.0 + 800.0
+
+    entries = client.get(f"/projects/{setup['project_a'].id}/legacy-consumption", headers=headers).json()
+    assert len(entries) == 2
+
+    template = client.get("/legacy-consumption/template.xlsx", headers=headers)
+    assert template.status_code == 200
+    assert template.content[:2] == b"PK"
+
+
+def test_legacy_consumption_import_is_all_or_nothing(client, setup):
+    headers = setup["admin_headers"]
+    content = _xlsx_bytes(
+        [
+            _LEGACY_HEADER,
+            ["PRJ-A", "2026-01-31", 100, 50, "ok"],
+            ["PRJ-INEXISTENTE", "2026-01-31", 10, 50, None],
+            ["PRJ-A", "data ruim", 0, -1, None],
+        ]
+    )
+    response = client.post("/legacy-consumption/import", files={"file": ("consumos.xlsx", content, _XLSX_MIME)}, headers=headers)
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "linha 3" in detail and "linha 4" in detail
+    assert client.get(f"/projects/{setup['project_a'].id}/legacy-consumption", headers=headers).json() == []
+
+    bad_header = _xlsx_bytes([["A", "B"], [1, 2]])
+    assert client.post("/legacy-consumption/import", files={"file": ("x.xlsx", bad_header, _XLSX_MIME)}, headers=headers).status_code == 422
+    not_xlsx = client.post("/legacy-consumption/import", files={"file": ("x.xlsx", b"nao e planilha", _XLSX_MIME)}, headers=headers)
+    assert not_xlsx.status_code == 422
+
+
+def test_project_type_create_update_and_portfolio_filter(client, setup):
+    headers = setup["admin_headers"]
+    payload = {
+        "client_id": setup["client_a"].id,
+        "manager_id": setup["pm"].id,
+        "code": "PRJ-TYPE",
+        "name": "Projeto tipado",
+        "color": "#800000",
+        "project_type": "HOUR_BANK",
+    }
+    created = client.post("/projects", json=payload, headers=headers)
+    assert created.status_code == 201, created.text
+    assert created.json()["project_type"] == "HOUR_BANK"
+
+    # Projeto existente nasce sem tipo e pode receber um depois.
+    assert client.get(f"/projects/{setup['project_a'].id}", headers=headers).json()["project_type"] is None
+    updated = client.patch(f"/projects/{setup['project_a'].id}", json={"project_type": "SUPPORT"}, headers=headers)
+    assert updated.status_code == 200
+    assert updated.json()["project_type"] == "SUPPORT"
+
+    rows = client.get("/reports/portfolio", params={"project_type": "HOUR_BANK"}, headers=headers).json()
+    assert [r["code"] for r in rows] == ["PRJ-TYPE"]
+    assert rows[0]["project_type"] == "HOUR_BANK"
+
+    invalid = client.patch(f"/projects/{setup['project_a'].id}", json={"project_type": "OUTRO"}, headers=headers)
+    assert invalid.status_code == 422

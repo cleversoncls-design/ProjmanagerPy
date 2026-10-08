@@ -18,6 +18,7 @@ from .models import (
     KnowledgeStatus,
     Language,
     ProjectStatus,
+    ProjectType,
     RagStatus,
     ResourceFunction,
     ReworkReason,
@@ -214,6 +215,8 @@ class ProjectCreate(BaseModel):
     # venda/proposta, digitado direto; não é calculado a partir de custo
     # (ver comentário em Project.margin_percentage, app/models.py).
     margin_percentage: Decimal | None = Field(default=None, ge=0, le=100)
+    # Tipo do projeto (ver models.ProjectType) — opcional.
+    project_type: ProjectType | None = None
     start_date: date | None = None
     end_date: date | None = None
     calendar_id: str | None = None
@@ -233,6 +236,7 @@ class ProjectUpdate(BaseModel):
     consulting_hours: Decimal | None = Field(default=None, ge=0)
     consulting_rate: Decimal | None = Field(default=None, ge=0)
     margin_percentage: Decimal | None = Field(default=None, ge=0, le=100)
+    project_type: ProjectType | None = None
     start_date: date | None = None
     end_date: date | None = None
     calendar_id: str | None = None
@@ -241,6 +245,38 @@ class ProjectUpdate(BaseModel):
     # volta a usar a data de hoje como data-base.
     status_date: date | None = None
     color: str | None = None
+
+
+class ProjectLegacyConsumptionCreate(BaseModel):
+    reference_date: date
+    hours: Decimal = Field(gt=0, max_digits=10, decimal_places=2)
+    cost_per_hour: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    description: str | None = Field(default=None, max_length=255)
+
+
+class ProjectLegacyConsumptionUpdate(BaseModel):
+    reference_date: date | None = None
+    hours: Decimal | None = Field(default=None, gt=0, max_digits=10, decimal_places=2)
+    cost_per_hour: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    description: str | None = Field(default=None, max_length=255)
+
+
+class ProjectLegacyConsumptionRead(ORMModel):
+    id: str
+    project_id: str
+    reference_date: date
+    hours: Decimal
+    cost_per_hour: Decimal
+    # hours * cost_per_hour — preenchido pelo router (não é coluna).
+    total_cost: Decimal
+    description: str | None
+
+
+class LegacyConsumptionImportResult(BaseModel):
+    created: int
+    projects: int
+    total_hours: Decimal
+    total_cost: Decimal
 
 
 class ProjectSummary(ORMModel):
@@ -254,6 +290,7 @@ class ProjectSummary(ORMModel):
     end_date: date | None
     calendar_id: str | None
     status_date: date | None
+    project_type: ProjectType | None = None
     color: str
     # True = projeto finalizado (COMPLETED/CANCELLED) exibindo o padrão
     # listrado no lugar de `color` — ver Project.color_striped.
@@ -885,6 +922,7 @@ class ProjectPortfolioRow(BaseModel):
     name: str
     status: ProjectStatus
     manager_name: str
+    project_type: ProjectType | None = None
     percent_complete: Decimal
     tasks_total: int
     tasks_remaining: int

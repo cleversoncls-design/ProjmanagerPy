@@ -23,6 +23,7 @@ from .models import (
     Project,
     Resource,
     ProjectExpense,
+    ProjectLegacyConsumption,
     RagStatus,
     Risk,
     RiskLevel,
@@ -1140,7 +1141,8 @@ def project_evm(session: Session, project_id: str, status_date: date | None = No
       trabalho deveria ter sido concluído até aqui".
     - EV (earned value): soma das horas orçadas × % concluído de CADA
       tarefa, na mesma base de horas do PV.
-    - AC (actual cost, em horas): soma de Task.actual_hours.
+    - AC (actual cost, em horas): soma de Task.actual_hours mais as horas
+      consumidas no sistema anterior (ProjectLegacyConsumption).
     - SPI = EV/PV, CPI = EV/AC — None quando o denominador é zero.
     """
     project = session.get(Project, project_id)
@@ -1165,7 +1167,7 @@ def project_evm(session: Session, project_id: str, status_date: date | None = No
     total_planned_hours = sum((planned_hours(t) for t in tasks), Decimal("0"))
     pv = sum((planned_hours(t) for t in tasks if planned_end(t) and planned_end(t) <= status_date), Decimal("0"))
     ev = sum((planned_hours(t) * Decimal(t.progress_percentage or 0) / 100 for t in tasks), Decimal("0"))
-    ac = sum((Decimal(t.actual_hours or 0) for t in tasks), Decimal("0"))
+    ac = sum((Decimal(t.actual_hours or 0) for t in tasks), Decimal("0")) + project_legacy_totals(session, project_id)[0]
 
     spi = _q(ev / pv) if pv > 0 else None
     cpi = _q(ev / ac) if ac > 0 else None
@@ -1232,7 +1234,7 @@ def project_statistics(session: Session, project_id: str) -> dict:
     actual_finish = max(actual_ends) if (all_finished and actual_ends) else None
     reference_end = actual_finish or date.today()
     actual_duration = Decimal(_duration_days(cal, actual_start, reference_end)) if actual_start else Decimal("0")
-    actual_work = sum((Decimal(t.actual_hours or 0) for t in tasks), Decimal("0"))
+    actual_work = sum((Decimal(t.actual_hours or 0) for t in tasks), Decimal("0")) + project_legacy_totals(session, project_id)[0]
     actual_cost = project_financials(session, project_id)["real_cost"]
     actual = {
         "start_date": actual_start,
@@ -1260,6 +1262,20 @@ def project_statistics(session: Session, project_id: str) -> dict:
     }
 
 
+def project_legacy_totals(session: Session, project_id: str) -> tuple[Decimal, Decimal]:
+    """(horas, custo) já consumidos no sistema anterior — soma dos
+    lançamentos de ProjectLegacyConsumption (custo = horas × custo médio/hora
+    de cada lançamento)."""
+    rows = session.execute(
+        select(ProjectLegacyConsumption.hours, ProjectLegacyConsumption.cost_per_hour).where(
+            ProjectLegacyConsumption.project_id == project_id
+        )
+    ).all()
+    hours = sum((Decimal(h) for h, _ in rows), Decimal("0"))
+    cost = sum((Decimal(h) * Decimal(c) for h, c in rows), Decimal("0"))
+    return hours, cost
+
+
 def project_financials(session: Session, project_id: str) -> dict[str, Decimal | None]:
     project = session.get(Project, project_id)
     if not project:
@@ -1279,7 +1295,10 @@ def project_financials(session: Session, project_id: str) -> dict[str, Decimal |
     ).all()
     timesheet_cost = sum((Decimal(hours) * Decimal(rate) for hours, rate in rows), Decimal("0"))
     expense_cost = sum((Decimal(x) for x in session.scalars(select(ProjectExpense.amount).where(ProjectExpense.project_id == project_id)).all()), Decimal("0"))
-    real_cost = timesheet_cost + expense_cost
+    # Consumo apropriado no sistema anterior entra no custo real (e portanto
+    # na margem/ROI) — ver ProjectLegacyConsumption.
+    legacy_hours, legacy_cost = project_legacy_totals(session, project_id)
+    real_cost = timesheet_cost + expense_cost + legacy_cost
     sold = Decimal(project.sold_value or 0)
     profit_margin = sold - real_cost
     # "% Margem Real" (pedido do usuário, "melhorias parte 5") — comparável
@@ -1293,6 +1312,8 @@ def project_financials(session: Session, project_id: str) -> dict[str, Decimal |
         "sold_value": sold,
         "timesheet_cost": timesheet_cost,
         "expense_cost": expense_cost,
+        "legacy_hours": legacy_hours,
+        "legacy_cost": legacy_cost,
         "real_cost": real_cost,
         "profit_margin": profit_margin,
         "real_margin_percentage": real_margin_percentage,
@@ -1366,6 +1387,7 @@ def portfolio_rows(session: Session, projects: list[Project], *, include_financi
                 "name": project.name,
                 "status": project.status,
                 "manager_name": managers_by_id.get(project.manager_id, "—"),
+                "project_type": project.project_type,
                 "percent_complete": progress["percent_complete"],
                 "tasks_total": progress["tasks_total"],
                 "tasks_remaining": progress["tasks_remaining"],
@@ -1407,6 +1429,11 @@ def financials_by_task_type(session: Session, project_id: str) -> dict[str, dict
         key = task_type.value if task_type is not None else ("TRASLADO" if is_transit else "ADHOC")
         buckets[key]["hours"] += Decimal(hours)
         buckets[key]["cost"] += Decimal(hours) * Decimal(rate)
+    # Consumo do sistema anterior: bucket próprio, só quando existe — assim a
+    # quebra continua somando com o custo real.
+    legacy_hours, legacy_cost = project_legacy_totals(session, project_id)
+    if legacy_hours > 0:
+        buckets["LEGACY"] = {"hours": legacy_hours, "cost": legacy_cost}
     for bucket in buckets.values():
         bucket["hours"] = _q(bucket["hours"])
         bucket["cost"] = _q(bucket["cost"])

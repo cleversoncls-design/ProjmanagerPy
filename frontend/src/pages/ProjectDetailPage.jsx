@@ -9,6 +9,7 @@ import * as usersApi from '../api/users'
 import * as resourcesApi from '../api/resources'
 import * as calendarsApi from '../api/calendars'
 import * as taskGroupsApi from '../api/taskGroups'
+import * as legacyApi from '../api/legacyConsumption'
 import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import PageHeader from '../components/PageHeader'
@@ -60,6 +61,8 @@ const TABS = [
   { key: 'tasks', label: 'Tarefas' },
   { key: 'gantt', label: 'Gantt' },
   { key: 'resources', label: 'Recursos' },
+  // Consumo já apropriado no sistema anterior — dado financeiro, só gestão.
+  { key: 'legacy', label: 'Consumo anterior', managementOnly: true },
 ]
 
 export default function ProjectDetailPage() {
@@ -95,6 +98,18 @@ export default function ProjectDetailPage() {
 
   useEffect(loadProject, [projectId])
 
+  // Recarrega só os números (sem o Spinner de tela cheia) depois de mexer
+  // nos lançamentos de consumo anterior — o custo real/horas mudam.
+  function refreshNumbers() {
+    Promise.all([projectsApi.getProject(projectId), reportsApi.getProjectReport(projectId), reportsApi.getEvm(projectId).catch(() => null)])
+      .then(([projectResult, reportResult, evmResult]) => {
+        setProject(projectResult)
+        setReport(reportResult)
+        setEvm(evmResult)
+      })
+      .catch(() => {})
+  }
+
   if (loading) return <Spinner />
   if (error) return <ErrorBanner message={error} />
   if (!project) return null
@@ -103,7 +118,10 @@ export default function ProjectDetailPage() {
     <div>
       <PageHeader
         title={`${project.code} — ${project.name}`}
-        subtitle={client ? client.legal_name : undefined}
+        subtitle={
+          [client ? client.legal_name : null, project.project_type ? labels.PROJECT_TYPE_LABELS[project.project_type] : null].filter(Boolean).join(' · ') ||
+          undefined
+        }
         action={
           <div className="flex items-center gap-2">
             <StatusPill label={labels.PROJECT_STATUS_LABELS[project.status] || project.status} tone={PROJECT_STATUS_TONE[project.status]} />
@@ -120,7 +138,7 @@ export default function ProjectDetailPage() {
       />
 
       <div className="mb-6 flex gap-1 border-b border-[var(--border)]">
-        {TABS.map((item) => (
+        {TABS.filter((item) => !item.managementOnly || canWrite).map((item) => (
           <button
             key={item.key}
             type="button"
@@ -140,6 +158,7 @@ export default function ProjectDetailPage() {
       {tab === 'tasks' && <TasksTab projectId={projectId} canWrite={canWrite} onTaskCreated={loadProject} />}
       {tab === 'gantt' && <GanttTab projectId={projectId} project={project} />}
       {tab === 'resources' && <ProjectResourcesTab projectId={projectId} canWrite={canWrite} />}
+      {tab === 'legacy' && canWrite && <LegacyConsumptionTab projectId={projectId} onChanged={refreshNumbers} />}
 
       {showEditModal && (
         <ProjectEditModal
@@ -389,6 +408,252 @@ function ProjectResourcesTab({ projectId, canWrite }) {
   )
 }
 
+/** Aba "Consumo anterior" — horas já consumidas no SISTEMA ANTERIOR, a um
+ * custo médio por hora (pedido do usuário). Vários lançamentos por projeto;
+ * entram no custo real/margem e nas horas consumidas, mas NÃO são
+ * apontamentos (sem aprovação, Ordem de Serviço nem agenda). Também dá pra
+ * carregar vários projetos de uma vez por planilha (.xlsx). */
+function LegacyConsumptionTab({ projectId, onChanged }) {
+  const { t } = useLanguage()
+  const [entries, setEntries] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [editing, setEditing] = useState(null) // null | 'new' | entry
+  const [importing, setImporting] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
+
+  function load() {
+    setError('')
+    legacyApi
+      .listLegacyConsumption(projectId)
+      .then(setEntries)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(load, [projectId])
+
+  const totals = useMemo(() => {
+    let hours = 0
+    let cost = 0
+    for (const entry of entries) {
+      hours += Number(entry.hours)
+      cost += Number(entry.total_cost)
+    }
+    return { hours, cost, average: hours > 0 ? cost / hours : 0 }
+  }, [entries])
+
+  async function handleDelete(entry) {
+    if (!window.confirm(t('Excluir este lançamento de consumo anterior?'))) return
+    setDeletingId(entry.id)
+    setError('')
+    setNotice('')
+    try {
+      await legacyApi.deleteLegacyConsumption(projectId, entry.id)
+      load()
+      onChanged()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  async function handleImport(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setImporting(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await legacyApi.importLegacyConsumption(file)
+      setNotice(
+        t('Importação concluída: {n} lançamento(s) em {p} projeto(s), {h} h e {c}.', {
+          n: result.created,
+          p: result.projects,
+          h: formatNumber(result.total_hours),
+          c: formatCurrency(result.total_cost),
+        }),
+      )
+      load()
+      onChanged()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  async function handleTemplate() {
+    setError('')
+    try {
+      await legacyApi.downloadLegacyTemplate()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  if (loading) return <Spinner />
+
+  return (
+    <div className="space-y-4">
+      <Card
+        title={t('Consumo anterior (sistema legado)')}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" onClick={handleTemplate}>
+              {t('Baixar modelo')}
+            </Button>
+            <label
+              className={`inline-flex cursor-pointer items-center rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--page)] ${
+                importing ? 'pointer-events-none opacity-50' : ''
+              }`}
+            >
+              {importing ? t('Importando…') : t('Importar planilha')}
+              <input
+                type="file"
+                accept=".xlsx"
+                className="hidden"
+                onChange={handleImport}
+                disabled={importing}
+              />
+            </label>
+            <Button onClick={() => setEditing('new')}>
+              <PlusIcon size={15} /> {t('Novo lançamento')}
+            </Button>
+          </div>
+        }
+      >
+        <p className="mb-3 text-xs text-[var(--text-muted)]">
+          {t(
+            'Horas já consumidas no sistema anterior, a um custo médio por hora. Entram no custo real, na margem e nas horas consumidas do projeto, mas não são apontamentos (sem aprovação nem Ordem de Serviço). A planilha pode trazer vários projetos de uma vez; se alguma linha tiver erro, nada é gravado.',
+          )}
+        </p>
+        <ErrorBanner message={error} />
+        {notice && <p className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--page)] px-3 py-2 text-sm text-[var(--text-primary)]">{notice}</p>}
+
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+          <StatTile label={t('Horas consumidas (anterior)')} value={`${formatNumber(totals.hours)} h`} compact />
+          <StatTile label={t('Custo apropriado')} value={formatCurrency(totals.cost)} compact />
+          <StatTile label={t('Custo médio/hora')} value={formatCurrency(totals.average)} compact />
+        </div>
+
+        <Table
+          emptyMessage={t('Nenhum consumo anterior lançado neste projeto.')}
+          columns={[
+            { key: 'reference_date', header: t('Data'), render: (row) => formatDate(row.reference_date) },
+            { key: 'hours', header: t('Horas'), align: 'right', render: (row) => formatNumber(row.hours) },
+            { key: 'cost_per_hour', header: t('Custo médio/hora'), align: 'right', render: (row) => formatCurrency(row.cost_per_hour) },
+            { key: 'total_cost', header: t('Custo total'), align: 'right', render: (row) => formatCurrency(row.total_cost) },
+            { key: 'description', header: t('Descrição'), render: (row) => row.description || '—' },
+            {
+              key: 'actions',
+              header: '',
+              align: 'right',
+              render: (row) => (
+                <div className="flex justify-end gap-1">
+                  <IconButton icon={PencilIcon} label={t('Editar')} onClick={() => setEditing(row)} />
+                  <IconButton icon={TrashIcon} variant="danger" label={t('Excluir')} disabled={deletingId === row.id} onClick={() => handleDelete(row)} />
+                </div>
+              ),
+            },
+          ]}
+          rows={entries}
+          getRowKey={(row) => row.id}
+        />
+      </Card>
+
+      {editing && (
+        <LegacyConsumptionModal
+          projectId={projectId}
+          entry={editing === 'new' ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null)
+            setNotice('')
+            load()
+            onChanged()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function LegacyConsumptionModal({ projectId, entry, onClose, onSaved }) {
+  const { t } = useLanguage()
+  const [form, setForm] = useState({
+    reference_date: entry?.reference_date || '',
+    hours: entry?.hours ?? '',
+    cost_per_hour: entry?.cost_per_hour ?? '',
+    description: entry?.description || '',
+  })
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  function updateField(field) {
+    return (event) => setForm((prev) => ({ ...prev, [field]: event.target.value }))
+  }
+
+  const total = Number(form.hours || 0) * Number(form.cost_per_hour || 0)
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    setError('')
+    setSaving(true)
+    const payload = {
+      reference_date: form.reference_date,
+      hours: form.hours,
+      cost_per_hour: form.cost_per_hour,
+      description: form.description.trim() || null,
+    }
+    try {
+      if (entry) await legacyApi.updateLegacyConsumption(projectId, entry.id, payload)
+      else await legacyApi.createLegacyConsumption(projectId, payload)
+      onSaved()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={entry ? t('Editar lançamento de consumo anterior') : t('Novo lançamento de consumo anterior')} onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <FormField label={t('Data de referência')} required hint={t('Ex.: último dia do mês apropriado no sistema anterior.')}>
+          <TextInput type="date" required value={form.reference_date} onChange={updateField('reference_date')} />
+        </FormField>
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label={t('Horas')} required>
+            <TextInput type="number" required min="0.01" step="0.01" value={form.hours} onChange={updateField('hours')} />
+          </FormField>
+          <FormField label={t('Custo médio/hora')} required>
+            <TextInput type="number" required min="0" step="0.01" value={form.cost_per_hour} onChange={updateField('cost_per_hour')} />
+          </FormField>
+        </div>
+        <p className="text-xs text-[var(--text-secondary)]">
+          {t('Custo total')}: <strong>{formatCurrency(total)}</strong>
+        </p>
+        <FormField label={t('Descrição')}>
+          <TextInput maxLength={255} value={form.description} onChange={updateField('description')} />
+        </FormField>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? t('Salvando…') : t('Salvar')}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 // Status que liberam a cor (some da disputa de exclusividade e vira
 // listrado — ver Project.color_striped no backend). Mesmo grupo de
 // _COLOR_POOL_EXCLUDED_STATUSES em app/routers/projects.py, menos MODELO
@@ -411,6 +676,7 @@ function ProjectEditModal({ project, onClose, onSaved }) {
     consulting_hours: project.consulting_hours ?? '0',
     consulting_rate: project.consulting_rate ?? '0',
     margin_percentage: project.margin_percentage ?? '',
+    project_type: project.project_type || '',
   })
   const [managers, setManagers] = useState([])
   const [calendars, setCalendars] = useState([])
@@ -472,6 +738,7 @@ function ProjectEditModal({ project, onClose, onSaved }) {
         consulting_hours: form.consulting_hours,
         consulting_rate: form.consulting_rate,
         margin_percentage: form.margin_percentage === '' ? null : form.margin_percentage,
+        project_type: form.project_type || null,
       })
       onSaved()
     } catch (err) {
@@ -508,6 +775,18 @@ function ProjectEditModal({ project, onClose, onSaved }) {
               ))}
             </Select>
           </FormField>
+          <FormField label={t('Tipo de projeto')}>
+            <Select value={form.project_type} onChange={updateField('project_type')}>
+              <option value="">{t('Sem tipo definido')}</option>
+              {Object.entries(labels.PROJECT_TYPE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
           <FormField label={t('Calendário do projeto')} hint={t('Usado para calcular dias úteis nas datas planejadas.')}>
             <Select value={form.calendar_id} onChange={updateField('calendar_id')}>
               <option value="">{t('Padrão (segunda a sexta, sem feriados)')}</option>

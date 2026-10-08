@@ -32,11 +32,12 @@ const EMPTY_FORM = {
   consulting_hours: '0',
   consulting_rate: '0',
   margin_percentage: '',
+  project_type: '',
   start_date: '',
   end_date: '',
 }
 
-const EMPTY_FILTERS = { status: '', client_id: '', manager_id: '', includeModelo: false }
+const EMPTY_FILTERS = { status: '', client_id: '', manager_id: '', project_type: '', includeModelo: false }
 
 export default function ProjectsPage() {
   const { user } = useAuth()
@@ -60,7 +61,7 @@ export default function ProjectsPage() {
   // JIT conseguir achar cada uma no código-fonte — ver mesmo padrão já
   // usado antes pra Cliente/Projetos Modelo.
   const filterColumnsClass =
-    canFilterByClient && canFilterByManager ? 'md:grid-cols-4' : canFilterByClient || canFilterByManager ? 'md:grid-cols-3' : 'md:grid-cols-2'
+    canFilterByClient && canFilterByManager ? 'md:grid-cols-5' : canFilterByClient || canFilterByManager ? 'md:grid-cols-4' : 'md:grid-cols-3'
 
   const [rows, setRows] = useState([])
   const [clients, setClients] = useState([])
@@ -91,6 +92,7 @@ export default function ProjectsPage() {
         status: filters.status || undefined,
         client_id: filters.client_id || undefined,
         manager_id: filters.manager_id || undefined,
+        project_type: filters.project_type || undefined,
         include_modelo: filters.includeModelo || undefined,
       })
       .then(setRows)
@@ -98,7 +100,7 @@ export default function ProjectsPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(loadRows, [filters.status, filters.client_id, filters.manager_id, filters.includeModelo])
+  useEffect(loadRows, [filters.status, filters.client_id, filters.manager_id, filters.project_type, filters.includeModelo])
 
   useEffect(() => {
     if (canFilterByClient) {
@@ -179,6 +181,7 @@ export default function ProjectsPage() {
       if (!payload.start_date) delete payload.start_date
       if (!payload.end_date) delete payload.end_date
       if (payload.margin_percentage === '') delete payload.margin_percentage
+      if (!payload.project_type) delete payload.project_type
       await projectsApi.createProject(payload)
       setShowModal(false)
       setForm(EMPTY_FORM)
@@ -239,6 +242,16 @@ export default function ProjectsPage() {
               </Select>
             </FormField>
           )}
+          <FormField label={t('Tipo de projeto')}>
+            <Select value={filters.project_type} onChange={updateFilter('project_type')}>
+              <option value="">{t('Todos')}</option>
+              {Object.entries(labels.PROJECT_TYPE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
           <FormField label={t('Projetos Modelo')}>
             <label className="flex h-[38px] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text-secondary)]">
               <input type="checkbox" checked={filters.includeModelo} onChange={toggleIncludeModelo} />
@@ -273,6 +286,11 @@ export default function ProjectsPage() {
                 key: 'status',
                 header: t('Status'),
                 render: (row) => <StatusPill label={labels.PROJECT_STATUS_LABELS[row.status] || row.status} tone={PROJECT_STATUS_TONE[row.status]} />,
+              },
+              {
+                key: 'project_type',
+                header: t('Tipo'),
+                render: (row) => (row.project_type ? labels.PROJECT_TYPE_LABELS[row.project_type] || row.project_type : '—'),
               },
               // Gerente responsável — pedido do usuário, pra não precisar
               // abrir o projeto só pra ver quem o conduz.
@@ -347,6 +365,17 @@ export default function ProjectsPage() {
                 </Select>
               </FormField>
             </div>
+
+            <FormField label={t('Tipo de projeto')}>
+              <Select value={form.project_type} onChange={updateField('project_type')}>
+                <option value="">{t('Sem tipo definido')}</option>
+                {Object.entries(labels.PROJECT_TYPE_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
 
             <FormField label={t('Cor do projeto')} hint={t('Usada na Agenda de consultores para identificar este projeto.')}>
               <ColorListPicker value={form.color} onChange={(color) => setForm((prev) => ({ ...prev, color }))} usedColors={usedColors} />

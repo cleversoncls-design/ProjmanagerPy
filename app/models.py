@@ -236,6 +236,21 @@ class ChangeStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+class ProjectType(StrEnum):
+    """Classificador do projeto (pedido do usuário) — lista fixa, só
+    informativa/filtro (nenhuma regra de cálculo depende dele). Guardado como
+    String (não enum do Postgres) em Project.project_type, como as demais
+    colunas de classificação recentes: acrescentar um tipo não exige migração."""
+
+    FIXED_PRICE = "FIXED_PRICE"  # Projeto Fechado
+    OPEN_HOURS = "OPEN_HOURS"  # Projeto Horas Abertas
+    HOUR_BANK = "HOUR_BANK"  # Banco de Horas
+    SUPPORT = "SUPPORT"  # Sustentação
+    INTERNAL = "INTERNAL"  # Internos
+    COMMERCIAL = "COMMERCIAL"  # Comercial
+    INVESTMENT = "INVESTMENT"  # Investimento
+
+
 class ResourceFunction(StrEnum):
     """Categoria de função do recurso (pedido do usuário, "melhorias parte
     4") — combinada com `Resource.level` (1 a 4) pra indicar a senioridade.
@@ -348,6 +363,9 @@ class Project(Base):
     # services.project_financials, essa sim calculada a partir do custo
     # efetivo). Opcional — fica em branco até alguém preencher.
     margin_percentage: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    # Tipo do projeto (ver ProjectType) — opcional: projetos já existentes
+    # ficam sem tipo até alguém classificar.
+    project_type: Mapped[str | None] = mapped_column(String(30))
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
     # Calendário aplicado ao projeto (dias úteis/feriados usados para
@@ -877,6 +895,24 @@ class ProjectExpense(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     expense_date: Mapped[date] = mapped_column(Date, nullable=False)
     project: Mapped[Project] = relationship(back_populates="expenses")
+
+
+class ProjectLegacyConsumption(Base):
+    """Consumo já apropriado no SISTEMA ANTERIOR (pedido do usuário: projetos
+    migrados chegam com horas já consumidas, a um custo médio por hora). Cada
+    lançamento é um bloco (data de referência, horas, custo médio/hora): o
+    custo é `hours * cost_per_hour`. Entra no custo real/margem do projeto e
+    nas horas consumidas (EVM/Status Report) — mas NÃO é um apontamento
+    (Timesheet): não passa por aprovação, Ordem de Serviço nem agenda."""
+
+    __tablename__ = "project_legacy_consumption"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    reference_date: Mapped[date] = mapped_column(Date, nullable=False)
+    hours: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    cost_per_hour: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class Calendar(Base):

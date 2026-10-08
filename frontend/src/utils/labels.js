@@ -161,6 +161,18 @@ export const TASK_STATUS_TONE = {
   CLOSED: 'muted',
 }
 
+// Classificador de tipo de projeto (lista fixa, pedido do usuário) — espelha
+// `ProjectType` em app/models.py.
+export const PROJECT_TYPE_LABELS = {
+  FIXED_PRICE: 'Projeto Fechado',
+  OPEN_HOURS: 'Projeto Horas Abertas',
+  HOUR_BANK: 'Banco de Horas',
+  SUPPORT: 'Sustentação',
+  INTERNAL: 'Internos',
+  COMMERCIAL: 'Comercial',
+  INVESTMENT: 'Investimento',
+}
+
 export const TASK_TYPE_LABELS = {
   MANAGEMENT: 'Gestão',
   CONSULTING: 'Consultoria',
@@ -172,6 +184,9 @@ export const TASK_TYPE_LABELS = {
   // acima (chave sintética, não é um TaskType de verdade), mas com bucket
   // próprio em financials_by_task_type pra separar do resto do avulso.
   TRASLADO: 'Traslado',
+  // Consumo apropriado no sistema anterior (ProjectLegacyConsumption) —
+  // bucket sintético de financials_by_task_type, só aparece com lançamentos.
+  LEGACY: 'Consumo anterior (sistema legado)',
 }
 
 // Cor categórica fixa por entidade (nunca por posição/ranking — um filtro
@@ -511,6 +526,7 @@ export function getLabels(lang) {
     RESOURCE_LEVEL_LABELS: translateMap(RESOURCE_LEVEL_LABELS, lang),
     TASK_MODALITY_LABELS: translateMap(TASK_MODALITY_LABELS, lang),
     PROJECT_STATUS_LABELS: translateMap(PROJECT_STATUS_LABELS, lang),
+    PROJECT_TYPE_LABELS: translateMap(PROJECT_TYPE_LABELS, lang),
     TASK_STATUS_LABELS: translateMap(TASK_STATUS_LABELS, lang),
     TASK_STATUS_LABELS_SHORT: translateMap(TASK_STATUS_LABELS_SHORT, lang),
     TASK_TYPE_LABELS: translateMap(TASK_TYPE_LABELS, lang),

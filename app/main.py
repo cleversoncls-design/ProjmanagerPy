@@ -21,6 +21,7 @@ from .routers import (
     email_settings,
     expenses,
     intakes,
+    legacy_consumption,
     knowledge,
     projects,
     reports,
@@ -113,6 +114,7 @@ app.include_router(resources.router)
 app.include_router(schedules.router)
 app.include_router(timesheets.router)
 app.include_router(expenses.router)
+app.include_router(legacy_consumption.router)
 app.include_router(calendars.router)
 app.include_router(risks.router)
 app.include_router(changes.router)

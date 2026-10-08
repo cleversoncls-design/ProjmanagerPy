@@ -126,6 +126,7 @@ def create_project(
     _ensure_color_available(db, color, user.language)
     project_data = data.model_dump()
     project_data["color"] = color
+    project_data["project_type"] = data.project_type.value if data.project_type else None
     project = Project(**project_data)
     _recompute_sold_value(project)
     db.add(project)
@@ -236,6 +237,8 @@ def update_project(
     if user.role in EXTERNAL_ROLES:
         for field in _EXTERNAL_HIDDEN_FIELDS:
             changes.pop(field, None)
+    if changes.get("project_type") is not None:
+        changes["project_type"] = changes["project_type"].value
     for field, value in changes.items():
         setattr(project, field, value)
     if any(field in changes for field in _FINANCIAL_FIELDS):

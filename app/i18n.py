@@ -230,6 +230,23 @@ _ES: dict[str, str] = {
     "Status inválido — use APPROVED ou REJECTED": "Estado inválido — use APPROVED o REJECTED",
     "Você não pode revisar sua própria autoavaliação": "Usted no puede revisar su propia autoevaluación",
     "Informe o motivo da rejeição em Comentário do revisor": "Informe el motivo del rechazo en Comentario del revisor",
+    "Lançamento de consumo anterior não encontrado": "Registro de consumo anterior no encontrado",
+    "Campo obrigatório não pode ser vazio": "Campo obligatorio no puede estar vacío",
+    "Arquivo muito grande (máximo 2 MB)": "Archivo demasiado grande (máximo 2 MB)",
+    "Arquivo inválido: envie uma planilha .xlsx": "Archivo inválido: envíe una planilla .xlsx",
+    "A planilha está vazia": "La planilla está vacía",
+    "Cabeçalho inválido: a planilha precisa das colunas Código do projeto, Data, Horas e Custo médio/hora": "Encabezado inválido: la planilla necesita las columnas Código del proyecto, Fecha, Horas y Costo promedio/hora",
+    "A planilha não tem nenhuma linha de dados": "La planilla no tiene ninguna fila de datos",
+    "Máximo de {max} linhas por importação": "Máximo de {max} filas por importación",
+    "projeto \"{code}\" não encontrado": "proyecto \"{code}\" no encontrado",
+    "código do projeto vazio": "código del proyecto vacío",
+    "data inválida": "fecha inválida",
+    "horas devem ser um número maior que zero": "las horas deben ser un número mayor que cero",
+    "custo médio/hora deve ser um número maior ou igual a zero": "el costo promedio/hora debe ser un número mayor o igual a cero",
+    "descrição acima de 255 caracteres": "descripción de más de 255 caracteres",
+    "linha {row}: {problems}": "fila {row}: {problems}",
+    " (+{n} outros erros)": " (+{n} errores más)",
+    "Importação cancelada, nada foi gravado — {n} linha(s) com erro: ": "Importación cancelada, no se guardó nada — {n} fila(s) con error: ",
 }
 
 
