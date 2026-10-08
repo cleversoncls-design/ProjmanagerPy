@@ -100,7 +100,14 @@ export default function StatusReportsPage() {
     projectsApi
       .listProjects()
       .then((rows) => {
-        const visible = rows.filter((p) => p.status !== 'MODELO')
+        // Gerente de Projetos (INTERNAL_PM) só escolhe entre os projetos que
+        // ele gerencia (Project.manager_id) — mesma regra de _scoped_projects
+        // no backend (tela de Projetos/Dashboard). Administrador, Gerente de
+        // Serviços e Diretor Geral (ADMIN_LIKE_ROLES) veem todos; perfis do
+        // cliente já vêm limitados ao próprio cliente por GET /projects.
+        const visible = rows.filter(
+          (p) => p.status !== 'MODELO' && (user?.role !== 'INTERNAL_PM' || p.manager_id === user.id),
+        )
         setProjects(visible)
         if (visible.length > 0) setProjectId(visible[0].id)
       })
