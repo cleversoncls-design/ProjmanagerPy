@@ -4128,3 +4128,25 @@ def test_turning_off_client_activity_releases_client_users_and_client_roles_cann
     assert updated.status_code == 200
     assert updated.json()["is_client_activity"] is False
     assert updated.json()["client_user_ids"] == []
+
+
+def test_schedule_parent_task_progress_is_rolled_up_from_children(client, setup):
+    headers = setup["admin_headers"]
+    project_id = setup["project_a"].id
+    parent = _create_task(client, headers, project_id, name="Fase", wbs_code="1")
+    child_a = _create_task(client, headers, project_id, name="A", wbs_code="1.1", parent_task_id=parent["id"], duration_days="1")
+    child_b = _create_task(client, headers, project_id, name="B", wbs_code="1.2", parent_task_id=parent["id"], duration_days="3")
+    assert client.patch(f"/tasks/{child_a['id']}", json={"progress_percentage": "100"}, headers=headers).status_code == 200
+    assert client.patch(f"/tasks/{child_b['id']}", json={"progress_percentage": "0"}, headers=headers).status_code == 200
+
+    rows = {t["id"]: t for t in client.get(f"/projects/{project_id}/schedule", headers=headers).json()["tasks"]}
+    # A pesa 1 dia (8h) e B 3 dias (24h): (8*100 + 24*0) / 32 = 25%
+    assert float(rows[parent["id"]]["rollup_progress_percentage"]) == 25.0
+    # o campo próprio da tarefa-pai continua não gravado; folhas não têm rollup
+    assert float(rows[parent["id"]]["progress_percentage"]) == 0.0
+    assert rows[child_a["id"]]["rollup_progress_percentage"] is None
+    assert float(rows[child_a["id"]]["progress_percentage"]) == 100.0
+
+    assert client.patch(f"/tasks/{child_b['id']}", json={"progress_percentage": "100"}, headers=headers).status_code == 200
+    rows = {t["id"]: t for t in client.get(f"/projects/{project_id}/schedule", headers=headers).json()["tasks"]}
+    assert float(rows[parent["id"]]["rollup_progress_percentage"]) == 100.0

@@ -958,6 +958,11 @@ def task_schedule_rows(session: Session, project: Project) -> dict:
     baseline_map = _latest_baseline_task_map(session, project.id)
     cal = calendar_for_project(session, project)
     rollups = _task_rollups(tasks, cal)
+    # % Realizado de tarefa-pai: o motor nunca grava progress_percentage numa
+    # tarefa-pai (só apontamento em folha, ver _task_progress_rollups), então
+    # a grade mostrava 0% mesmo com todas as filhas concluídas. Só entra pra
+    # quem tem filhas (as mesmas chaves de `rollups`); folha usa o campo próprio.
+    progress_rollups = _task_progress_rollups(tasks)
 
     def _baseline_field(row: dict | None, direct_key: str, rollup_key: str):
         """Tarefa-folha usa o campo direto do snapshot; tarefa-pai (sem
@@ -1011,6 +1016,7 @@ def task_schedule_rows(session: Session, project: Project) -> dict:
                 "rollup_end_date": rollup["end"] if rollup else None,
                 "rollup_duration_days": rollup["duration"] if rollup else None,
                 "rollup_estimated_hours": rollup["hours"] if rollup else None,
+                "rollup_progress_percentage": progress_rollups.get(t.id) if rollup else None,
                 "baseline_start_date": (
                     date.fromisoformat(_baseline_field(baseline_row, "planned_start_date", "rollup_start_date"))
                     if _baseline_field(baseline_row, "planned_start_date", "rollup_start_date")

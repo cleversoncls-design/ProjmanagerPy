@@ -454,6 +454,10 @@ class TaskScheduleRow(TaskRead):
     rollup_end_date: date | None = None
     rollup_duration_days: Decimal | None = None
     rollup_estimated_hours: Decimal | None = None
+    # % Realizado agregado das folhas descendentes (ponderado por horas) —
+    # só tarefa-pai; None na folha, que usa progress_percentage. Ver
+    # services._task_progress_rollups.
+    rollup_progress_percentage: Decimal | None = None
     baseline_start_date: date | None = None
     baseline_end_date: date | None = None
     baseline_estimated_hours: Decimal | None = None

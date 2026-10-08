@@ -396,6 +396,7 @@ def project_schedule(project_id: str, user: User = Depends(get_current_user), db
                 "rollup_end_date": row["rollup_end_date"],
                 "rollup_duration_days": row["rollup_duration_days"],
                 "rollup_estimated_hours": row["rollup_estimated_hours"],
+                "rollup_progress_percentage": row["rollup_progress_percentage"],
                 "baseline_start_date": row["baseline_start_date"],
                 "baseline_end_date": row["baseline_end_date"],
                 "baseline_estimated_hours": row["baseline_estimated_hours"],

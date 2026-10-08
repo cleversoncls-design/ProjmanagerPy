@@ -124,7 +124,7 @@ def build_tasks_workbook(session: Session, project: Project) -> bytes:
                 row["rollup_end_date"] or task.planned_end_date,
                 resources_label,
                 predecessors_label,
-                _num(task.progress_percentage),
+                _num(row["rollup_progress_percentage"] if row["rollup_progress_percentage"] is not None else task.progress_percentage),
                 _num(row["planned_percent_complete"]),
                 _num(row["spi"]),
                 _num(row["cpi"]),

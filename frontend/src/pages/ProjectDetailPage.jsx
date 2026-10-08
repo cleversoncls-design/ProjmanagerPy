@@ -1484,7 +1484,9 @@ function TasksTab({ projectId, canWrite, onTaskCreated }) {
       key: 'progress_percentage',
       header: t('% realizado'),
       align: 'right',
-      render: (row) => formatPercent(row.progress_percentage),
+      // Tarefa-pai mostra o agregado das filhas (rollup, ponderado por horas):
+      // o backend nunca grava % Realizado numa tarefa-pai.
+      render: (row) => formatPercent(row.rollup_progress_percentage ?? row.progress_percentage),
     },
     planned_percent_complete: {
       key: 'planned_percent_complete',
@@ -2865,7 +2867,7 @@ function GanttTab({ projectId, project }) {
       const start = ganttStart(task)
       const end = ganttEnd(task)
       const color = resolveGanttColor(TASK_TYPE_COLORS[task.task_type] || 'var(--text-muted)')
-      const progress = Math.min(100, Math.max(0, Number(task.progress_percentage) || 0))
+      const progress = Math.min(100, Math.max(0, Number(task.rollup_progress_percentage ?? task.progress_percentage) || 0))
       const progressColor = progress >= 100 ? progressGood : progress > 0 ? progressWarning : null
 
       ctx.strokeStyle = border
@@ -3026,7 +3028,7 @@ function GanttTab({ projectId, project }) {
               const color = TASK_TYPE_COLORS[task.task_type] || 'var(--text-muted)'
               const preds = predecessorCount[task.id] || 0
               const isParentTask = parentTaskIds.has(task.id)
-              const progress = Math.min(100, Math.max(0, Number(task.progress_percentage) || 0))
+              const progress = Math.min(100, Math.max(0, Number(task.rollup_progress_percentage ?? task.progress_percentage) || 0))
               const progressColor = progress >= 100 ? 'var(--status-good)' : progress > 0 ? 'var(--status-warning)' : null
               return (
                 // Sem "items-center" aqui de propósito: com ele, a coluna
