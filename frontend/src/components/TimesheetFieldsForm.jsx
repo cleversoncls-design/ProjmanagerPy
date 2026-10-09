@@ -174,13 +174,13 @@ export default function TimesheetFieldsForm({
           <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 rounded-lg border border-[var(--border)] px-3 py-2 sm:grid-cols-2">
             {Object.entries(labels.REWORK_REASON_LABELS).map(([value, label]) => (
               <label key={value} className="flex items-center gap-1.5 text-sm text-[var(--text-secondary)]">
-                <input type="checkbox" checked={(form.rework_reasons || []).includes(value)} onChange={() => onToggleReworkReason?.(value)} />
+                <input type="radio" name="rework_reason" checked={(form.rework_reasons || [])[0] === value} onChange={() => onToggleReworkReason?.(value)} />
                 {label}
               </label>
             ))}
           </div>
           {(form.rework_reasons || []).length === 0 && (
-            <span className="mt-1 block text-xs text-[var(--status-critical)]">{t('Obrigatório — selecione ao menos um motivo de retrabalho.')}</span>
+            <span className="mt-1 block text-xs text-[var(--status-critical)]">{t('Obrigatório — selecione o motivo do retrabalho (apenas um).')}</span>
           )}
         </FormField>
       )}

@@ -267,6 +267,11 @@ def _validate_rework(data: TimesheetCreate, task: Task | None, user: User) -> No
     if classification == WorkClassification.REWORK:
         if not data.rework_reasons:
             raise HTTPException(status_code=422, detail=translate("Selecione ao menos um motivo de retrabalho", user.language))
+        # Um apontamento de retrabalho tem UM único motivo (regra pedida pelo
+        # usuário). Registros antigos com vários motivos continuam legíveis;
+        # ao editar, precisam ficar com um só.
+        if len(set(data.rework_reasons)) > 1:
+            raise HTTPException(status_code=422, detail=translate("Selecione apenas um motivo de retrabalho", user.language))
     elif data.rework_reasons:
         raise HTTPException(
             status_code=422,

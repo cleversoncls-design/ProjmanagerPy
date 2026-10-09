@@ -57,7 +57,8 @@ export function entryToTimesheetForm(entry, tasksById) {
     absence_type: entry.absence_type || '',
     task_progress_percentage: entry.task_progress_percentage ?? '',
     work_classification: entry.work_classification || 'NORMAL',
-    rework_reasons: entry.rework_reasons || [],
+    // Registros antigos podiam ter vários motivos; o formulário trabalha com um só.
+    rework_reasons: (entry.rework_reasons || []).slice(0, 1),
     start_time: entry.start_time ? entry.start_time.slice(0, 5) : '',
     end_time: entry.end_time ? entry.end_time.slice(0, 5) : '',
     break_minutes: minutesToHM(entry.break_minutes),
@@ -111,14 +112,11 @@ export function applyExclusiveTimesheetField(prev, field, value, tasksById) {
   return { ...prev, [field]: value }
 }
 
-/** Marca/desmarca um motivo de retrabalho (lista de múltipla escolha) —
- * separado de `applyExclusiveTimesheetField` porque não é um campo de
- * valor único; usado pelo checklist de "Motivo do retrabalho" em
- * TimesheetFieldsForm.jsx. */
+/** Escolhe o motivo do retrabalho — um apontamento de retrabalho tem UM único
+ * motivo (escolha única, rádio em TimesheetFieldsForm.jsx). Guardado como
+ * lista de um item porque é o formato da API (`rework_reasons`). */
 export function toggleReworkReason(form, reason) {
-  const current = form.rework_reasons || []
-  const next = current.includes(reason) ? current.filter((r) => r !== reason) : [...current, reason]
-  return { ...form, rework_reasons: next }
+  return { ...form, rework_reasons: [reason] }
 }
 
 /** Pedido do usuário: projeto selecionado sem tarefa e sem Traslado deixou

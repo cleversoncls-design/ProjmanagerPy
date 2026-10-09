@@ -2548,9 +2548,23 @@ def test_timesheet_rework_requires_at_least_one_reason(client, setup):
         },
         headers=consultant_headers,
     )
+    # Retrabalho aceita um único motivo.
+    assert with_reason.status_code == 422
+    with_reason = client.post(
+        "/timesheets",
+        json={
+            "task_id": task["id"],
+            "date": "2026-08-27",
+            "start_time": "09:00",
+            "end_time": "10:00",
+            "work_classification": "REWORK",
+            "rework_reasons": ["PRODUCT_ERROR"],
+        },
+        headers=consultant_headers,
+    )
     assert with_reason.status_code == 201
     assert with_reason.json()["work_classification"] == "REWORK"
-    assert sorted(with_reason.json()["rework_reasons"]) == ["CONSULTANT_CHANGE", "PRODUCT_ERROR"]
+    assert with_reason.json()["rework_reasons"] == ["PRODUCT_ERROR"]
 
     # Normal (padrão quando omitido) não aceita motivo nenhum.
     normal_with_reason = client.post(

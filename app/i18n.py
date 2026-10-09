@@ -141,6 +141,7 @@ _ES: dict[str, str] = {
     "% de Avanço da Tarefa só é aceito em apontamento de tarefa do projeto": (
         "El % de Avance de la Tarea solo se acepta en un registro de horas de tarea del proyecto"
     ),
+    "Selecione apenas um motivo de retrabalho": "Seleccione solo un motivo de retrabajo",
     "Selecione ao menos um motivo de retrabalho": "Seleccione al menos un motivo de retrabajo",
     "Motivo de retrabalho só é aceito quando o apontamento é classificado como Retrabalho": (
         "El motivo de retrabajo solo se acepta cuando el registro está clasificado como Retrabajo"

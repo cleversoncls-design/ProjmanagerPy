@@ -1211,6 +1211,7 @@ export const es = {
   'Comercial': 'Comercial',
   'Investimento': 'Inversión',
   // Tickets: anexos e indicadores.
+  'Obrigatório — selecione o motivo do retrabalho (apenas um).': 'Obligatorio — seleccione el motivo del retrabajo (solo uno).',
   'Vem ligado por padrão: desmarque para parar de receber convites.': 'Viene activado por defecto: desmarque para dejar de recibir invitaciones.',
   'Atendimento iniciado': 'Atención iniciada',
   'Atendimento finalizado': 'Atención finalizada',
