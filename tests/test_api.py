@@ -4483,6 +4483,14 @@ def test_ticket_create_numbering_and_visibility(client, setup, db_session):
     assert client.get("/tickets", headers=env["dev_headers"]).json() == []
     assert client.get(f"/tickets/{first['id']}", headers=env["dev_headers"]).status_code == 404
 
+    # Filtros por cliente e por projeto (e o nome do cliente na linha).
+    by_client = client.get("/tickets", params={"client_id": setup["client_a"].id}, headers=setup["admin_headers"]).json()
+    assert len(by_client) == 2 and by_client[0]["client_id"] == setup["client_a"].id
+    assert by_client[0]["client_name"]
+    assert client.get("/tickets", params={"client_id": setup["client_b"].id}, headers=setup["admin_headers"]).json() == []
+    assert len(client.get("/tickets", params={"project_id": setup["project_a"].id}, headers=setup["admin_headers"]).json()) == 2
+    assert client.get("/tickets", params={"project_id": setup["project_b"].id}, headers=setup["admin_headers"]).json() == []
+
     # Perfil do cliente não acessa.
     client_headers = auth_headers(client, setup["client_pm_a"].email)
     assert client.get("/tickets", headers=client_headers).status_code == 403

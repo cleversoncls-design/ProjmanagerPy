@@ -1616,6 +1616,8 @@ class TicketRead(BaseModel):
     project_id: str
     project_code: str
     project_name: str
+    client_id: str | None = None
+    client_name: str | None = None
     task_id: str | None
     task_wbs: str | None
     task_name: str | None

@@ -161,6 +161,8 @@ def _ticket_dict(ticket: Ticket, hours: tuple[Decimal, Decimal]) -> dict:
         "project_id": ticket.project_id,
         "project_code": ticket.project.code,
         "project_name": ticket.project.name,
+        "client_id": ticket.project.client_id,
+        "client_name": ticket.project.client.legal_name if ticket.project.client else None,
         "task_id": ticket.task_id,
         "task_wbs": task.wbs_code if task else None,
         "task_name": task.name if task else None,
@@ -330,6 +332,7 @@ def create_ticket(
 @router.get("/tickets", response_model=list[TicketRead])
 def list_tickets(
     project_id: str | None = None,
+    client_id: str | None = None,
     task_id: str | None = None,
     status_filter: TicketStatus | None = None,
     criticality: TicketCriticality | None = None,
@@ -353,6 +356,8 @@ def list_tickets(
         query = query.where(Ticket.assignee_id == user.id)
     if project_id:
         query = query.where(Ticket.project_id == project_id)
+    if client_id:
+        query = query.where(Project.client_id == client_id)
     if task_id:
         query = query.where(Ticket.task_id == task_id)
     if status_filter:

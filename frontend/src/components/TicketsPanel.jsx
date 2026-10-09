@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import * as ticketsApi from '../api/tickets'
 import * as projectsApi from '../api/projects'
 import * as tasksApi from '../api/tasks'
+import * as clientsApi from '../api/clients'
 import { useLanguage } from '../context/LanguageContext'
 import Card from './Card'
 import Button from './Button'
@@ -30,16 +31,33 @@ export default function TicketsPanel({ projectId = null }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [filters, setFilters] = useState({ scope: 'all', status_filter: '', criticality: '', open_only: true })
+  const [filters, setFilters] = useState({ scope: 'all', client_id: '', project_id: '', status_filter: '', criticality: '', open_only: true })
+  // Filtros por cliente e projeto (só na página geral; na aba do projeto o
+  // projeto já é fixo). As opções vêm da lista de projetos/clientes do perfil.
+  const [clients, setClients] = useState([])
+  const [projectOptions, setProjectOptions] = useState([])
   const [showNew, setShowNew] = useState(false)
   const [openTicketId, setOpenTicketId] = useState(null)
+
+  useEffect(() => {
+    if (projectId) return
+    clientsApi.listClients().then(setClients).catch(() => {})
+    projectsApi.listProjects().then(setProjectOptions).catch(() => {})
+  }, [projectId])
+
+  // Projetos do cliente escolhido (todos, se nenhum cliente foi escolhido).
+  const filteredProjects = useMemo(
+    () => (filters.client_id ? projectOptions.filter((project) => project.client_id === filters.client_id) : projectOptions),
+    [projectOptions, filters.client_id],
+  )
 
   function load() {
     setLoading(true)
     setError('')
     ticketsApi
       .listTickets({
-        project_id: projectId || undefined,
+        project_id: projectId || filters.project_id || undefined,
+        client_id: projectId ? undefined : filters.client_id || undefined,
         scope: filters.scope,
         status_filter: filters.status_filter || undefined,
         criticality: filters.criticality || undefined,
@@ -50,13 +68,22 @@ export default function TicketsPanel({ projectId = null }) {
       .finally(() => setLoading(false))
   }
 
-  useEffect(load, [projectId, filters.scope, filters.status_filter, filters.criticality, filters.open_only])
+  useEffect(load, [projectId, filters.client_id, filters.project_id, filters.scope, filters.status_filter, filters.criticality, filters.open_only])
 
   function updateFilter(field) {
     return (event) => {
       const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value
       setFilters((prev) => ({ ...prev, [field]: value }))
     }
+  }
+
+  // Trocar o cliente limpa o projeto escolhido se ele não for desse cliente.
+  function updateClientFilter(event) {
+    const clientId = event.target.value
+    setFilters((prev) => {
+      const keepProject = prev.project_id && (!clientId || projectOptions.find((project) => project.id === prev.project_id)?.client_id === clientId)
+      return { ...prev, client_id: clientId, project_id: keepProject ? prev.project_id : '' }
+    })
   }
 
   const columns = [
@@ -71,7 +98,12 @@ export default function TicketsPanel({ projectId = null }) {
       ),
     },
     { key: 'title', header: t('Título'), render: (row) => row.title },
-    ...(projectId ? [] : [{ key: 'project', header: t('Projeto'), nowrap: true, render: (row) => `${row.project_code}` }]),
+    ...(projectId
+      ? []
+      : [
+          { key: 'client', header: t('Cliente'), render: (row) => row.client_name || '—' },
+          { key: 'project', header: t('Projeto'), nowrap: true, render: (row) => `${row.project_code}` },
+        ]),
     {
       key: 'task',
       header: t('Tarefa'),
@@ -103,7 +135,31 @@ export default function TicketsPanel({ projectId = null }) {
           </Button>
         }
       >
-        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className={`mb-4 grid grid-cols-2 gap-3 ${projectId ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
+          {!projectId && (
+            <FormField label={t('Cliente')}>
+              <Select value={filters.client_id} onChange={updateClientFilter}>
+                <option value="">{t('Todos')}</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.legal_name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          )}
+          {!projectId && (
+            <FormField label={t('Projeto')}>
+              <Select value={filters.project_id} onChange={updateFilter('project_id')}>
+                <option value="">{t('Todos')}</option>
+                {filteredProjects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.code} — {project.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          )}
           <FormField label={t('Exibir')}>
             <Select value={filters.scope} onChange={updateFilter('scope')}>
               <option value="all">{t('Tudo que posso ver')}</option>
