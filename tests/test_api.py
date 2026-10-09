@@ -4816,3 +4816,16 @@ def test_ticket_indicators(client, setup, db_session):
     assert client.get("/tickets-indicators", headers=env["pm_headers"]).json()["total_tickets"] == 3
     assert client.get("/tickets-indicators", headers=env["requester_headers"]).status_code == 403
     assert client.get("/tickets-indicators", headers=env["dev_headers"]).status_code == 403
+
+
+def test_ticket_list_by_project_shows_only_that_project(client, setup, db_session):
+    env = _ticket_env(client, setup, db_session)
+    ticket_a = _open_ticket(client, env, setup, title="No projeto A")
+    task_b = _create_task(client, setup["admin_headers"], setup["project_b"].id, name="Outra", wbs_code="1")
+    ticket_b = _open_ticket(client, env, setup, project_id=setup["project_b"].id, task_id=task_b["id"], title="No projeto B")
+
+    for headers in (setup["admin_headers"], env["pm_headers"], env["requester_headers"]):
+        only_a = client.get("/tickets", params={"project_id": setup["project_a"].id}, headers=headers).json()
+        assert [row["id"] for row in only_a] == [ticket_a["id"]]
+        only_b = client.get("/tickets", params={"project_id": setup["project_b"].id}, headers=headers).json()
+        assert [row["id"] for row in only_b] == [ticket_b["id"]]

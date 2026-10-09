@@ -27,7 +27,7 @@ function todayIso() {
 /** Lista de tickets internos (pendentes) + abertura + detalhe com histórico.
  * Usada na página "Tickets" (todos os projetos) e na aba "Tickets" de um
  * projeto (`projectId` fixo). Ver app/routers/tickets.py. */
-export default function TicketsPanel({ projectId = null }) {
+export default function TicketsPanel({ projectId = null, canCreate = true }) {
   const { t, labels } = useLanguage()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
@@ -133,9 +133,13 @@ export default function TicketsPanel({ projectId = null }) {
       <Card
         title={t('Tickets (pendentes)')}
         action={
-          <Button onClick={() => setShowNew(true)}>
-            <PlusIcon size={15} /> {t('Novo ticket')}
-          </Button>
+          canCreate ? (
+            <Button onClick={() => setShowNew(true)}>
+              <PlusIcon size={15} /> {t('Novo ticket')}
+            </Button>
+          ) : (
+            <span className="text-xs text-[var(--text-muted)]">{t('Projeto concluído, cancelado ou modelo: não aceita novos tickets.')}</span>
+          )
         }
       >
         <div className={`mb-4 grid grid-cols-2 gap-3 ${projectId ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>

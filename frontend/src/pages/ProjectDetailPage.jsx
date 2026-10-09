@@ -160,7 +160,9 @@ export default function ProjectDetailPage() {
       {tab === 'tasks' && <TasksTab projectId={projectId} canWrite={canWrite} onTaskCreated={loadProject} />}
       {tab === 'gantt' && <GanttTab projectId={projectId} project={project} />}
       {tab === 'resources' && <ProjectResourcesTab projectId={projectId} canWrite={canWrite} />}
-      {tab === 'tickets' && canWrite && <TicketsPanel projectId={projectId} />}
+      {tab === 'tickets' && canWrite && (
+        <TicketsPanel projectId={projectId} canCreate={!['COMPLETED', 'CANCELLED', 'MODELO'].includes(project.status)} />
+      )}
       {tab === 'legacy' && canWrite && <LegacyConsumptionTab projectId={projectId} onChanged={refreshNumbers} />}
 
       {showEditModal && (

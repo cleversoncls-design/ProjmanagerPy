@@ -1211,6 +1211,7 @@ export const es = {
   'Comercial': 'Comercial',
   'Investimento': 'Inversión',
   // Tickets: anexos e indicadores.
+  'Projeto concluído, cancelado ou modelo: não aceita novos tickets.': 'Proyecto concluido, cancelado o modelo: no acepta nuevos tickets.',
   'Dashboard Tickets': 'Dashboard Tickets',
   'Indicadores dos tickets internos: criticidade, tempo de espera, horas gastas e carga por responsável.': 'Indicadores de los tickets internos: criticidad, tiempo de espera, horas dedicadas y carga por responsable.',
   'Anexos (opcional)': 'Adjuntos (opcional)',
