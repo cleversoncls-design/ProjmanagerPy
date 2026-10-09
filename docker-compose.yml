@@ -25,11 +25,58 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-projmanager}
       POSTGRES_USER: ${POSTGRES_USER:-projmanager}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:?Defina JWT_SECRET_KEY no arquivo .env (ex.: openssl rand -hex 32)}"
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-480}
+      # Opcional (sem `:?`, de propósito) — ao contrário da JWT_SECRET_KEY,
+      # não exige redeploy imediato de quem já tinha o sistema no ar antes
+      # desta funcionalidade existir. Só é necessária quando alguém de
+      # fato for salvar uma senha de SMTP na tela Configurações > E-mail
+      # (ver app/crypto.py) — até lá, o sistema sobe normalmente sem ela.
+      EMAIL_CREDENTIALS_ENCRYPTION_KEY: ${EMAIL_CREDENTIALS_ENCRYPTION_KEY:-}
+      # Fuso em que valem os horários da Agenda de consultores nos convites de
+      # calendário (.ics) — padrão America/Asuncion (ver app/ics.py).
+      APP_TIMEZONE: ${APP_TIMEZONE:-America/Asuncion}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-0}
+      RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
+      # Pasta dos anexos dos tickets (montada no volume uploads_data).
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - uploads_data:/app/uploads
     ports:
       - "${API_PORT:-3035}:8000"
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        # Deixe VITE_API_BASE_URL vazia (padrão) — o frontend chama "/api"
+        # no mesmo host:porta usado pra abrir a página, e o nginx deste
+        # serviço repassa internamente pro serviço "api" (ver
+        # frontend/nginx.conf). Só uma porta (WEB_PORT) precisa ficar
+        # acessível de fora; API_PORT continua existindo só pra acesso
+        # direto à API (curl, Swagger) sem passar pelo frontend. Preencha
+        # VITE_API_BASE_URL apenas se a API morar num host diferente deste
+        # docker-compose. Qualquer mudança aqui é gravada dentro do JS
+        # estático no build, então exige reconstruir a imagem:
+        # docker compose build web && docker compose up -d web
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+    container_name: projmanager-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3036}:80"
+    depends_on:
+      - api
 
 volumes:
   postgres_data:
+  uploads_data:
