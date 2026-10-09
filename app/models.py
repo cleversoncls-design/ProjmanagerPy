@@ -20,6 +20,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     false,
+    true,
     func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -700,11 +701,11 @@ class Resource(Base):
     # deste recurso — opcional; sem ele, o recálculo de cronograma usa o
     # calendário do projeto/calendar_id informado explicitamente na chamada.
     calendar_id: Mapped[str | None] = mapped_column(ForeignKey("calendars.id", ondelete="SET NULL"))
-    # Convite de calendário por e-mail (Agenda → Google Calendar): cada
-    # consultor liga/desliga pra si mesmo (menu do avatar → "Meu Google
-    # Calendar"). `calendar_invite_email` é o endereço da conta Google, quando
+    # Convite de calendário por e-mail (Agenda → Google Calendar): vem LIGADO
+    # por padrão (migração 0037) e cada consultor pode desligar pra si mesmo
+    # (menu do avatar → "Meu Google Calendar"). `calendar_invite_email` é o endereço da conta Google, quando
     # diferente do e-mail de login; vazio = usa o e-mail do usuário.
-    calendar_invite_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    calendar_invite_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
     calendar_invite_email: Mapped[str | None] = mapped_column(String(255))
     __table_args__ = (CheckConstraint("level IS NULL OR level BETWEEN 1 AND 4", name="ck_resource_level_range"),)
     user: Mapped[User] = relationship(back_populates="resource")

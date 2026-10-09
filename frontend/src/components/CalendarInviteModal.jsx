@@ -86,6 +86,7 @@ export default function CalendarInviteModal({ initial, onClose, onSaved }) {
         </FormField>
 
         <p className="text-xs text-[var(--text-muted)]">
+          {t('Vem ligado por padrão: desmarque para parar de receber convites.')}{' '}
           {t('Vale só para agendamentos novos ou alterados a partir de agora; os que já existem não são reenviados.')}
         </p>
 

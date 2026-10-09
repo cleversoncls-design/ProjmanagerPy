@@ -3879,7 +3879,7 @@ def test_calendar_invite_settings_are_self_service_and_need_a_resource(client, s
     current = client.get("/resources/me/calendar-invite", headers=consultant_headers)
     assert current.status_code == 200
     assert current.json() == {
-        "enabled": False,
+        "enabled": True,  # ligado por padrão (migração 0037)
         "email": None,
         "default_email": setup["consultant"].email,
         "email_service_ready": False,
@@ -3983,6 +3983,13 @@ def test_schedule_without_invite_keeps_plain_email_and_no_cancel(client, setup, 
         json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
         headers=admin_headers,
     ).json()
+    # O consultor desliga o convite ("Meu Google Calendar").
+    off = client.put(
+        "/resources/me/calendar-invite",
+        json={"enabled": False, "email": None},
+        headers=auth_headers(client, setup["consultant"].email),
+    )
+    assert off.status_code == 200 and off.json()["enabled"] is False
 
     _FakeSmtpConnection.instances = []
     monkeypatch.setattr("app.email_service.smtplib.SMTP", _FakeSmtpConnection)
@@ -4006,6 +4013,40 @@ def test_schedule_without_invite_keeps_plain_email_and_no_cancel(client, setup, 
     _FakeSmtpConnection.instances = []
     assert client.delete(f"/resource-schedules/{created.json()['id']}", headers=admin_headers).status_code == 204
     assert _FakeSmtpConnection.instances == []
+
+
+def test_schedule_sends_calendar_invite_by_default(client, setup, monkeypatch):
+    """Sem o consultor ter mexido em nada, o agendamento já leva o convite
+    (.ics) no e-mail; remarcar reenvia e excluir cancela."""
+    admin_headers = setup["admin_headers"]
+    _enable_smtp(client, admin_headers)
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+
+    _FakeSmtpConnection.instances = []
+    monkeypatch.setattr("app.email_service.smtplib.SMTP", _FakeSmtpConnection)
+
+    created = client.post(
+        "/resource-schedules",
+        json={
+            "resource_id": resource["id"],
+            "project_id": setup["project_a"].id,
+            "date": "2026-10-08",
+            "start_time": "08:00",
+            "end_time": "12:00",
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    assert len(_FakeSmtpConnection.instances) == 1
+    assert _calendar_parts(_FakeSmtpConnection.instances[0].sent[2])["calendar"] is not None
+
+    _FakeSmtpConnection.instances = []
+    assert client.delete(f"/resource-schedules/{created.json()['id']}", headers=admin_headers).status_code == 204
+    assert len(_FakeSmtpConnection.instances) == 1  # METHOD:CANCEL
 
 
 def test_calendar_invite_test_endpoint_sends_a_real_invite(client, setup, monkeypatch):
