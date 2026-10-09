@@ -113,10 +113,13 @@ export function applyExclusiveTimesheetField(prev, field, value, tasksById) {
 }
 
 /** Escolhe o motivo do retrabalho — um apontamento de retrabalho tem UM único
- * motivo (escolha única, rádio em TimesheetFieldsForm.jsx). Guardado como
- * lista de um item porque é o formato da API (`rework_reasons`). */
+ * motivo: marcar uma caixa desmarca a que estava marcada; clicar de novo na
+ * marcada desmarca (fica sem motivo e o formulário avisa que é obrigatório).
+ * Guardado como lista de um item porque é o formato da API
+ * (`rework_reasons`). */
 export function toggleReworkReason(form, reason) {
-  return { ...form, rework_reasons: [reason] }
+  const current = form.rework_reasons || []
+  return { ...form, rework_reasons: current.length === 1 && current[0] === reason ? [] : [reason] }
 }
 
 /** Pedido do usuário: projeto selecionado sem tarefa e sem Traslado deixou
