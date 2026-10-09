@@ -35,10 +35,6 @@ export function changeTicketCriticality(ticketId, payload) {
   return api.post(`/tickets/${ticketId}/criticality`, payload)
 }
 
-export function logTicketTime(ticketId, payload) {
-  return api.post(`/tickets/${ticketId}/time`, payload)
-}
-
 /** Cronômetro de atendimento (servidor): iniciar / finalizar (gera o
  * apontamento com a hora final do momento) / descartar. */
 export function startTicketWork(ticketId) {

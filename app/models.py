@@ -281,6 +281,7 @@ class TicketInteractionKind(StrEnum):
     STATUS = "STATUS"
     CRITICALITY = "CRITICALITY"
     TIME = "TIME"  # horas apontadas na tarefa a partir do ticket
+    WORK_STARTED = "WORK_STARTED"  # "Iniciar atendimento" (data/hora no created_at)
 
 
 class ResourceFunction(StrEnum):

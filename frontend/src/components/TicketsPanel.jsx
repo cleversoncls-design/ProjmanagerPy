@@ -3,7 +3,6 @@ import * as ticketsApi from '../api/tickets'
 import * as projectsApi from '../api/projects'
 import * as tasksApi from '../api/tasks'
 import * as clientsApi from '../api/clients'
-import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import Card from './Card'
 import Button from './Button'
@@ -19,11 +18,6 @@ import { formatDateTime, formatHoursDuration, hmToMinutes } from '../utils/forma
 import { TICKET_CRITICALITY_TONE, TICKET_STATUS_TONE } from '../utils/labels'
 
 const CLOSED_PROJECT_STATUSES = ['COMPLETED', 'CANCELLED', 'MODELO']
-
-function todayIso() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-}
 
 /** Lista de tickets internos (pendentes) + abertura + detalhe com histórico.
  * Usada na página "Tickets" (todos os projetos) e na aba "Tickets" de um
@@ -385,33 +379,28 @@ const CRITICALITY_HINTS = {
   CRITICAL: 'interrupção total do serviço / bloqueio geral',
 }
 
+// Confirmar a solução: o solicitante ou o gerente fecha um ticket que já está
+// em atendimento (ou resolvido, nos tickets antigos). Não exige mensagem.
+function confirmsResolution(ticket, target) {
+  return target === 'CLOSED' && ['IN_PROGRESS', 'WAITING_REQUESTER', 'RESOLVED'].includes(ticket.status)
+}
+
 // Mensagem obrigatória nestas mudanças de status (espelha tickets.py).
-function statusNeedsMessage(ticket, target, userId) {
-  if (target === 'WAITING_REQUESTER' || target === 'RESOLVED') return true
+function statusNeedsMessage(ticket, target) {
   if (target === 'IN_PROGRESS' && (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')) return true
-  if (target === 'CLOSED' && ticket.status !== 'RESOLVED' && !requesterConfirms(ticket, target, userId)) return true
+  if (target === 'CLOSED' && !confirmsResolution(ticket, target)) return true
   return false
 }
 
-// O solicitante confirmando a solução com o ticket ainda em atendimento.
-function requesterConfirms(ticket, target, userId) {
-  return target === 'CLOSED' && ticket.requester_id === userId && (ticket.status === 'IN_PROGRESS' || ticket.status === 'WAITING_REQUESTER')
-}
-
-function statusActionLabel(ticket, target, t, userId) {
-  if (requesterConfirms(ticket, target, userId)) return t('Confirmar como resolvido e fechar')
-  if (target === 'IN_PROGRESS' && ticket.status === 'ASSIGNED') return t('Iniciar atendimento')
+function statusActionLabel(ticket, target, t) {
+  if (confirmsResolution(ticket, target)) return t('Confirmar como resolvido e fechar')
   if (target === 'IN_PROGRESS' && ticket.status === 'WAITING_REQUESTER') return t('Voltar ao atendimento')
   if (target === 'IN_PROGRESS') return t('Reabrir (não resolvido)')
-  if (target === 'WAITING_REQUESTER') return t('Pedir informação ao solicitante')
-  if (target === 'RESOLVED') return t('Marcar como resolvido')
-  if (target === 'CLOSED' && ticket.status === 'RESOLVED') return t('Confirmar solução e fechar')
   return t('Encerrar / cancelar ticket')
 }
 
 function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) {
   const { t, labels } = useLanguage()
-  const { user } = useAuth()
   const [ticket, setTicket] = useState(null)
   const [assignees, setAssignees] = useState([])
   const [loading, setLoading] = useState(true)
@@ -430,7 +419,6 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
   const [assigneeId, setAssigneeId] = useState('')
   const [newCriticality, setNewCriticality] = useState('')
   const [message, setMessage] = useState('')
-  const [timeForm, setTimeForm] = useState({ date: todayIso(), start_time: '', end_time: '', break_time: '00:00', description: '' })
 
   useEffect(() => {
     ticketsApi
@@ -503,9 +491,8 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
   const statusAction = action && typeof action === 'object' ? action.status : null
   const workSession = ticket.my_work_session
   const elapsedSeconds = workSession ? workSession.elapsed_seconds + Math.max(0, Math.floor((now - receivedAt.current) / 1000)) : 0
-  // "Iniciar atendimento" (cronômetro) substitui o botão de status de mesmo nome
-  // para quem pode apontar tempo.
-  const statusTargets = ticket.allowed_statuses.filter((target) => !(target === 'IN_PROGRESS' && ticket.status === 'ASSIGNED' && ticket.can_log_time))
+  // "Iniciar atendimento" (cronômetro) já move o ticket para Em atendimento.
+  const statusTargets = ticket.allowed_statuses.filter((target) => !(target === 'IN_PROGRESS' && ticket.status === 'ASSIGNED'))
 
   return (
     <Modal title={`${ticket.code} — ${ticket.title}`} onClose={onClose} wide>
@@ -547,11 +534,6 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
                 {t('Iniciar atendimento')}
               </Button>
             )}
-            {ticket.can_log_time && (
-              <Button variant="secondary" onClick={() => openAction('time')}>
-                {t('Apontar tempo manualmente')}
-              </Button>
-            )}
             {ticket.can_change_criticality && (
               <Button
                 variant="secondary"
@@ -575,10 +557,10 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
             {statusTargets.map((target) => (
               <Button
                 key={target}
-                variant={target === 'CLOSED' && (ticket.status === 'RESOLVED' || requesterConfirms(ticket, target, user?.id)) ? 'primary' : 'secondary'}
+                variant={confirmsResolution(ticket, target) ? 'primary' : 'secondary'}
                 onClick={() => openAction({ status: target })}
               >
-                {statusActionLabel(ticket, target, t, user?.id)}
+                {statusActionLabel(ticket, target, t)}
               </Button>
             ))}
           </div>
@@ -674,61 +656,18 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
         )}
 
         {statusAction && (
-          <ActionBox title={statusActionLabel(ticket, statusAction, t, user?.id)} onCancel={() => setAction(null)}>
+          <ActionBox title={statusActionLabel(ticket, statusAction, t)} onCancel={() => setAction(null)}>
             <FormField
-              label={statusNeedsMessage(ticket, statusAction, user?.id) ? t('Mensagem') : t('Mensagem (opcional)')}
-              required={statusNeedsMessage(ticket, statusAction, user?.id)}
+              label={statusNeedsMessage(ticket, statusAction) ? t('Mensagem') : t('Mensagem (opcional)')}
+              required={statusNeedsMessage(ticket, statusAction)}
             >
               <TextArea rows={3} value={message} onChange={(event) => setMessage(event.target.value)} />
             </FormField>
             <Button
-              disabled={busy || (statusNeedsMessage(ticket, statusAction, user?.id) && !message.trim())}
+              disabled={busy || (statusNeedsMessage(ticket, statusAction) && !message.trim())}
               onClick={() => run(() => ticketsApi.changeTicketStatus(ticket.id, { status: statusAction, message }))}
             >
               {t('Confirmar')}
-            </Button>
-          </ActionBox>
-        )}
-
-        {action === 'time' && (
-          <ActionBox title={t('Apontar tempo neste ticket')} onCancel={() => setAction(null)}>
-            <p className="text-xs text-[var(--text-muted)]">
-              {t('Cria um apontamento de horas na tarefa do ticket (pendente de aprovação), como o apontamento normal.')}
-            </p>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              <FormField label={t('Data')} required>
-                <TextInput type="date" value={timeForm.date} onChange={(event) => setTimeForm((prev) => ({ ...prev, date: event.target.value }))} />
-              </FormField>
-              <FormField label={t('Hora início')} required>
-                <TextInput type="time" value={timeForm.start_time} onChange={(event) => setTimeForm((prev) => ({ ...prev, start_time: event.target.value }))} />
-              </FormField>
-              <FormField label={t('Hora fim')} required>
-                <TextInput type="time" value={timeForm.end_time} onChange={(event) => setTimeForm((prev) => ({ ...prev, end_time: event.target.value }))} />
-              </FormField>
-              <FormField label={t('Intervalo')}>
-                <TextInput type="time" value={timeForm.break_time} onChange={(event) => setTimeForm((prev) => ({ ...prev, break_time: event.target.value }))} />
-              </FormField>
-            </div>
-            <FormField label={t('O que foi feito')}>
-              <TextArea rows={2} value={timeForm.description} onChange={(event) => setTimeForm((prev) => ({ ...prev, description: event.target.value }))} />
-            </FormField>
-            <Button
-              disabled={busy || !timeForm.date || !timeForm.start_time || !timeForm.end_time}
-              onClick={() =>
-                run(async () => {
-                  const updated = await ticketsApi.logTicketTime(ticket.id, {
-                    date: timeForm.date,
-                    start_time: timeForm.start_time,
-                    end_time: timeForm.end_time,
-                    break_minutes: hmToMinutes(timeForm.break_time),
-                    description: timeForm.description || null,
-                  })
-                  setTimeForm((prev) => ({ ...prev, start_time: '', end_time: '', break_time: '00:00', description: '' }))
-                  return updated
-                })
-              }
-            >
-              {t('Registrar tempo')}
             </Button>
           </ActionBox>
         )}
@@ -787,7 +726,7 @@ function formatClock(totalSeconds) {
 // Interações sem texto e sem arquivo (direcionou, mudou status/criticidade)
 // aparecem como um aviso centralizado; as demais viram "balões" de conversa.
 function isEvent(item) {
-  return ['ASSIGNMENT', 'STATUS', 'CRITICALITY'].includes(item.kind) && !item.message
+  return item.kind === 'WORK_STARTED' || (['ASSIGNMENT', 'STATUS', 'CRITICALITY'].includes(item.kind) && !item.message)
 }
 
 /** Histórico em formato de conversa: o solicitante de um lado (balão azul
@@ -850,8 +789,10 @@ function interactionTitle(item, labels, t) {
       return `${t('Status')}: ${labels.TICKET_STATUS_LABELS[item.from_value] || item.from_value} → ${labels.TICKET_STATUS_LABELS[item.to_value] || item.to_value}`
     case 'CRITICALITY':
       return `${t('Criticidade')}: ${labels.TICKET_CRITICALITY_LABELS[item.from_value] || item.from_value} → ${labels.TICKET_CRITICALITY_LABELS[item.to_value] || item.to_value}`
+    case 'WORK_STARTED':
+      return t('Atendimento iniciado')
     case 'TIME':
-      return `${t('Tempo apontado')}: ${formatHoursDuration(item.to_value)} (${item.from_value})`
+      return `${t('Atendimento finalizado')} — ${t('apontado')}: ${formatHoursDuration(item.to_value)} (${item.from_value})`
     default:
       return t('Comentário')
   }

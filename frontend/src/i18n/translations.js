@@ -1211,6 +1211,9 @@ export const es = {
   'Comercial': 'Comercial',
   'Investimento': 'Inversión',
   // Tickets: anexos e indicadores.
+  'Atendimento iniciado': 'Atención iniciada',
+  'Atendimento finalizado': 'Atención finalizada',
+  'apontado': 'registrado',
   'Confirmar como resolvido e fechar': 'Confirmar como resuelto y cerrar',
   'Apontar tempo manualmente': 'Registrar tiempo manualmente',
   'Você já tem um atendimento em andamento no ticket': 'Ya tiene una atención en curso en el ticket',

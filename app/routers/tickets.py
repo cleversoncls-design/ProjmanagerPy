@@ -66,7 +66,6 @@ from ..schemas import (
     TicketIndicators,
     TicketRead,
     TicketStatusChange,
-    TicketTimeEntry,
     TicketWorkFinish,
     TimesheetCreate,
 )
@@ -162,24 +161,24 @@ def _allowed_statuses(ticket: Ticket, user: User) -> list[TicketStatus]:
     assignee = ticket.assignee_id == user.id
     requester = ticket.requester_id == user.id
     allowed: set[TicketStatus] = set()
-    if assignee or manager:
-        if current == _S.ASSIGNED:
-            allowed.add(_S.IN_PROGRESS)
-        elif current == _S.IN_PROGRESS:
-            allowed |= {_S.WAITING_REQUESTER, _S.RESOLVED}
-        elif current == _S.WAITING_REQUESTER:
-            allowed |= {_S.IN_PROGRESS, _S.RESOLVED}
+    # O responsável não marca "pedir informação" nem "resolvido": começa o
+    # atendimento (pelo cronômetro, que move ASSIGNED -> IN_PROGRESS) e se
+    # comunica pelas interações. Quem confirma a solução (e fecha) é o
+    # solicitante ou o gerente do projeto. WAITING_REQUESTER/RESOLVED só
+    # existem em tickets antigos; deles ainda dá para sair.
+    if assignee and current in (_S.ASSIGNED, _S.WAITING_REQUESTER):
+        allowed.add(_S.IN_PROGRESS)
+    if manager and current == _S.WAITING_REQUESTER:
+        allowed.add(_S.IN_PROGRESS)
     if requester or manager:
+        if current in (_S.IN_PROGRESS, _S.WAITING_REQUESTER, _S.RESOLVED):
+            allowed.add(_S.CLOSED)  # confirma que foi resolvido
         if current == _S.RESOLVED:
-            allowed |= {_S.CLOSED, _S.IN_PROGRESS}
-    if requester and current in (_S.IN_PROGRESS, _S.WAITING_REQUESTER):
-        # O solicitante recebeu o retorno e confirma que resolveu: fecha o
-        # ticket direto, sem esperar o responsável marcar "Resolvido".
-        allowed.add(_S.CLOSED)
+            allowed.add(_S.IN_PROGRESS)  # reabre: não resolveu
     if manager:
-        if current != _S.CLOSED:
-            allowed.add(_S.CLOSED)  # cancelamento / encerramento pelo gerente
-        else:
+        if current in (_S.OPEN, _S.ASSIGNED):
+            allowed.add(_S.CLOSED)  # cancelamento antes do atendimento
+        elif current == _S.CLOSED:
             allowed.add(_S.IN_PROGRESS)  # reabertura pelo gerente
     # ordem estável (a do enum)
     return [status_ for status_ in TicketStatus if status_ in allowed and status_ != current]
@@ -276,7 +275,7 @@ def _detail(db: Session, ticket: Ticket, user: User) -> dict:
     payload["allowed_statuses"] = _allowed_statuses(ticket, user)
     payload["can_assign"] = manager and open_ticket
     payload["can_comment"] = open_ticket and _can_view(ticket, user)
-    payload["can_log_time"] = open_ticket and (ticket.assignee_id == user.id or user.role in MANAGEMENT_ROLES)
+    payload["can_log_time"] = open_ticket and ticket.assignee_id == user.id
     payload["can_change_criticality"] = manager and open_ticket
     active = _active_session(db, user)
     payload["my_work_session"] = None
@@ -528,21 +527,21 @@ def change_ticket_status(
         raise HTTPException(status_code=422, detail=translate("Mudança de status não permitida para este ticket", user.language))
     message = (data.message or "").strip()
     # Pedir informação, concluir, reabrir e cancelar exigem explicação.
-    # Exceção: o solicitante confirmando a solução (ticket ainda em
-    # atendimento) fecha sem precisar de texto.
-    requester_confirms = (
-        data.status == _S.CLOSED
-        and ticket.requester_id == user.id
-        and ticket.status in (_S.IN_PROGRESS.value, _S.WAITING_REQUESTER.value)
+    # Confirmar a solução (solicitante ou gerente, ticket já em atendimento)
+    # fecha sem exigir texto; reabrir e cancelar antes do atendimento exigem.
+    confirms_resolution = data.status == _S.CLOSED and ticket.status in (
+        _S.IN_PROGRESS.value,
+        _S.WAITING_REQUESTER.value,
+        _S.RESOLVED.value,
     )
-    needs_message = data.status in (_S.WAITING_REQUESTER, _S.RESOLVED) or (
-        data.status == _S.IN_PROGRESS and ticket.status in (_S.RESOLVED.value, _S.CLOSED.value)
-    ) or (data.status == _S.CLOSED and ticket.status != _S.RESOLVED.value and not requester_confirms)
+    needs_message = (data.status == _S.IN_PROGRESS and ticket.status in (_S.RESOLVED.value, _S.CLOSED.value)) or (
+        data.status == _S.CLOSED and not confirms_resolution
+    )
     if needs_message and not message:
         raise HTTPException(status_code=422, detail=translate("Informe uma mensagem para esta mudança de status", user.language))
     interaction = _set_status(db, ticket, user, data.status, message)
-    if requester_confirms:
-        ticket.resolved_at = ticket.closed_at
+    if confirms_resolution:
+        ticket.resolved_at = ticket.resolved_at or ticket.closed_at
     record_audit(db, entity_type="ticket", entity_id=ticket.id, action=AuditAction.UPDATE, user_id=user.id, details={"status": data.status.value})
     db.commit()
     db.refresh(ticket)
@@ -608,36 +607,6 @@ def change_ticket_criticality(
     return _detail(db, ticket, user)
 
 
-@router.post("/tickets/{ticket_id}/time", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
-def log_time(
-    ticket_id: str,
-    data: TicketTimeEntry,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    """Apontamento de tempo feito de dentro do ticket: cria um Timesheet na
-    TAREFA do ticket (mesmas regras e aprovação do apontamento normal) e
-    registra a linha "tempo apontado" no histórico."""
-    _require_internal(user)
-    ticket = _get_ticket(db, ticket_id, user)
-    _require_time_permission(ticket, user)
-
-    _register_ticket_time(
-        db,
-        ticket,
-        user,
-        day=data.date,
-        start=data.start_time,
-        end=data.end_time,
-        break_minutes=data.break_minutes,
-        description=data.description,
-        progress=data.task_progress_percentage,
-    )
-    db.commit()
-    db.refresh(ticket)
-    return _detail(db, ticket, user)
-
-
 def _register_ticket_time(
     db: Session,
     ticket: Ticket,
@@ -652,8 +621,7 @@ def _register_ticket_time(
 ):
     """Cria o apontamento na TAREFA do ticket (Pendente de aprovação, mesmas
     regras do apontamento normal) e a linha "tempo apontado" no histórico;
-    ASSIGNED vira IN_PROGRESS. Não dá commit. Compartilhada pelo apontamento
-    manual e por "Finalizar atendimento"."""
+    ASSIGNED vira IN_PROGRESS. Não dá commit. Usada por "Finalizar atendimento"."""
     entry = create_timesheet_entry(
         TimesheetCreate(
             task_id=ticket.task_id,
@@ -694,6 +662,9 @@ def start_work(ticket_id: str, user: User = Depends(get_current_user), db: Sessi
     _require_internal(user)
     ticket = _get_ticket(db, ticket_id, user)
     _require_time_permission(ticket, user)
+    if ticket.assignee_id != user.id:
+        # O atendimento é de quem foi acionado; gerente acompanha e direciona.
+        raise HTTPException(status_code=403, detail=translate("Só o responsável pelo ticket pode apontar horas nele", user.language))
     if not db.scalar(select(Resource.id).where(Resource.user_id == user.id)):
         raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
     active = _active_session(db, user)
@@ -703,7 +674,10 @@ def start_work(ticket_id: str, user: User = Depends(get_current_user), db: Sessi
             status_code=422,
             detail=translate("Você já tem um atendimento em andamento no ticket {code}", user.language).format(code=other.code if other else "-"),
         )
-    db.add(TicketWorkSession(ticket_id=ticket.id, user_id=user.id, started_at=datetime.utcnow()))
+    started_at = datetime.utcnow()
+    db.add(TicketWorkSession(ticket_id=ticket.id, user_id=user.id, started_at=started_at))
+    # Registra no histórico a data/hora em que o atendimento começou.
+    _add_interaction(db, ticket, user, TicketInteractionKind.WORK_STARTED)
     if ticket.status == _S.ASSIGNED.value:
         _set_status(db, ticket, user, _S.IN_PROGRESS)
     db.commit()
