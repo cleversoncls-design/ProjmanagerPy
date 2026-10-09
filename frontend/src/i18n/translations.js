@@ -1223,6 +1223,9 @@ export const es = {
   'Referência (fora da análise): horas de ausência no período': 'Referencia (fuera del análisis): horas de ausencia en el período',
   'Retrabalho por motivo': 'Retrabajo por motivo',
   'Total de horas de projeto': 'Total de horas de proyecto',
+  // Página inicial do Consultor.
+  'Minha agenda': 'Mi agenda',
+  'O que está agendado para você, com feriados e ausências.': 'Lo que está programado para usted, con feriados y ausencias.',
   // Tickets: anexos e indicadores.
   'Obrigatório — selecione o motivo do retrabalho (apenas um).': 'Obligatorio — seleccione el motivo del retrabajo (solo uno).',
   'Vem ligado por padrão: desmarque para parar de receber convites.': 'Viene activado por defecto: desmarque para dejar de recibir invitaciones.',

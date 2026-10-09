@@ -113,7 +113,7 @@ export const KNOWLEDGE_REVIEW_ROLES = ['INTERNAL_PM', 'SERVICE_MANAGER', 'GENERA
 export const ROLE_HOME_PATH = {
   ADMIN: '/',
   INTERNAL_PM: '/projects',
-  CONSULTANT: '/timesheets',
+  CONSULTANT: '/',
   CLIENT_PM: '/projects',
   CLIENT_USER: '/no-access',
   SERVICE_MANAGER: '/',

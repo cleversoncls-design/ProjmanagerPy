@@ -78,6 +78,10 @@ export default function SchedulesPage() {
   const { user } = useAuth()
   const { labels, t, language } = useLanguage()
   const canManage = MANAGEMENT_ROLES.includes(user.role)
+  // "Minha agenda" (pedido do usuário): para o Consultor esta tela é a página
+  // inicial — mostra só os agendamentos do próprio usuário (sem filtro de
+  // Consultor), mais feriados e as ausências dele, somente leitura.
+  const mine = !canManage
 
   const [viewDate, setViewDate] = useState(() => {
     const now = new Date()
@@ -92,7 +96,12 @@ export default function SchedulesPage() {
   const [allTasks, setAllTasks] = useState([])
   const [schedules, setSchedules] = useState([])
   const [loading, setLoading] = useState(true)
+  const [resourcesLoaded, setResourcesLoaded] = useState(false)
   const [error, setError] = useState('')
+  // Ausências (Férias, Atestado...) do consultor selecionado no mês, por
+  // data -> tipo — só informativo na grade; quem bloqueia agendar em dia de
+  // ausência é o backend.
+  const [absencesByDate, setAbsencesByDate] = useState({})
   // Feriados do calendário padrão (pedido do usuário: mostrar na Agenda
   // como indisponíveis) — a Agenda não é de um projeto só (pode ter
   // agendamentos de vários projetos/recursos, cada um com seu próprio
@@ -118,8 +127,14 @@ export default function SchedulesPage() {
   // Tarefas de todos os projetos (mesmo padrão de TimesheetsPage.jsx)
   // alimentam o checklist "Tarefas" do agendamento (pedido do usuário).
   useEffect(() => {
-    resourcesApi.listResources().then(setResources).catch(() => {})
-    usersApi.listUsers().then(setUsers).catch(() => {})
+    resourcesApi
+      .listResources()
+      .then(setResources)
+      .catch(() => {})
+      .finally(() => setResourcesLoaded(true))
+    // Lista de usuários é só de gestão (GET /users); o Consultor usa o
+    // próprio nome (ver resourceOptions abaixo).
+    if (canManage) usersApi.listUsers().then(setUsers).catch(() => {})
     clientsApi.listClients().then(setClients).catch(() => {})
     projectsApi
       .listProjects()
@@ -149,9 +164,13 @@ export default function SchedulesPage() {
     () =>
       resources.map((resource) => ({
         ...resource,
-        userName: usersById[resource.user_id]?.name || resourceFunctionLevelLabel(resource, labels) || resource.id,
+        userName:
+          (resource.user_id === user.id ? user.name : null) ||
+          usersById[resource.user_id]?.name ||
+          resourceFunctionLevelLabel(resource, labels) ||
+          resource.id,
       })),
-    [resources, usersById, labels],
+    [resources, usersById, labels, user],
   )
   const resourcesById = useMemo(() => Object.fromEntries(resourceOptions.map((r) => [r.id, r])), [resourceOptions])
   const projectsById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects])
@@ -190,6 +209,13 @@ export default function SchedulesPage() {
   // simplesmente não aparecem nos dias do mês, sem trocar o formato da
   // tela.
   function loadSchedules() {
+    // Consultor: só carrega depois de descobrir o próprio recurso, para não
+    // piscar a agenda de todo mundo antes do filtro entrar.
+    if (mine && !filters.resource_id) {
+      setSchedules([])
+      setLoading(!resourcesLoaded)
+      return
+    }
     setLoading(true)
     setError('')
     schedulesApi
@@ -205,7 +231,28 @@ export default function SchedulesPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(loadSchedules, [viewDate, filters.resource_id, filters.client_id, filters.project_id])
+  useEffect(loadSchedules, [viewDate, filters.resource_id, filters.client_id, filters.project_id, resourcesLoaded])
+
+  // Ausências do consultor selecionado no período visível da grade.
+  useEffect(() => {
+    if (!filters.resource_id) {
+      setAbsencesByDate({})
+      return
+    }
+    timesheetsApi
+      .listTimesheets({
+        resource_id: filters.resource_id,
+        start: toIsoDate(monthCells[0]),
+        end: toIsoDate(monthCells[monthCells.length - 1]),
+        has_absence: true,
+      })
+      .then((rows) =>
+        setAbsencesByDate(
+          Object.fromEntries(rows.filter((row) => row.absence_type && row.status !== 'REJECTED').map((row) => [row.date, row.absence_type])),
+        ),
+      )
+      .catch(() => setAbsencesByDate({}))
+  }, [viewDate, filters.resource_id])
 
   const schedulesByDate = useMemo(() => {
     const map = {}
@@ -234,20 +281,29 @@ export default function SchedulesPage() {
 
   return (
     <div>
-      <PageHeader title={t('Agenda de consultores')} subtitle={t('Agendamento de recursos por projeto, dia e horário.')} />
+      <PageHeader
+        title={mine ? t('Minha agenda') : t('Agenda de consultores')}
+        subtitle={
+          mine
+            ? t('O que está agendado para você, com feriados e ausências.')
+            : t('Agendamento de recursos por projeto, dia e horário.')
+        }
+      />
 
       <Card className="mb-4">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <FormField label={t('Consultor')}>
-            <Select value={filters.resource_id} onChange={updateFilter('resource_id')}>
-              <option value="">{t('Todos')}</option>
-              {resourceOptions.map((resource) => (
-                <option key={resource.id} value={resource.id}>
-                  {resource.userName}
-                </option>
-              ))}
-            </Select>
-          </FormField>
+        <div className={`grid grid-cols-2 gap-3 ${mine ? 'md:grid-cols-4' : 'md:grid-cols-5'}`}>
+          {!mine && (
+            <FormField label={t('Consultor')}>
+              <Select value={filters.resource_id} onChange={updateFilter('resource_id')}>
+                <option value="">{t('Todos')}</option>
+                {resourceOptions.map((resource) => (
+                  <option key={resource.id} value={resource.id}>
+                    {resource.userName}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          )}
           <FormField label={t('Cliente')}>
             <Select value={filters.client_id} onChange={updateFilter('client_id')}>
               <option value="">{t('Todos')}</option>
@@ -332,6 +388,7 @@ export default function SchedulesPage() {
               const isToday = iso === toIsoDate(new Date())
               const holidayDescription = holidaysByDate[iso]
               const isHoliday = Boolean(holidayDescription)
+              const absenceType = absencesByDate[iso]
               // Feriado conta como indisponível pra agendar (pedido do
               // usuário) — some o "+" de criação rápida e não aceita
               // soltar um bloco arrastado nele, sem impedir visualizar os
@@ -389,6 +446,11 @@ export default function SchedulesPage() {
                   {isHoliday && (
                     <p className="truncate text-[10px] font-medium text-[var(--status-critical)]">{holidayDescription}</p>
                   )}
+                  {absenceType && (
+                    <p className="truncate text-[10px] font-medium text-[var(--status-warning)]">
+                      {labels.ABSENCE_TYPE_LABELS[absenceType] || absenceType}
+                    </p>
+                  )}
                   <div className="space-y-0.5">
                     {daySchedules.slice(0, 3).map((schedule) => {
                       const color = projectsById[schedule.project_id]?.color || DEFAULT_PROJECT_COLOR
@@ -411,7 +473,8 @@ export default function SchedulesPage() {
                           className={`block w-full truncate rounded px-1 py-0.5 text-left text-[10.5px] font-medium ${canManage ? 'cursor-grab active:cursor-grabbing' : ''}`}
                           style={{ backgroundColor: color, color: contrastTextColor(color) }}
                         >
-                          {formatTime(schedule.start_time)} {resourcesById[schedule.resource_id]?.userName || '—'}
+                          {formatTime(schedule.start_time)}{' '}
+                          {mine ? projectsById[schedule.project_id]?.code || '—' : resourcesById[schedule.resource_id]?.userName || '—'}
                         </button>
                       )
                     })}

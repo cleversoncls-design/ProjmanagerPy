@@ -42,6 +42,8 @@ import {
 // Consultor nunca vê a seção "Projetos").
 const NAV_SECTIONS = [
   { type: 'item', to: '/', label: 'Dashboard', end: true, icon: HomeIcon, roles: DASHBOARD_ROLES },
+  // Página inicial do Consultor (pedido do usuário): a própria agenda.
+  { type: 'item', to: '/', label: 'Minha agenda', end: true, icon: CalendarIcon, roles: ['CONSULTANT'] },
   {
     type: 'group',
     key: 'projetos',

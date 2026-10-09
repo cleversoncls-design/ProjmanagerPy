@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import DashboardPage from '../pages/DashboardPage'
+import SchedulesPage from '../pages/SchedulesPage'
 import { DASHBOARD_ROLES, ROLE_HOME_PATH } from '../utils/labels'
 
 /** "/" não pode ter `roles` num <ProtectedRoute> comum — quem for barrado
@@ -16,5 +17,7 @@ export default function HomeRoute() {
   // autenticado antes de chegar aqui.
   if (!user) return null
   if (DASHBOARD_ROLES.includes(user.role)) return <DashboardPage />
+  // Consultor: a página inicial é a própria agenda (pedido do usuário).
+  if (user.role === 'CONSULTANT') return <SchedulesPage />
   return <Navigate to={ROLE_HOME_PATH[user.role] || '/projects'} replace />
 }
