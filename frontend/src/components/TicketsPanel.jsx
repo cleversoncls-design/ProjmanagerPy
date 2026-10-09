@@ -3,7 +3,6 @@ import * as ticketsApi from '../api/tickets'
 import * as projectsApi from '../api/projects'
 import * as tasksApi from '../api/tasks'
 import * as clientsApi from '../api/clients'
-import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import Card from './Card'
 import Button from './Button'
@@ -13,11 +12,10 @@ import ErrorBanner from './ErrorBanner'
 import StatusPill from './StatusPill'
 import Table from './Table'
 import { FormField, TextInput, Select, TextArea } from './FormField'
-import TicketIndicators from './TicketIndicators'
 import { AttachmentList, AttachmentPicker } from './TicketAttachments'
 import { PlusIcon } from './icons'
 import { formatDateTime, formatHoursDuration, hmToMinutes } from '../utils/format'
-import { MANAGEMENT_ROLES, TICKET_CRITICALITY_TONE, TICKET_STATUS_TONE } from '../utils/labels'
+import { TICKET_CRITICALITY_TONE, TICKET_STATUS_TONE } from '../utils/labels'
 
 const CLOSED_PROJECT_STATUSES = ['COMPLETED', 'CANCELLED', 'MODELO']
 
@@ -31,11 +29,6 @@ function todayIso() {
  * projeto (`projectId` fixo). Ver app/routers/tickets.py. */
 export default function TicketsPanel({ projectId = null }) {
   const { t, labels } = useLanguage()
-  const { user } = useAuth()
-  // Indicadores só para perfis de gestão (a API também restringe).
-  const isManager = MANAGEMENT_ROLES.includes(user?.role)
-  const [showIndicators, setShowIndicators] = useState(true)
-  const [indicatorsKey, setIndicatorsKey] = useState(0)
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -137,16 +130,6 @@ export default function TicketsPanel({ projectId = null }) {
 
   return (
     <div className="space-y-4">
-      {isManager && (
-        <div className="space-y-2">
-          <div className="flex justify-end">
-            <button type="button" onClick={() => setShowIndicators((prev) => !prev)} className="text-xs text-[var(--text-muted)] hover:underline">
-              {showIndicators ? t('Ocultar indicadores') : t('Mostrar indicadores')}
-            </button>
-          </div>
-          {showIndicators && <TicketIndicators projectId={projectId || filters.project_id || null} clientId={projectId ? '' : filters.client_id} reloadKey={indicatorsKey} />}
-        </div>
-      )}
       <Card
         title={t('Tickets (pendentes)')}
         action={
@@ -225,7 +208,6 @@ export default function TicketsPanel({ projectId = null }) {
           onCreated={(ticket, notice) => {
             setShowNew(false)
             load()
-            setIndicatorsKey((prev) => prev + 1)
             setOpenNotice(notice || '')
             setOpenTicketId(ticket.id)
           }}
@@ -239,10 +221,7 @@ export default function TicketsPanel({ projectId = null }) {
             setOpenTicketId(null)
             setOpenNotice('')
           }}
-          onChanged={() => {
-            load()
-            setIndicatorsKey((prev) => prev + 1)
-          }}
+          onChanged={load}
         />
       )}
     </div>

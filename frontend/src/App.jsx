@@ -17,6 +17,7 @@ import TaskGroupDetailPage from './pages/TaskGroupDetailPage'
 import SchedulesPage from './pages/SchedulesPage'
 import TimesheetsPage from './pages/TimesheetsPage'
 import TicketsPage from './pages/TicketsPage'
+import TicketsDashboardPage from './pages/TicketsDashboardPage'
 import TimesheetApprovalsPage from './pages/TimesheetApprovalsPage'
 import ServiceOrdersPage from './pages/ServiceOrdersPage'
 import ReportsIndexPage from './pages/ReportsIndexPage'
@@ -88,6 +89,7 @@ export default function App() {
                     <Route path="/task-groups" element={<TaskGroupsPage />} />
                     <Route path="/task-groups/:groupId" element={<TaskGroupDetailPage />} />
                     <Route path="/reports/hours-breakdown" element={<HoursBreakdownReportPage />} />
+                    <Route path="/tickets/dashboard" element={<TicketsDashboardPage />} />
                   </Route>
 
                   {/* Status Report (pedido do usuário: "pode implementar os

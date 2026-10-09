@@ -55,11 +55,18 @@ const NAV_SECTIONS = [
       // MANAGEMENT_ROLES — Consultor perdeu este item do menu (decisão
       // confirmada com o usuário na reorganização de menus).
       { to: '/schedules', label: 'Agenda de consultores', icon: ClockIcon, roles: MANAGEMENT_ROLES },
-      // Tickets internos (pendentes) — logo abaixo da Agenda (pedido do
-      // usuário). Todo perfil interno, inclusive Consultor, abre/acompanha os
-      // seus; gerentes direcionam. Para o Consultor, este é o único item
-      // visível do grupo "Projetos".
-      { to: '/tickets', label: 'Tickets', icon: FlagIcon, roles: INTERNAL_ROLES },
+    ],
+  },
+  // Menu próprio de Tickets (pedido do usuário): a lista de tickets, que todo
+  // perfil interno (inclusive Consultor) usa para abrir e acompanhar os seus,
+  // e o Dashboard com os indicadores, só para perfis de gestão.
+  {
+    type: 'group',
+    key: 'tickets',
+    label: 'Tickets',
+    items: [
+      { to: '/tickets', label: 'Tickets', end: true, icon: FlagIcon, roles: INTERNAL_ROLES },
+      { to: '/tickets/dashboard', label: 'Dashboard Tickets', icon: BarChartIcon, roles: MANAGEMENT_ROLES },
     ],
   },
   {

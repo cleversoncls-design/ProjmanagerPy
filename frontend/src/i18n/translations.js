@@ -1211,11 +1211,11 @@ export const es = {
   'Comercial': 'Comercial',
   'Investimento': 'Inversión',
   // Tickets: anexos e indicadores.
+  'Dashboard Tickets': 'Dashboard Tickets',
+  'Indicadores dos tickets internos: criticidade, tempo de espera, horas gastas e carga por responsável.': 'Indicadores de los tickets internos: criticidad, tiempo de espera, horas dedicadas y carga por responsable.',
   'Anexos (opcional)': 'Adjuntos (opcional)',
   'Print da tela, log de erro ou arquivo que ajude a reproduzir o problema.': 'Captura de pantalla, log de error o archivo que ayude a reproducir el problema.',
   'O ticket foi registrado, mas os anexos não foram enviados': 'El ticket fue registrado, pero los adjuntos no fueron enviados',
-  'Mostrar indicadores': 'Mostrar indicadores',
-  'Ocultar indicadores': 'Ocultar indicadores',
   'Indicadores dos tickets': 'Indicadores de los tickets',
   'Tickets abertos': 'Tickets abiertos',
   'Idade média dos abertos': 'Antigüedad promedio de los abiertos',
