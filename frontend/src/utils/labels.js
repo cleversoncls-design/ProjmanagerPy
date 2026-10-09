@@ -173,6 +173,40 @@ export const PROJECT_TYPE_LABELS = {
   INVESTMENT: 'Investimento',
 }
 
+// Tickets internos (pendentes) — espelha TicketStatus/TicketCriticality em
+// app/models.py.
+export const TICKET_STATUS_LABELS = {
+  OPEN: 'Aberto',
+  ASSIGNED: 'Direcionado',
+  IN_PROGRESS: 'Em atendimento',
+  WAITING_REQUESTER: 'Aguardando solicitante',
+  RESOLVED: 'Resolvido',
+  CLOSED: 'Fechado',
+}
+
+export const TICKET_STATUS_TONE = {
+  OPEN: 'warning',
+  ASSIGNED: 'muted',
+  IN_PROGRESS: 'warning',
+  WAITING_REQUESTER: 'serious',
+  RESOLVED: 'good',
+  CLOSED: 'muted',
+}
+
+export const TICKET_CRITICALITY_LABELS = {
+  LOW: 'Baixa',
+  MEDIUM: 'Média',
+  HIGH: 'Alta',
+  CRITICAL: 'Crítica',
+}
+
+export const TICKET_CRITICALITY_TONE = {
+  LOW: 'muted',
+  MEDIUM: 'warning',
+  HIGH: 'serious',
+  CRITICAL: 'critical',
+}
+
 export const TASK_TYPE_LABELS = {
   MANAGEMENT: 'Gestão',
   CONSULTING: 'Consultoria',
@@ -527,6 +561,8 @@ export function getLabels(lang) {
     TASK_MODALITY_LABELS: translateMap(TASK_MODALITY_LABELS, lang),
     PROJECT_STATUS_LABELS: translateMap(PROJECT_STATUS_LABELS, lang),
     PROJECT_TYPE_LABELS: translateMap(PROJECT_TYPE_LABELS, lang),
+    TICKET_STATUS_LABELS: translateMap(TICKET_STATUS_LABELS, lang),
+    TICKET_CRITICALITY_LABELS: translateMap(TICKET_CRITICALITY_LABELS, lang),
     TASK_STATUS_LABELS: translateMap(TASK_STATUS_LABELS, lang),
     TASK_STATUS_LABELS_SHORT: translateMap(TASK_STATUS_LABELS_SHORT, lang),
     TASK_TYPE_LABELS: translateMap(TASK_TYPE_LABELS, lang),

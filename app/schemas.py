@@ -28,6 +28,9 @@ from .models import (
     TaskModality,
     TaskStatus,
     TaskType,
+    TicketCriticality,
+    TicketInteractionKind,
+    TicketStatus,
     TimesheetStatus,
     UserRole,
     UserStatus,
@@ -703,6 +706,9 @@ class TimesheetCreate(BaseModel):
     # create_timesheet em routers/timesheets.py — nunca confiar no cliente
     # pra essa checagem, que é justamente a regra de aprovação extra).
     schedule_id: str | None = None
+    # Ticket interno (pendente) que originou a hora — opcional; exige
+    # task_id da mesma tarefa do ticket (ver _validate_ticket).
+    ticket_id: str | None = None
     date: date
     # Hora início/fim + intervalo — `hours_spent` não é mais informado
     # aqui: é sempre calculado no backend (Hora Final − Hora Inicial −
@@ -742,6 +748,7 @@ class TimesheetRead(ORMModel):
     project_id: str | None
     resource_id: str
     schedule_id: str | None
+    ticket_id: str | None = None
     date: date
     start_time: time | None
     end_time: time | None
@@ -1545,3 +1552,103 @@ class KnowledgeSubmissionReview(BaseModel):
     status: KnowledgeStatus
     review_notes: str | None = None
     items: list[KnowledgeSubmissionReviewItem] = []
+
+
+# ---------------------------------------------------------------------------
+# Tickets internos (pendentes)
+# ---------------------------------------------------------------------------
+
+
+class TicketCreate(BaseModel):
+    project_id: str
+    task_id: str
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1)
+    criticality: TicketCriticality = TicketCriticality.MEDIUM
+
+
+class TicketAssign(BaseModel):
+    assignee_id: str
+    message: str | None = None
+
+
+class TicketStatusChange(BaseModel):
+    status: TicketStatus
+    message: str | None = None
+
+
+class TicketComment(BaseModel):
+    message: str = Field(min_length=1)
+
+
+class TicketCriticalityChange(BaseModel):
+    criticality: TicketCriticality
+    message: str | None = None
+
+
+class TicketTimeEntry(BaseModel):
+    """Tempo gasto no ticket — vira um apontamento de horas (Timesheet) na
+    tarefa do ticket, igual ao apontamento normal (fica Pendente de
+    aprovação)."""
+
+    date: date
+    start_time: time
+    end_time: time
+    break_minutes: int = Field(default=0, ge=0)
+    description: str | None = None
+    task_progress_percentage: Decimal | None = Field(default=None, ge=0, le=100)
+
+
+class TicketInteractionRead(BaseModel):
+    id: str
+    author_id: str | None
+    author_name: str | None
+    kind: TicketInteractionKind
+    message: str | None
+    from_value: str | None
+    to_value: str | None
+    created_at: datetime
+
+
+class TicketRead(BaseModel):
+    id: str
+    code: str
+    project_id: str
+    project_code: str
+    project_name: str
+    task_id: str | None
+    task_wbs: str | None
+    task_name: str | None
+    parent_task_name: str | None
+    title: str
+    description: str
+    criticality: TicketCriticality
+    status: TicketStatus
+    requester_id: str | None
+    requester_name: str | None
+    requester_email: str | None
+    assignee_id: str | None
+    assignee_name: str | None
+    created_at: datetime
+    updated_at: datetime
+    resolved_at: datetime | None
+    closed_at: datetime | None
+    hours_logged: Decimal
+    hours_approved: Decimal
+
+
+class TicketDetail(TicketRead):
+    interactions: list[TicketInteractionRead]
+    # O que o usuário logado pode fazer neste ticket (calculado no backend
+    # para a tela não duplicar as regras).
+    allowed_statuses: list[TicketStatus]
+    can_assign: bool
+    can_comment: bool
+    can_log_time: bool
+    can_change_criticality: bool
+
+
+class TicketAssignee(ORMModel):
+    id: str
+    name: str
+    email: str

@@ -4419,3 +4419,228 @@ def test_project_type_create_update_and_portfolio_filter(client, setup):
 
     invalid = client.patch(f"/projects/{setup['project_a'].id}", json={"project_type": "OUTRO"}, headers=headers)
     assert invalid.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Tickets internos (pendentes)
+# ---------------------------------------------------------------------------
+
+
+def _ticket_env(client, setup, db_session):
+    """Tarefa-folha no projeto A, desenvolvedor com Recurso (alocado na
+    tarefa) e cabeçalhos do solicitante (consultor), gerente (pm) e dev."""
+    admin_headers = setup["admin_headers"]
+    task = _create_task(client, admin_headers, setup["project_a"].id, name="Integração", wbs_code="1")
+    dev = make_user(db_session, role=UserRole.CONSULTANT, email="dev@example.com")
+    resource = client.post(
+        "/resources",
+        json={"user_id": dev.id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    assigned = client.post(
+        f"/tasks/{task['id']}/assignments", json={"resource_id": resource["id"], "allocated_hours": "20"}, headers=admin_headers
+    )
+    assert assigned.status_code == 201, assigned.text
+    return {
+        "task": task,
+        "dev": dev,
+        "resource": resource,
+        "requester_headers": auth_headers(client, setup["consultant"].email),
+        "pm_headers": auth_headers(client, setup["pm"].email),
+        "dev_headers": auth_headers(client, dev.email),
+    }
+
+
+def _open_ticket(client, env, setup, **extra):
+    payload = {
+        "project_id": setup["project_a"].id,
+        "task_id": env["task"]["id"],
+        "title": "Erro na integração",
+        "description": "Passo a passo para reproduzir",
+        "criticality": "HIGH",
+        **extra,
+    }
+    response = client.post("/tickets", json=payload, headers=env["requester_headers"])
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_ticket_create_numbering_and_visibility(client, setup, db_session):
+    env = _ticket_env(client, setup, db_session)
+    first = _open_ticket(client, env, setup)
+    second = _open_ticket(client, env, setup, title="Outro")
+    assert first["code"].startswith("TK-") and first["code"].endswith("-0001")
+    assert second["code"].endswith("-0002")
+    assert first["status"] == "OPEN"
+    assert first["requester_email"] == "consultor@example.com"
+    assert first["task_wbs"] == "1"
+    assert [i["kind"] for i in first["interactions"]] == ["CREATED"]
+
+    # Solicitante, gerente do projeto e admin veem; dev (ainda sem ticket) não.
+    assert len(client.get("/tickets", headers=env["requester_headers"]).json()) == 2
+    assert len(client.get("/tickets", headers=env["pm_headers"]).json()) == 2
+    assert len(client.get("/tickets", headers=setup["admin_headers"]).json()) == 2
+    assert client.get("/tickets", headers=env["dev_headers"]).json() == []
+    assert client.get(f"/tickets/{first['id']}", headers=env["dev_headers"]).status_code == 404
+
+    # Perfil do cliente não acessa.
+    client_headers = auth_headers(client, setup["client_pm_a"].email)
+    assert client.get("/tickets", headers=client_headers).status_code == 403
+    assert client.post(
+        "/tickets",
+        json={"project_id": setup["project_a"].id, "task_id": env["task"]["id"], "title": "x", "description": "y"},
+        headers=client_headers,
+    ).status_code == 403
+
+
+def test_ticket_rejects_parent_task_and_other_project_task(client, setup, db_session):
+    env = _ticket_env(client, setup, db_session)
+    admin_headers = setup["admin_headers"]
+    parent = _create_task(client, admin_headers, setup["project_a"].id, name="Pai", wbs_code="2")
+    _create_task(client, admin_headers, setup["project_a"].id, name="Filha", wbs_code="2.1", parent_task_id=parent["id"])
+    payload = {"project_id": setup["project_a"].id, "task_id": parent["id"], "title": "t", "description": "d"}
+    assert client.post("/tickets", json=payload, headers=env["requester_headers"]).status_code == 422
+    payload["task_id"] = "nao-existe"
+    assert client.post("/tickets", json=payload, headers=env["requester_headers"]).status_code == 404
+
+
+def test_ticket_full_flow_assign_status_comments_and_close(client, setup, db_session):
+    env = _ticket_env(client, setup, db_session)
+    ticket = _open_ticket(client, env, setup)
+    tid = ticket["id"]
+
+    # Só o gerente direciona; destino precisa de Recurso.
+    assert client.post(f"/tickets/{tid}/assign", json={"assignee_id": env["dev"].id}, headers=env["requester_headers"]).status_code == 403
+    no_resource = client.post(f"/tickets/{tid}/assign", json={"assignee_id": setup["client_user_a"].id}, headers=env["pm_headers"])
+    assert no_resource.status_code == 422
+    assigned = client.post(f"/tickets/{tid}/assign", json={"assignee_id": env["dev"].id, "message": "Pode olhar?"}, headers=env["pm_headers"])
+    assert assigned.status_code == 200, assigned.text
+    body = assigned.json()
+    assert body["status"] == "ASSIGNED"
+    assert body["assignee_name"] == env["dev"].name
+    assert body["interactions"][-1]["kind"] == "ASSIGNMENT"
+    repeated = client.post(f"/tickets/{tid}/assign", json={"assignee_id": env["dev"].id}, headers=env["pm_headers"])
+    assert repeated.status_code == 422
+
+    # O dev (responsável) passa a ver o ticket e pode iniciar o atendimento.
+    dev_view = client.get(f"/tickets/{tid}", headers=env["dev_headers"]).json()
+    assert dev_view["allowed_statuses"] == ["IN_PROGRESS"]
+    assert dev_view["can_log_time"] is True and dev_view["can_assign"] is False
+    started = client.post(f"/tickets/{tid}/status", json={"status": "IN_PROGRESS"}, headers=env["dev_headers"])
+    assert started.json()["status"] == "IN_PROGRESS"
+
+    # Pedir informação exige mensagem; solicitante responde -> volta a atendimento.
+    assert client.post(f"/tickets/{tid}/status", json={"status": "WAITING_REQUESTER"}, headers=env["dev_headers"]).status_code == 422
+    waiting = client.post(
+        f"/tickets/{tid}/status", json={"status": "WAITING_REQUESTER", "message": "Qual o arquivo?"}, headers=env["dev_headers"]
+    )
+    assert waiting.json()["status"] == "WAITING_REQUESTER"
+    answered = client.post(f"/tickets/{tid}/comments", json={"message": "Segue o arquivo X"}, headers=env["requester_headers"])
+    assert answered.status_code == 201
+    assert answered.json()["status"] == "IN_PROGRESS"
+
+    # Solicitante não pode resolver; dev resolve (com mensagem); só o solicitante fecha.
+    assert client.post(f"/tickets/{tid}/status", json={"status": "RESOLVED", "message": "x"}, headers=env["requester_headers"]).status_code == 422
+    resolved = client.post(f"/tickets/{tid}/status", json={"status": "RESOLVED", "message": "Corrigido"}, headers=env["dev_headers"])
+    assert resolved.json()["status"] == "RESOLVED"
+    assert resolved.json()["resolved_at"] is not None
+    assert client.post(f"/tickets/{tid}/status", json={"status": "CLOSED"}, headers=env["dev_headers"]).status_code == 422
+
+    # Reabrir exige mensagem; depois resolve de novo e o solicitante confirma.
+    assert client.post(f"/tickets/{tid}/status", json={"status": "IN_PROGRESS"}, headers=env["requester_headers"]).status_code == 422
+    reopened = client.post(
+        f"/tickets/{tid}/status", json={"status": "IN_PROGRESS", "message": "Ainda falha"}, headers=env["requester_headers"]
+    )
+    assert reopened.json()["status"] == "IN_PROGRESS" and reopened.json()["resolved_at"] is None
+    client.post(f"/tickets/{tid}/status", json={"status": "RESOLVED", "message": "Agora sim"}, headers=env["dev_headers"])
+    closed = client.post(f"/tickets/{tid}/status", json={"status": "CLOSED"}, headers=env["requester_headers"])
+    assert closed.json()["status"] == "CLOSED" and closed.json()["closed_at"] is not None
+
+    # Fechado: sem novas interações; o histórico guardou tudo.
+    assert client.post(f"/tickets/{tid}/comments", json={"message": "oi"}, headers=env["requester_headers"]).status_code == 422
+    kinds = [i["kind"] for i in client.get(f"/tickets/{tid}", headers=env["requester_headers"]).json()["interactions"]]
+    assert kinds[0] == "CREATED" and kinds.count("STATUS") >= 6 and "COMMENT" in kinds and "ASSIGNMENT" in kinds
+
+    # Filtros
+    assert client.get("/tickets", params={"open_only": True}, headers=env["requester_headers"]).json() == []
+    assert len(client.get("/tickets", params={"scope": "assigned"}, headers=env["dev_headers"]).json()) == 1
+    assert len(client.get("/tickets", params={"status_filter": "CLOSED"}, headers=env["pm_headers"]).json()) == 1
+
+
+def test_ticket_criticality_only_by_manager(client, setup, db_session):
+    env = _ticket_env(client, setup, db_session)
+    ticket = _open_ticket(client, env, setup)
+    tid = ticket["id"]
+    assert client.post(f"/tickets/{tid}/criticality", json={"criticality": "CRITICAL"}, headers=env["requester_headers"]).status_code == 403
+    changed = client.post(f"/tickets/{tid}/criticality", json={"criticality": "CRITICAL", "message": "Parou tudo"}, headers=env["pm_headers"])
+    assert changed.status_code == 200
+    assert changed.json()["criticality"] == "CRITICAL"
+    assert changed.json()["interactions"][-1]["from_value"] == "HIGH"
+    assert client.post(f"/tickets/{tid}/criticality", json={"criticality": "CRITICAL"}, headers=env["pm_headers"]).status_code == 422
+
+
+def test_ticket_time_entry_creates_timesheet_on_task(client, setup, db_session):
+    env = _ticket_env(client, setup, db_session)
+    ticket = _open_ticket(client, env, setup)
+    tid = ticket["id"]
+    client.post(f"/tickets/{tid}/assign", json={"assignee_id": env["dev"].id}, headers=env["pm_headers"])
+
+    payload = {"date": "2026-10-05", "start_time": "09:00", "end_time": "11:30", "break_minutes": 0, "description": "Analisei o log"}
+    # Quem não é o responsável não aponta.
+    assert client.post(f"/tickets/{tid}/time", json=payload, headers=env["requester_headers"]).status_code == 403
+
+    logged = client.post(f"/tickets/{tid}/time", json=payload, headers=env["dev_headers"])
+    assert logged.status_code == 201, logged.text
+    body = logged.json()
+    assert body["status"] == "IN_PROGRESS"  # ASSIGNED -> IN_PROGRESS ao começar
+    assert float(body["hours_logged"]) == 2.5
+    assert float(body["hours_approved"]) == 0.0
+    assert [i["kind"] for i in body["interactions"]][-2:] == ["TIME", "STATUS"]
+
+    # O apontamento existe na tarefa, vinculado ao ticket, Pendente.
+    sheets = client.get("/timesheets", params={"task_id": env["task"]["id"]}, headers=env["dev_headers"]).json()
+    assert len(sheets) == 1
+    assert sheets[0]["ticket_id"] == tid and sheets[0]["status"] == "PENDING"
+    assert float(sheets[0]["hours_spent"]) == 2.5
+
+    # Aprovado -> entra nas horas aprovadas do ticket.
+    approved = client.patch(f"/timesheets/{sheets[0]['id']}/status", json={"status": "APPROVED"}, headers=setup["admin_headers"])
+    assert approved.status_code == 200, approved.text
+    assert float(client.get(f"/tickets/{tid}", headers=env["dev_headers"]).json()["hours_approved"]) == 2.5
+
+
+def test_timesheet_with_ticket_field_validates_task_and_assignee(client, setup, db_session):
+    env = _ticket_env(client, setup, db_session)
+    ticket = _open_ticket(client, env, setup)
+    tid = ticket["id"]
+    client.post(f"/tickets/{tid}/assign", json={"assignee_id": env["dev"].id}, headers=env["pm_headers"])
+    base = {"date": "2026-10-06", "start_time": "09:00", "end_time": "10:00"}
+
+    ok = client.post("/timesheets", json={**base, "task_id": env["task"]["id"], "ticket_id": tid}, headers=env["dev_headers"])
+    assert ok.status_code == 201 and ok.json()["ticket_id"] == tid
+
+    other_task = _create_task(client, setup["admin_headers"], setup["project_a"].id, name="Outra", wbs_code="9")
+    client.post(
+        f"/tasks/{other_task['id']}/assignments",
+        json={"resource_id": env["resource"]["id"], "allocated_hours": "5"},
+        headers=setup["admin_headers"],
+    )
+    wrong_task = client.post("/timesheets", json={**base, "task_id": other_task["id"], "ticket_id": tid}, headers=env["dev_headers"])
+    assert wrong_task.status_code == 422
+    missing = client.post("/timesheets", json={**base, "task_id": env["task"]["id"], "ticket_id": "nao-existe"}, headers=env["dev_headers"])
+    assert missing.status_code == 404
+
+    # Ticket fechado não recebe horas novas.
+    client.post(f"/tickets/{tid}/status", json={"status": "CLOSED", "message": "Cancelado"}, headers=env["pm_headers"])
+    closed = client.post("/timesheets", json={**base, "task_id": env["task"]["id"], "ticket_id": tid}, headers=env["dev_headers"])
+    assert closed.status_code == 422
+
+
+def test_ticket_assignees_list_is_restricted_to_management(client, setup, db_session):
+    env = _ticket_env(client, setup, db_session)
+    assert client.get("/tickets/assignees", headers=env["requester_headers"]).status_code == 403
+    listed = client.get("/tickets/assignees", headers=env["pm_headers"])
+    assert listed.status_code == 200
+    assert env["dev"].email in [u["email"] for u in listed.json()]
+    # Cliente (sem Recurso) e usuários sem Recurso não aparecem.
+    assert setup["client_user_a"].email not in [u["email"] for u in listed.json()]

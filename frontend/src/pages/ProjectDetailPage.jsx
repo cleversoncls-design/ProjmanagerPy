@@ -13,6 +13,7 @@ import * as legacyApi from '../api/legacyConsumption'
 import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import PageHeader from '../components/PageHeader'
+import TicketsPanel from '../components/TicketsPanel'
 import Card from '../components/Card'
 import StatTile from '../components/StatTile'
 import Table from '../components/Table'
@@ -62,6 +63,7 @@ const TABS = [
   { key: 'gantt', label: 'Gantt' },
   { key: 'resources', label: 'Recursos' },
   // Consumo já apropriado no sistema anterior — dado financeiro, só gestão.
+  { key: 'tickets', label: 'Tickets', managementOnly: true },
   { key: 'legacy', label: 'Consumo anterior', managementOnly: true },
 ]
 
@@ -158,6 +160,7 @@ export default function ProjectDetailPage() {
       {tab === 'tasks' && <TasksTab projectId={projectId} canWrite={canWrite} onTaskCreated={loadProject} />}
       {tab === 'gantt' && <GanttTab projectId={projectId} project={project} />}
       {tab === 'resources' && <ProjectResourcesTab projectId={projectId} canWrite={canWrite} />}
+      {tab === 'tickets' && canWrite && <TicketsPanel projectId={projectId} />}
       {tab === 'legacy' && canWrite && <LegacyConsumptionTab projectId={projectId} onChanged={refreshNumbers} />}
 
       {showEditModal && (

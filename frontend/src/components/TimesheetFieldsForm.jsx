@@ -1,4 +1,5 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import * as ticketsApi from '../api/tickets'
 import { useLanguage } from '../context/LanguageContext'
 import { FormField, TextInput, Select, TextArea } from './FormField'
 import { timesheetFormNeedsTaskOrTransit } from '../utils/timesheetForm'
@@ -41,6 +42,30 @@ export default function TimesheetFieldsForm({
   // apontamento válido ("avulso" foi descontinuado) — ver
   // timesheetFormNeedsTaskOrTransit, utils/timesheetForm.js.
   const needsTaskOrTransit = timesheetFormNeedsTaskOrTransit(form)
+
+  // Ticket interno (pendente) que originou a hora — opcional. Lista os
+  // tickets em aberto direcionados a mim na tarefa escolhida; o ticket já
+  // vinculado (edição) sempre aparece, mesmo que tenha fechado depois.
+  const [ticketOptions, setTicketOptions] = useState([])
+  useEffect(() => {
+    if (!form.task_id) {
+      setTicketOptions([])
+      return
+    }
+    let cancelled = false
+    ticketsApi
+      .listTickets({ task_id: form.task_id, scope: 'assigned', open_only: true })
+      .then((rows) => {
+        if (!cancelled) setTicketOptions(rows)
+      })
+      .catch(() => {
+        if (!cancelled) setTicketOptions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [form.task_id])
+  const selectedTicketMissing = Boolean(form.ticket_id) && !ticketOptions.some((ticket) => ticket.id === form.ticket_id)
 
   return (
     <div className="space-y-4">
@@ -93,6 +118,19 @@ export default function TimesheetFieldsForm({
           </div>
         </FormField>
       </div>
+      {form.task_id && (ticketOptions.length > 0 || form.ticket_id) && (
+        <FormField label={t('Ticket')} hint={t('Opcional — vincula esta hora a um ticket direcionado a você nesta tarefa.')}>
+          <Select value={form.ticket_id || ''} onChange={updateField('ticket_id')}>
+            <option value="">{t('Sem ticket')}</option>
+            {selectedTicketMissing && <option value={form.ticket_id}>{t('Ticket vinculado')}</option>}
+            {ticketOptions.map((ticket) => (
+              <option key={ticket.id} value={ticket.id}>
+                {ticket.code} — {ticket.title}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+      )}
       {form.task_id && (
         <div className="grid grid-cols-2 gap-4">
           <FormField label={t('% de Avanço da Tarefa')} hint={t('Atualiza o % realizado desta tarefa ao salvar.')}>

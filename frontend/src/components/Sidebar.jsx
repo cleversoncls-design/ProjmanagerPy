@@ -26,6 +26,7 @@ import {
   ClipboardCheckIcon,
   ClockIcon,
   FileTextIcon,
+  FlagIcon,
   HomeIcon,
   LayersIcon,
   MailIcon,
@@ -63,6 +64,9 @@ const NAV_SECTIONS = [
     items: [
       { to: '/timesheets', label: 'Apontamento de horas', icon: ClipboardCheckIcon, roles: INTERNAL_ROLES },
       { to: '/service-orders', label: 'Ordens de Serviço', icon: FileTextIcon, roles: INTERNAL_ROLES },
+      // Tickets internos (pendentes) — pedido do usuário; todo perfil interno
+      // abre/acompanha os próprios, gerentes direcionam.
+      { to: '/tickets', label: 'Tickets', icon: FlagIcon, roles: INTERNAL_ROLES },
       { to: '/timesheet-approvals', label: 'Aprovações de horas', icon: BadgeCheckIcon, roles: MANAGEMENT_ROLES },
     ],
   },

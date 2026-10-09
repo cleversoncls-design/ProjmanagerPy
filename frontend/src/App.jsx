@@ -16,6 +16,7 @@ import TaskGroupsPage from './pages/TaskGroupsPage'
 import TaskGroupDetailPage from './pages/TaskGroupDetailPage'
 import SchedulesPage from './pages/SchedulesPage'
 import TimesheetsPage from './pages/TimesheetsPage'
+import TicketsPage from './pages/TicketsPage'
 import TimesheetApprovalsPage from './pages/TimesheetApprovalsPage'
 import ServiceOrdersPage from './pages/ServiceOrdersPage'
 import ReportsIndexPage from './pages/ReportsIndexPage'
@@ -63,6 +64,7 @@ export default function App() {
                   <Route element={<ProtectedRoute roles={INTERNAL_ROLES} />}>
                     <Route path="/timesheets" element={<TimesheetsPage />} />
                     <Route path="/service-orders" element={<ServiceOrdersPage />} />
+                    <Route path="/tickets" element={<TicketsPage />} />
                   </Route>
 
                   <Route element={<ProtectedRoute roles={ADMIN_LIKE_ROLES} />}>

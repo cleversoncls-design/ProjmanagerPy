@@ -23,6 +23,8 @@ from ..models import (
     Task,
     TaskAssignment,
     TaskStatus,
+    Ticket,
+    TicketStatus,
     Timesheet,
     TimesheetStatus,
     User,
@@ -299,6 +301,31 @@ def _resolve_schedule(
     return schedule, unscheduled
 
 
+def _validate_ticket(
+    data: TimesheetCreate, task: Task | None, user: User, db: Session, keep_ticket_id: str | None = None
+) -> Ticket | None:
+    """Ticket interno (pendente) informado no apontamento: precisa existir,
+    não estar fechado, ser da MESMA tarefa do apontamento e o usuário ser o
+    responsável do ticket (ou um perfil de gestão). Sem ticket_id, nada a
+    validar. `keep_ticket_id` = ticket que o apontamento JÁ tinha (edição): se
+    continua o mesmo, só a regra da tarefa vale — editar um apontamento antigo
+    não pode ser bloqueado porque o ticket depois fechou."""
+    if not data.ticket_id:
+        return None
+    ticket = db.get(Ticket, data.ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail=translate("Ticket não encontrado", user.language))
+    if not task or ticket.task_id != task.id:
+        raise HTTPException(status_code=422, detail=translate("O ticket pertence a outra tarefa — aponte na tarefa do ticket", user.language))
+    if data.ticket_id == keep_ticket_id:
+        return ticket
+    if ticket.status == TicketStatus.CLOSED.value:
+        raise HTTPException(status_code=422, detail=translate("Não é possível apontar horas em um ticket fechado", user.language))
+    if ticket.assignee_id != user.id and user.role not in _MANAGEMENT_ROLES:
+        raise HTTPException(status_code=403, detail=translate("Só o responsável pelo ticket pode apontar horas nele", user.language))
+    return ticket
+
+
 def _require_own_editable_entry(timesheet_id: str, resource: Resource, user: User, db: Session) -> Timesheet:
     """Checagem comum a editar/excluir um apontamento: precisa existir e ser
     do próprio recurso (nunca de outro consultor — isso é para gestor via
@@ -318,13 +345,17 @@ def _require_own_editable_entry(timesheet_id: str, resource: Resource, user: Use
     return entry
 
 
-@router.post("/timesheets", response_model=TimesheetRead, status_code=status.HTTP_201_CREATED)
-def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Timesheet:
+def create_timesheet_entry(data: TimesheetCreate, user: User, db: Session) -> Timesheet:
+    """Cria o apontamento (flush + auditoria) SEM dar commit — quem chama
+    decide quando commitar. Compartilhada por POST /timesheets e pelo
+    apontamento de tempo feito de dentro de um ticket (routers/tickets.py),
+    que precisa gravar o histórico do ticket na mesma transação."""
     resource = db.scalar(select(Resource).where(Resource.user_id == user.id))
     if not resource:
         raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
 
     task, project = _resolve_task_and_project(data, resource, user, db)
+    ticket = _validate_ticket(data, task, user, db)
     _validate_rework(data, task, user)
     hours_spent = _compute_hours(data, user.language)
     schedule, unscheduled = _resolve_schedule(data, resource, project, user, db)
@@ -334,6 +365,7 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
         project_id=project.id if project else None,
         resource_id=resource.id,
         schedule_id=schedule.id if schedule else None,
+        ticket_id=ticket.id if ticket else None,
         date=data.date,
         start_time=data.start_time,
         end_time=data.end_time,
@@ -351,6 +383,12 @@ def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_use
     _apply_task_progress(entry, task)
     db.flush()
     record_audit(db, entity_type="timesheet", entity_id=entry.id, action=AuditAction.CREATE, user_id=user.id)
+    return entry
+
+
+@router.post("/timesheets", response_model=TimesheetRead, status_code=status.HTTP_201_CREATED)
+def create_timesheet(data: TimesheetCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Timesheet:
+    entry = create_timesheet_entry(data, user, db)
     db.commit()
     db.refresh(entry)
     return entry
@@ -372,10 +410,12 @@ def update_timesheet(
     old_task_id = entry.task_id
 
     task, project = _resolve_task_and_project(data, resource, user, db)
+    ticket = _validate_ticket(data, task, user, db, keep_ticket_id=entry.ticket_id)
     _validate_rework(data, task, user)
     hours_spent = _compute_hours(data, user.language)
     schedule, unscheduled = _resolve_schedule(data, resource, project, user, db)
 
+    entry.ticket_id = ticket.id if ticket else None
     entry.task_id = task.id if task else None
     entry.project_id = project.id if project else None
     entry.schedule_id = schedule.id if schedule else None

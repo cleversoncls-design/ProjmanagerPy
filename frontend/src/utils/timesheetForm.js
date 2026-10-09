@@ -21,6 +21,8 @@ export function emptyTimesheetForm(date) {
     date,
     project_id: '',
     task_id: '',
+    // Ticket interno (pendente) que originou a hora — opcional, só com tarefa.
+    ticket_id: '',
     is_transit: false,
     absence_type: '',
     // % de Avanço da Tarefa + classificador Normal/Retrabalho (pedido do
@@ -50,6 +52,7 @@ export function entryToTimesheetForm(entry, tasksById) {
     date: entry.date,
     project_id: entry.task_id ? task?.project_id || '' : entry.project_id || '',
     task_id: entry.task_id || '',
+    ticket_id: entry.ticket_id || '',
     is_transit: entry.is_transit || false,
     absence_type: entry.absence_type || '',
     task_progress_percentage: entry.task_progress_percentage ?? '',
@@ -78,7 +81,7 @@ export function entryToTimesheetForm(entry, tasksById) {
 // terceiro argumento) permite pré-preencher o % com o avanço ATUAL da
 // tarefa escolhida — só uma sugestão inicial; o consultor pode ajustar
 // antes de salvar.
-const CLEAR_TASK_PROGRESS_FIELDS = { task_progress_percentage: '', work_classification: 'NORMAL', rework_reasons: [] }
+const CLEAR_TASK_PROGRESS_FIELDS = { task_progress_percentage: '', work_classification: 'NORMAL', rework_reasons: [], ticket_id: '' }
 
 export function applyExclusiveTimesheetField(prev, field, value, tasksById) {
   if (field === 'project_id') return { ...prev, project_id: value, task_id: '', is_transit: false, absence_type: value ? '' : prev.absence_type, ...CLEAR_TASK_PROGRESS_FIELDS }
@@ -157,6 +160,8 @@ export function timesheetFormToPayload(form) {
     payload.project_id = form.project_id
   } else if (form.task_id) {
     payload.task_id = form.task_id
+    // Mantém o vínculo com o ticket (editar o apontamento não pode soltá-lo).
+    if (form.ticket_id) payload.ticket_id = form.ticket_id
     // % de Avanço da Tarefa + classificador Normal/Retrabalho (pedido do
     // usuário) — só enviados junto de task_id; vazio/'' vira null (campo
     // opcional, ver TimesheetCreate.task_progress_percentage).

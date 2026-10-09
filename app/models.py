@@ -251,6 +251,38 @@ class ProjectType(StrEnum):
     INVESTMENT = "INVESTMENT"  # Investimento
 
 
+class TicketCriticality(StrEnum):
+    """Criticidade do ticket interno (pendente) — escolhida por quem abre."""
+
+    LOW = "LOW"  # Baixa: não impede a operação
+    MEDIUM = "MEDIUM"  # Média: dificulta o processo, mas existem alternativas
+    HIGH = "HIGH"  # Alta: impede o funcionamento de um processo-chave
+    CRITICAL = "CRITICAL"  # Crítica: interrupção total / bloqueio geral
+
+
+class TicketStatus(StrEnum):
+    """Fluxo do ticket: OPEN -> ASSIGNED (gerente direciona) -> IN_PROGRESS
+    <-> WAITING_REQUESTER (responsável pede informação) -> RESOLVED
+    (responsável conclui) -> CLOSED (só o solicitante confirma; se
+    discordar, volta a IN_PROGRESS = reaberto)."""
+
+    OPEN = "OPEN"
+    ASSIGNED = "ASSIGNED"
+    IN_PROGRESS = "IN_PROGRESS"
+    WAITING_REQUESTER = "WAITING_REQUESTER"
+    RESOLVED = "RESOLVED"
+    CLOSED = "CLOSED"
+
+
+class TicketInteractionKind(StrEnum):
+    CREATED = "CREATED"
+    COMMENT = "COMMENT"
+    ASSIGNMENT = "ASSIGNMENT"
+    STATUS = "STATUS"
+    CRITICALITY = "CRITICALITY"
+    TIME = "TIME"  # horas apontadas na tarefa a partir do ticket
+
+
 class ResourceFunction(StrEnum):
     """Categoria de função do recurso (pedido do usuário, "melhorias parte
     4") — combinada com `Resource.level` (1 a 4) pra indicar a senioridade.
@@ -800,6 +832,12 @@ class Timesheet(Base):
     # quem de fato decide a regra de aprovação extra). SET NULL: apagar o
     # agendamento não pode arrastar um apontamento (dado financeiro) junto.
     schedule_id: Mapped[str | None] = mapped_column(ForeignKey("resource_schedules.id", ondelete="SET NULL"))
+    # Ticket interno (pendente) que originou esta hora — opcional, só
+    # informativo/de rastreio (a hora segue na tarefa do ticket, entrando em
+    # custo e horas consumidas do projeto como qualquer apontamento). SET
+    # NULL: apagar o ticket nunca pode arrastar um apontamento (dado
+    # financeiro) junto.
+    ticket_id: Mapped[str | None] = mapped_column(ForeignKey("tickets.id", ondelete="SET NULL"), index=True)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     # Hora início/fim + intervalo (Fase 2 do apontamento) — `hours_spent`
     # nunca é digitado diretamente: é sempre calculado a partir destes três
@@ -895,6 +933,65 @@ class ProjectExpense(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     expense_date: Mapped[date] = mapped_column(Date, nullable=False)
     project: Mapped[Project] = relationship(back_populates="expenses")
+
+
+class Ticket(Base):
+    """Ticket interno / pendente (pedido do usuário): um consultor registra
+    um incidente ligado a uma tarefa de um projeto, o gerente direciona para
+    outro consultor/desenvolvedor, e as interações ficam gravadas em
+    `TicketInteraction` até o solicitante confirmar a solução. As horas
+    gastas são apontadas na tarefa (Timesheet.ticket_id) — ver
+    app/routers/tickets.py."""
+
+    __tablename__ = "tickets"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    # Número exibido (TK-2026-0012): `year` + `seq` (sequencial por ano).
+    code: Mapped[str] = mapped_column(String(20), nullable=False, unique=True, index=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    # SET NULL: excluir a tarefa nunca apaga o histórico do ticket; a API
+    # exige a tarefa na criação.
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    criticality: Mapped[str] = mapped_column(String(10), nullable=False, default=TicketCriticality.MEDIUM.value)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=TicketStatus.OPEN.value, index=True)
+    requester_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    assignee_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.utcnow())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.utcnow())
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    __table_args__ = (UniqueConstraint("year", "seq", name="uq_ticket_year_seq"),)
+    project: Mapped[Project] = relationship()
+    task: Mapped[Task | None] = relationship()
+    requester: Mapped[User | None] = relationship(foreign_keys=[requester_id])
+    assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id])
+    interactions: Mapped[list["TicketInteraction"]] = relationship(
+        back_populates="ticket", order_by="TicketInteraction.created_at", cascade="all, delete-orphan"
+    )
+
+
+class TicketInteraction(Base):
+    """Linha do tempo do ticket — só recebe registros novos (nunca editada
+    nem apagada): comentário, mudança de status, direcionamento ou troca de
+    criticidade, cada um com autor e data/hora."""
+
+    __tablename__ = "ticket_interactions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    ticket_id: Mapped[str] = mapped_column(ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    author_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    message: Mapped[str | None] = mapped_column(Text)
+    # Para STATUS/ASSIGNMENT/CRITICALITY: valor anterior e novo (texto curto;
+    # em ASSIGNMENT guardam o NOME do usuário, pra o histórico continuar
+    # legível mesmo que o cadastro mude depois).
+    from_value: Mapped[str | None] = mapped_column(String(255))
+    to_value: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.utcnow())
+    ticket: Mapped[Ticket] = relationship(back_populates="interactions")
+    author: Mapped[User | None] = relationship()
 
 
 class ProjectLegacyConsumption(Base):

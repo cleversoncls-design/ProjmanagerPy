@@ -31,6 +31,7 @@ from .routers import (
     status_reports,
     task_groups,
     tasks,
+    tickets,
     timesheets,
     users,
 )
@@ -115,6 +116,7 @@ app.include_router(schedules.router)
 app.include_router(timesheets.router)
 app.include_router(expenses.router)
 app.include_router(legacy_consumption.router)
+app.include_router(tickets.router)
 app.include_router(calendars.router)
 app.include_router(risks.router)
 app.include_router(changes.router)

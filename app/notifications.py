@@ -22,7 +22,18 @@ from sqlalchemy.orm import Session
 from .email_service import get_email_settings, send_email
 from .ics import build_invite_ics, wall_clock_to_utc
 from .i18n import t as translate
-from .models import Project, Resource, ResourceSchedule, Task, Timesheet, TimesheetStatus, User
+from .models import (
+    Project,
+    Resource,
+    ResourceSchedule,
+    Task,
+    Ticket,
+    TicketInteraction,
+    TicketInteractionKind,
+    Timesheet,
+    TimesheetStatus,
+    User,
+)
 
 
 def _schedule_email_content(schedule: ResourceSchedule, user: User, *, created: bool) -> tuple[str, str, str]:
@@ -390,3 +401,89 @@ def send_pending_approval_digests(db: Session, *, dry_run: bool = False) -> list
                 kind="resumo_aprovacoes",
             )
     return summaries
+
+
+# ---------------------------------------------------------------------------
+# Tickets internos (pendentes)
+# ---------------------------------------------------------------------------
+
+_TICKET_STATUS_LABELS = {
+    "OPEN": "Aberto",
+    "ASSIGNED": "Direcionado",
+    "IN_PROGRESS": "Em atendimento",
+    "WAITING_REQUESTER": "Aguardando solicitante",
+    "RESOLVED": "Resolvido",
+    "CLOSED": "Fechado",
+}
+_TICKET_CRITICALITY_LABELS = {"LOW": "Baixa", "MEDIUM": "Média", "HIGH": "Alta", "CRITICAL": "Crítica"}
+
+
+def _ticket_email_content(ticket: Ticket, interaction: TicketInteraction, user: User) -> tuple[str, str, str]:
+    """(assunto, html, texto) do aviso de uma interação do ticket, no idioma
+    do destinatário."""
+    lang = user.language
+    kind = interaction.kind
+    author = interaction.author.name if interaction.author else "-"
+    if kind == TicketInteractionKind.CREATED.value:
+        headline = translate("Novo ticket aberto", lang)
+    elif kind == TicketInteractionKind.ASSIGNMENT.value:
+        headline = translate("Ticket direcionado para {name}", lang).format(name=interaction.to_value or "-")
+    elif kind == TicketInteractionKind.STATUS.value:
+        headline = translate("Status do ticket alterado para {status}", lang).format(
+            status=translate(_TICKET_STATUS_LABELS.get(interaction.to_value or "", interaction.to_value or "-"), lang)
+        )
+    elif kind == TicketInteractionKind.CRITICALITY.value:
+        headline = translate("Criticidade do ticket alterada para {level}", lang).format(
+            level=translate(_TICKET_CRITICALITY_LABELS.get(interaction.to_value or "", interaction.to_value or "-"), lang)
+        )
+    else:
+        headline = translate("Nova interação no ticket", lang)
+
+    subject = f"[{ticket.code}] {headline} — {ticket.title}"
+    task_label = f"{ticket.task.wbs_code} — {ticket.task.name}" if ticket.task else "-"
+    rows = [
+        (translate("Ticket", lang), f"{ticket.code} — {ticket.title}"),
+        (translate("Projeto", lang), f"{ticket.project.code} — {ticket.project.name}"),
+        (translate("Tarefa", lang), task_label),
+        (translate("Criticidade", lang), translate(_TICKET_CRITICALITY_LABELS.get(ticket.criticality, ticket.criticality), lang)),
+        (translate("Status", lang), translate(_TICKET_STATUS_LABELS.get(ticket.status, ticket.status), lang)),
+        (translate("Autor", lang), author),
+    ]
+    message = interaction.message
+    greeting = translate("Olá, {name}!", lang).format(name=user.name)
+    items_html = "".join(f"<li><strong>{h(label)}:</strong> {h(value)}</li>" for label, value in rows)
+    html_body = f"<p>{h(greeting)}</p><p>{h(headline)}</p><ul>{items_html}</ul>"
+    text_body = f"{greeting}\n\n{headline}\n\n" + "\n".join(f"{label}: {value}" for label, value in rows) + "\n"
+    if message:
+        html_body += f"<p><strong>{h(translate('Mensagem', lang))}:</strong></p><blockquote>{h(message).replace(chr(10), '<br>')}</blockquote>"
+        text_body += f"\n{translate('Mensagem', lang)}:\n{message}\n"
+    return subject, html_body, text_body
+
+
+def notify_ticket_interaction(interaction_id: str) -> None:
+    """Avisa por e-mail as partes do ticket (solicitante e responsável; o
+    gerente do projeto quando o ticket é aberto) sobre uma interação nova —
+    nunca o próprio autor. Chamada em segundo plano depois do commit; uma
+    falha de envio nunca desfaz nada (mesma regra dos demais avisos)."""
+    from .database import get_session_factory
+
+    session = get_session_factory()()
+    try:
+        interaction = session.get(TicketInteraction, interaction_id)
+        if not interaction:
+            return
+        ticket = interaction.ticket
+        recipients: dict[str, User] = {}
+        candidates = [ticket.requester, ticket.assignee]
+        if interaction.kind == TicketInteractionKind.CREATED.value:
+            candidates.append(session.get(User, ticket.project.manager_id))
+        for person in candidates:
+            if person and person.email and person.id != interaction.author_id:
+                recipients[person.id] = person
+        for person in recipients.values():
+            subject, html_body, text_body = _ticket_email_content(ticket, interaction, person)
+            send_email(
+                session, to_email=person.email, to_name=person.name, subject=subject, html_body=html_body, text_body=text_body, kind="ticket"
+            )
+    finally:
+        session.close()
