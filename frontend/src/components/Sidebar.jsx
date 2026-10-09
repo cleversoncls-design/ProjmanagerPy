@@ -64,12 +64,12 @@ const NAV_SECTIONS = [
     items: [
       { to: '/timesheets', label: 'Apontamento de horas', icon: ClipboardCheckIcon, roles: INTERNAL_ROLES },
       { to: '/service-orders', label: 'Ordens de Serviço', icon: FileTextIcon, roles: INTERNAL_ROLES },
-      // Tickets internos (pendentes) — pedido do usuário; todo perfil interno
-      // abre/acompanha os próprios, gerentes direcionam.
-      { to: '/tickets', label: 'Tickets', icon: FlagIcon, roles: INTERNAL_ROLES },
       { to: '/timesheet-approvals', label: 'Aprovações de horas', icon: BadgeCheckIcon, roles: MANAGEMENT_ROLES },
     ],
   },
+  // Tickets internos (pendentes) — item próprio no menu (pedido do usuário):
+  // todo perfil interno abre/acompanha os seus, gerentes direcionam.
+  { type: 'item', to: '/tickets', label: 'Tickets', icon: FlagIcon, roles: INTERNAL_ROLES },
   // "Conhecimento" (pedido do usuário, "NOVAS MELHORIAS": processo de
   // registro de conhecimento dos consultores) — três telas, cada uma com
   // seu próprio `roles` exatamente como o usuário especificou (ver
