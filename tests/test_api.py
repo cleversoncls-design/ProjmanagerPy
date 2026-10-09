@@ -4652,3 +4652,167 @@ def test_ticket_assignees_list_is_restricted_to_management(client, setup, db_ses
     assert env["dev"].email in [u["email"] for u in listed.json()]
     # Cliente (sem Recurso) e usuários sem Recurso não aparecem.
     assert setup["client_user_a"].email not in [u["email"] for u in listed.json()]
+
+
+# ---------------------------------------------------------------------------
+# Tickets: anexos e indicadores
+# ---------------------------------------------------------------------------
+
+_PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+_PDF = b"%PDF-1.4\n" + b"0" * 64
+
+
+def _attach(client, tid, headers, files, **data):
+    return client.post(
+        f"/tickets/{tid}/attachments",
+        files=[("files", (name, content, mime)) for name, content, mime in files],
+        data=data,
+        headers=headers,
+    )
+
+
+def test_ticket_attachments_upload_download_and_validation(client, setup, db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.routers.tickets.UPLOADS_DIR", tmp_path)
+    env = _ticket_env(client, setup, db_session)
+    ticket = _open_ticket(client, env, setup)
+    tid = ticket["id"]
+    created_interaction = ticket["interactions"][0]
+    assert created_interaction["attachments"] == []
+
+    # Anexo na abertura (interação CREATED do próprio autor).
+    on_create = _attach(
+        client, tid, env["requester_headers"], [("print.png", _PNG, "image/png")], interaction_id=created_interaction["id"]
+    )
+    assert on_create.status_code == 201, on_create.text
+    first = on_create.json()["interactions"][0]["attachments"]
+    assert [a["filename"] for a in first] == ["print.png"]
+    assert first[0]["size_bytes"] == len(_PNG)
+    assert len(on_create.json()["interactions"]) == 1  # não criou nova interação
+
+    # Só o autor da interação anexa a ela.
+    foreign = _attach(client, tid, env["pm_headers"], [("a.png", _PNG, "image/png")], interaction_id=created_interaction["id"])
+    assert foreign.status_code == 403
+    missing = _attach(client, tid, env["requester_headers"], [("a.png", _PNG, "image/png")], interaction_id="nao-existe")
+    assert missing.status_code == 404
+
+    # Sem interaction_id: vira um comentário com os arquivos.
+    commented = _attach(
+        client,
+        tid,
+        env["pm_headers"],
+        [("log.txt", b"erro 500\nstack", "text/plain"), ("laudo.pdf", _PDF, "application/pdf")],
+        message="Segue o log",
+    )
+    assert commented.status_code == 201, commented.text
+    last = commented.json()["interactions"][-1]
+    assert last["kind"] == "COMMENT" and last["message"] == "Segue o log"
+    assert sorted(a["filename"] for a in last["attachments"]) == ["laudo.pdf", "log.txt"]
+
+    # Download devolve os bytes originais, como arquivo.
+    attachment = first[0]
+    downloaded = client.get(f"/tickets/{tid}/attachments/{attachment['id']}", headers=env["requester_headers"])
+    assert downloaded.status_code == 200
+    assert downloaded.content == _PNG
+    assert "attachment" in downloaded.headers["content-disposition"]
+    assert downloaded.headers["x-content-type-options"] == "nosniff"
+    assert len(list(tmp_path.iterdir())) == 3
+
+    # Anexo de outro ticket não é baixável por este ticket.
+    other = _open_ticket(client, env, setup, title="Outro ticket")
+    assert client.get(f"/tickets/{other['id']}/attachments/{attachment['id']}", headers=env["requester_headers"]).status_code == 404
+    # Quem não enxerga o ticket não baixa.
+    assert client.get(f"/tickets/{tid}/attachments/{attachment['id']}", headers=env["dev_headers"]).status_code == 404
+
+
+def test_ticket_attachments_rejections(client, setup, db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.routers.tickets.UPLOADS_DIR", tmp_path)
+    env = _ticket_env(client, setup, db_session)
+    tid = _open_ticket(client, env, setup)["id"]
+    headers = env["requester_headers"]
+
+    assert _attach(client, tid, headers, [("virus.exe", b"MZ" + b"0" * 10, "application/octet-stream")]).status_code == 422
+    assert _attach(client, tid, headers, [("falso.png", b"isto nao e uma imagem", "image/png")]).status_code == 422
+    assert _attach(client, tid, headers, [("vazio.txt", b"", "text/plain")]).status_code == 422
+    big = _attach(client, tid, headers, [("grande.txt", b"x" * (10 * 1024 * 1024 + 1), "text/plain")])
+    assert big.status_code == 422
+    too_many = _attach(client, tid, headers, [(f"f{i}.txt", b"ok", "text/plain") for i in range(6)])
+    assert too_many.status_code == 422
+    # Se um arquivo é inválido, NENHUM é gravado e nenhuma interação nasce.
+    mixed = _attach(client, tid, headers, [("ok.txt", b"ok", "text/plain"), ("x.exe", b"MZ00", "application/octet-stream")])
+    assert mixed.status_code == 422
+    assert list(tmp_path.iterdir()) == []
+    assert len(client.get(f"/tickets/{tid}", headers=headers).json()["interactions"]) == 1
+
+    # Limite de 10 anexos por ticket.
+    for _ in range(2):
+        assert _attach(client, tid, headers, [(f"a{i}.txt", b"ok", "text/plain") for i in range(5)]).status_code == 201
+    over = _attach(client, tid, headers, [("extra.txt", b"ok", "text/plain")])
+    assert over.status_code == 422
+
+    # Ticket fechado não recebe anexos.
+    client.post(f"/tickets/{tid}/status", json={"status": "CLOSED", "message": "Cancelado"}, headers=env["pm_headers"])
+    closed = _attach(client, tid, headers, [("tarde.txt", b"ok", "text/plain")])
+    assert closed.status_code == 422
+
+
+def test_ticket_attachment_by_requester_returns_waiting_ticket_to_progress(client, setup, db_session, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.routers.tickets.UPLOADS_DIR", tmp_path)
+    env = _ticket_env(client, setup, db_session)
+    tid = _open_ticket(client, env, setup)["id"]
+    client.post(f"/tickets/{tid}/assign", json={"assignee_id": env["dev"].id}, headers=env["pm_headers"])
+    waiting = client.post(
+        f"/tickets/{tid}/status", json={"status": "WAITING_REQUESTER", "message": "Preciso do print"}, headers=env["dev_headers"]
+    )
+    assert waiting.status_code == 200, waiting.text
+    answered = _attach(client, tid, env["requester_headers"], [("print.png", _PNG, "image/png")], message="Aqui está")
+    assert answered.status_code == 201, answered.text
+    assert answered.json()["status"] == "IN_PROGRESS"
+
+
+def test_ticket_indicators(client, setup, db_session):
+    env = _ticket_env(client, setup, db_session)
+    critical = _open_ticket(client, env, setup, title="Parado", criticality="CRITICAL")
+    _open_ticket(client, env, setup, title="Dúvida", criticality="LOW")
+    done = _open_ticket(client, env, setup, title="Cancelado", criticality="MEDIUM")
+    client.post(f"/tickets/{critical['id']}/assign", json={"assignee_id": env["dev"].id}, headers=env["pm_headers"])
+    client.post(f"/tickets/{done['id']}/status", json={"status": "CLOSED", "message": "Não procede"}, headers=env["pm_headers"])
+    logged = client.post(
+        f"/tickets/{critical['id']}/time",
+        json={"date": "2026-10-05", "start_time": "09:00", "end_time": "11:00", "break_minutes": 0, "description": "Análise"},
+        headers=env["dev_headers"],
+    )
+    assert logged.status_code == 201, logged.text
+
+    response = client.get("/tickets-indicators", headers=setup["admin_headers"])
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total_tickets"] == 3 and body["open_tickets"] == 2 and body["closed_tickets"] == 1
+    assert body["open_by_criticality"]["CRITICAL"] == 1
+    assert body["open_by_criticality"]["LOW"] == 1
+    assert body["open_by_criticality"]["MEDIUM"] == 0  # o fechado não conta
+    assert body["by_status"]["CLOSED"] == 1
+    assert body["by_status"]["IN_PROGRESS"] == 1
+    assert body["by_status"]["OPEN"] == 1
+    assert sum(bucket["count"] for bucket in body["aging_buckets"]) == 2
+    assert body["aging_buckets"][0]["label"] == "0-2 dias" and body["aging_buckets"][0]["count"] == 2
+    assert len(body["oldest_open"]) == 2
+    assert float(body["hours_logged"]) == 2.0
+    project_row = body["hours_by_project"][0]
+    assert project_row["project_id"] == setup["project_a"].id
+    assert project_row["tickets_total"] == 3 and project_row["tickets_open"] == 2
+    assert float(project_row["hours_logged"]) == 2.0
+    dev_row = next(row for row in body["workload"] if row["user_id"] == env["dev"].id)
+    assert dev_row["open_tickets"] == 1 and float(dev_row["hours_logged"]) == 2.0
+
+    # Filtros: projeto sem tickets zera tudo.
+    empty = client.get("/tickets-indicators", params={"project_id": setup["project_b"].id}, headers=setup["admin_headers"]).json()
+    assert empty["total_tickets"] == 0 and empty["average_age_days"] is None
+    by_client = client.get(
+        "/tickets-indicators", params={"client_id": setup["project_a"].client_id}, headers=setup["admin_headers"]
+    ).json()
+    assert by_client["total_tickets"] == 3
+
+    # Gerente de Projetos vê o que conduz; consultor não acessa.
+    assert client.get("/tickets-indicators", headers=env["pm_headers"]).json()["total_tickets"] == 3
+    assert client.get("/tickets-indicators", headers=env["requester_headers"]).status_code == 403
+    assert client.get("/tickets-indicators", headers=env["dev_headers"]).status_code == 403

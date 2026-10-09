@@ -17,11 +17,15 @@ Projetos vê os dos projetos que gerencia; qualquer perfil interno vê os que
 abriu ou recebeu. Perfis do cliente não têm acesso (fluxo interno)."""
 from __future__ import annotations
 
+import os
+import uuid
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -38,6 +42,7 @@ from ..models import (
     Task,
     TaskStatus,
     Ticket,
+    TicketAttachment,
     TicketCriticality,
     TicketInteraction,
     TicketInteractionKind,
@@ -56,6 +61,7 @@ from ..schemas import (
     TicketCreate,
     TicketCriticalityChange,
     TicketDetail,
+    TicketIndicators,
     TicketRead,
     TicketStatusChange,
     TicketTimeEntry,
@@ -68,6 +74,50 @@ router = APIRouter(tags=["tickets"])
 _S = TicketStatus
 # Projetos em que ainda faz sentido abrir ticket.
 _CLOSED_PROJECT_STATUSES = {ProjectStatus.COMPLETED, ProjectStatus.CANCELLED, ProjectStatus.MODELO}
+
+# --- Anexos -----------------------------------------------------------------
+# Pasta dos arquivos (volume do Docker, ver docker-compose.yml). Lida a cada
+# chamada (`_upload_dir`) para os testes poderem trocar o valor.
+UPLOADS_DIR = Path(os.getenv("UPLOADS_DIR", "/app/uploads"))
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # por arquivo
+MAX_FILES_PER_UPLOAD = 5  # por envio
+MAX_ATTACHMENTS_PER_TICKET = 10
+# extensão -> tipo MIME (o tipo informado pelo navegador nunca é confiado).
+ALLOWED_ATTACHMENT_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "pdf": "application/pdf",
+    "txt": "text/plain",
+    "log": "text/plain",
+    "csv": "text/csv",
+    "json": "application/json",
+    "xml": "application/xml",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "xls": "application/vnd.ms-excel",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "doc": "application/msword",
+    "zip": "application/zip",
+}
+# Assinatura (primeiros bytes) das extensões em que ela é fixa: barra arquivo
+# renomeado (ex.: executável chamado .png).
+_SIGNATURES = {
+    "png": (b"\x89PNG\r\n\x1a\n",),
+    "jpg": (b"\xff\xd8\xff",),
+    "jpeg": (b"\xff\xd8\xff",),
+    "gif": (b"GIF87a", b"GIF89a"),
+    "pdf": (b"%PDF-",),
+    "xlsx": (b"PK\x03\x04",),
+    "docx": (b"PK\x03\x04",),
+    "zip": (b"PK\x03\x04", b"PK\x05\x06"),
+    "xls": (b"\xd0\xcf\x11\xe0",),
+    "doc": (b"\xd0\xcf\x11\xe0",),
+}
+
+
+def _upload_dir() -> Path:
+    return UPLOADS_DIR
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +237,13 @@ def _ticket_dict(ticket: Ticket, hours: tuple[Decimal, Decimal]) -> dict:
 
 def _detail(db: Session, ticket: Ticket, user: User) -> dict:
     payload = _ticket_dict(ticket, _hours_by_ticket(db, [ticket.id]).get(ticket.id, (Decimal("0"), Decimal("0"))))
+    attachments_by_interaction: dict[str | None, list[dict]] = defaultdict(list)
+    for attachment in db.scalars(
+        select(TicketAttachment).where(TicketAttachment.ticket_id == ticket.id).order_by(TicketAttachment.created_at)
+    ).all():
+        attachments_by_interaction[attachment.interaction_id].append(
+            {"id": attachment.id, "filename": attachment.filename, "content_type": attachment.content_type, "size_bytes": attachment.size_bytes}
+        )
     payload["interactions"] = [
         {
             "id": item.id,
@@ -197,6 +254,7 @@ def _detail(db: Session, ticket: Ticket, user: User) -> dict:
             "from_value": item.from_value,
             "to_value": item.to_value,
             "created_at": item.created_at,
+            "attachments": attachments_by_interaction.get(item.id, []),
         }
         for item in ticket.interactions
     ]
@@ -460,6 +518,17 @@ def change_ticket_status(
     return _detail(db, ticket, user)
 
 
+def _post_comment(db: Session, ticket: Ticket, user: User, message: str | None) -> TicketInteraction:
+    """Registra um comentário (com ou sem texto, quando só há anexos). Se o
+    solicitante responde enquanto o ticket está Aguardando solicitante, ele
+    volta sozinho a Em atendimento. Não dá commit."""
+    interaction = _add_interaction(db, ticket, user, TicketInteractionKind.COMMENT, message=message)
+    if ticket.status == _S.WAITING_REQUESTER.value and ticket.requester_id == user.id:
+        _set_status(db, ticket, user, _S.IN_PROGRESS)
+    record_audit(db, entity_type="ticket", entity_id=ticket.id, action=AuditAction.UPDATE, user_id=user.id, details={"comment": True})
+    return interaction
+
+
 @router.post("/tickets/{ticket_id}/comments", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
 def comment_ticket(
     ticket_id: str,
@@ -472,18 +541,10 @@ def comment_ticket(
     ticket = _get_ticket(db, ticket_id, user)
     if ticket.status == _S.CLOSED.value:
         raise HTTPException(status_code=422, detail=translate("Ticket fechado não aceita novas interações", user.language))
-    interaction = _add_interaction(db, ticket, user, TicketInteractionKind.COMMENT, message=data.message)
-    db.flush()
-    notify_ids = [interaction.id]
-    # O solicitante respondeu o que o responsável pediu: volta ao atendimento.
-    if ticket.status == _S.WAITING_REQUESTER.value and ticket.requester_id == user.id:
-        status_interaction = _set_status(db, ticket, user, _S.IN_PROGRESS)
-        notify_ids.append(status_interaction.id)
-    record_audit(db, entity_type="ticket", entity_id=ticket.id, action=AuditAction.UPDATE, user_id=user.id, details={"comment": True})
+    interaction = _post_comment(db, ticket, user, data.message)
     db.commit()
     db.refresh(ticket)
-    for interaction_id in notify_ids[:1]:
-        background_tasks.add_task(notify_ticket_interaction, interaction_id)
+    background_tasks.add_task(notify_ticket_interaction, interaction.id)
     return _detail(db, ticket, user)
 
 
@@ -558,3 +619,264 @@ def log_time(
     db.commit()
     db.refresh(ticket)
     return _detail(db, ticket, user)
+
+
+# ---------------------------------------------------------------------------
+# Anexos
+# ---------------------------------------------------------------------------
+
+
+def _extension(filename: str) -> str:
+    return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+
+def _clean_filename(filename: str) -> str:
+    """Só o nome (sem pasta) e sem caracteres de controle, no máximo 200."""
+    name = (filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    name = "".join(ch for ch in name if ch.isprintable()).strip()
+    return name[:200] or "arquivo"
+
+
+@router.post("/tickets/{ticket_id}/attachments", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
+async def upload_ticket_attachments(
+    ticket_id: str,
+    background_tasks: BackgroundTasks,
+    files: list[UploadFile] = File(...),
+    message: str | None = Form(None),
+    interaction_id: str | None = Form(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Anexa arquivos ao ticket. Sem `interaction_id`, o envio vira uma nova
+    interação (comentário, com `message` opcional); com `interaction_id`
+    (ex.: a abertura do ticket), anexa a uma interação SUA já existente."""
+    _require_internal(user)
+    ticket = _get_ticket(db, ticket_id, user)
+    lang = user.language
+    if ticket.status == _S.CLOSED.value:
+        raise HTTPException(status_code=422, detail=translate("Ticket fechado não aceita novas interações", lang))
+    if not files:
+        raise HTTPException(status_code=422, detail=translate("Selecione ao menos um arquivo", lang))
+    if len(files) > MAX_FILES_PER_UPLOAD:
+        raise HTTPException(
+            status_code=422, detail=translate("Máximo de {max} arquivos por envio", lang).format(max=MAX_FILES_PER_UPLOAD)
+        )
+    existing = db.scalar(select(func.count(TicketAttachment.id)).where(TicketAttachment.ticket_id == ticket.id)) or 0
+    if existing + len(files) > MAX_ATTACHMENTS_PER_TICKET:
+        raise HTTPException(
+            status_code=422,
+            detail=translate("O ticket aceita no máximo {max} anexos", lang).format(max=MAX_ATTACHMENTS_PER_TICKET),
+        )
+
+    # Valida TODOS os arquivos antes de gravar qualquer coisa.
+    prepared: list[tuple[str, str, bytes]] = []
+    for upload in files:
+        name = _clean_filename(upload.filename or "")
+        ext = _extension(name)
+        if ext not in ALLOWED_ATTACHMENT_TYPES:
+            raise HTTPException(
+                status_code=422,
+                detail=translate("Tipo de arquivo não permitido: {name}", lang).format(name=name),
+            )
+        content = await upload.read(MAX_ATTACHMENT_BYTES + 1)
+        if len(content) > MAX_ATTACHMENT_BYTES:
+            raise HTTPException(
+                status_code=422,
+                detail=translate("Arquivo muito grande (máximo {mb} MB): {name}", lang).format(mb=MAX_ATTACHMENT_BYTES // (1024 * 1024), name=name),
+            )
+        if not content:
+            raise HTTPException(status_code=422, detail=translate("Arquivo vazio: {name}", lang).format(name=name))
+        signatures = _SIGNATURES.get(ext)
+        if signatures and not content.startswith(signatures):
+            raise HTTPException(
+                status_code=422,
+                detail=translate("O conteúdo do arquivo não corresponde ao tipo informado: {name}", lang).format(name=name),
+            )
+        prepared.append((name, ext, content))
+
+    notify_id: str | None = None
+    if interaction_id:
+        interaction = db.get(TicketInteraction, interaction_id)
+        if not interaction or interaction.ticket_id != ticket.id:
+            raise HTTPException(status_code=404, detail=translate("Interação não encontrada", lang))
+        if interaction.author_id != user.id:
+            raise HTTPException(status_code=403, detail=translate("Só o autor da interação pode anexar arquivos a ela", lang))
+    else:
+        interaction = _post_comment(db, ticket, user, message)
+        notify_id = interaction.id
+
+    directory = _upload_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    try:
+        for name, ext, content in prepared:
+            stored_name = f"{uuid.uuid4().hex}.{ext}"
+            path = directory / stored_name
+            path.write_bytes(content)
+            written.append(path)
+            db.add(
+                TicketAttachment(
+                    ticket_id=ticket.id,
+                    interaction_id=interaction.id,
+                    filename=name,
+                    stored_name=stored_name,
+                    content_type=ALLOWED_ATTACHMENT_TYPES[ext],
+                    size_bytes=len(content),
+                    uploaded_by_id=user.id,
+                )
+            )
+        ticket.updated_at = datetime.utcnow()
+        db.commit()
+    except Exception:
+        # Falhou no meio (disco cheio, permissão...): não deixa arquivo órfão.
+        db.rollback()
+        for path in written:
+            path.unlink(missing_ok=True)
+        raise
+    db.refresh(ticket)
+    if notify_id:
+        background_tasks.add_task(notify_ticket_interaction, notify_id)
+    return _detail(db, ticket, user)
+
+
+@router.get("/tickets/{ticket_id}/attachments/{attachment_id}")
+def download_ticket_attachment(
+    ticket_id: str,
+    attachment_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    _require_internal(user)
+    ticket = _get_ticket(db, ticket_id, user)
+    attachment = db.get(TicketAttachment, attachment_id)
+    if not attachment or attachment.ticket_id != ticket.id:
+        raise HTTPException(status_code=404, detail=translate("Anexo não encontrado", user.language))
+    path = _upload_dir() / attachment.stored_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=translate("Arquivo do anexo não encontrado no servidor", user.language))
+    # Sempre como download (nunca inline) + nosniff: o navegador não
+    # interpreta o conteúdo enviado por um usuário.
+    return FileResponse(
+        path,
+        media_type=attachment.content_type,
+        filename=attachment.filename,
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Indicadores (gerentes)
+# ---------------------------------------------------------------------------
+
+_AGING_BUCKETS = [("0-2 dias", 0, 2), ("3-7 dias", 3, 7), ("8-15 dias", 8, 15), ("16+ dias", 16, 10**6)]
+
+
+@router.get("/tickets-indicators", response_model=TicketIndicators)
+def ticket_indicators(
+    project_id: str | None = None,
+    client_id: str | None = None,
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Indicadores para gerentes: abertos por criticidade e status, tempo de
+    espera (idade dos abertos), horas gastas em tickets por projeto e carga
+    por responsável. Administrador/Gerente de Serviços/Diretor Geral veem
+    tudo; Gerente de Projetos, só os projetos que conduz."""
+    query = select(Ticket).join(Project, Project.id == Ticket.project_id)
+    if user.role not in ADMIN_LIKE_ROLES:
+        query = query.where(Project.manager_id == user.id)
+    if project_id:
+        query = query.where(Ticket.project_id == project_id)
+    if client_id:
+        query = query.where(Project.client_id == client_id)
+    tickets = list(db.scalars(query).all())
+    ids = [ticket.id for ticket in tickets]
+    hours = _hours_by_ticket(db, ids)
+    zero = (Decimal("0"), Decimal("0"))
+    now = datetime.utcnow()
+
+    open_tickets = [ticket for ticket in tickets if ticket.status != _S.CLOSED.value]
+    ages = {ticket.id: max(0, (now - ticket.created_at).days) for ticket in open_tickets}
+
+    by_criticality = {level.value: 0 for level in TicketCriticality}
+    for ticket in open_tickets:
+        by_criticality[ticket.criticality] = by_criticality.get(ticket.criticality, 0) + 1
+    by_status = {state.value: 0 for state in TicketStatus}
+    for ticket in tickets:
+        by_status[ticket.status] = by_status.get(ticket.status, 0) + 1
+
+    buckets = [
+        {"label": label, "count": sum(1 for age in ages.values() if low <= age <= high)} for label, low, high in _AGING_BUCKETS
+    ]
+    oldest = sorted(open_tickets, key=lambda ticket: ages[ticket.id], reverse=True)[:8]
+    average_age = (Decimal(sum(ages.values())) / Decimal(len(ages))).quantize(Decimal("0.1")) if ages else None
+
+    projects: dict[str, dict] = {}
+    for ticket in tickets:
+        row = projects.setdefault(
+            ticket.project_id,
+            {
+                "project_id": ticket.project_id,
+                "project_code": ticket.project.code,
+                "project_name": ticket.project.name,
+                "tickets_total": 0,
+                "tickets_open": 0,
+                "hours_logged": Decimal("0"),
+                "hours_approved": Decimal("0"),
+            },
+        )
+        logged, approved = hours.get(ticket.id, zero)
+        row["tickets_total"] += 1
+        row["tickets_open"] += 1 if ticket.status != _S.CLOSED.value else 0
+        row["hours_logged"] += logged
+        row["hours_approved"] += approved
+
+    # Carga por responsável: tickets abertos direcionados + horas que a
+    # pessoa apontou em tickets.
+    workload: dict[str, dict] = {}
+    for ticket in open_tickets:
+        if ticket.assignee_id:
+            row = workload.setdefault(
+                ticket.assignee_id,
+                {"user_id": ticket.assignee_id, "name": ticket.assignee.name if ticket.assignee else "-", "open_tickets": 0, "hours_logged": Decimal("0")},
+            )
+            row["open_tickets"] += 1
+    if ids:
+        for owner_id, total in db.execute(
+            select(Resource.user_id, func.sum(Timesheet.hours_spent))
+            .join(Resource, Resource.id == Timesheet.resource_id)
+            .where(Timesheet.ticket_id.in_(ids), Timesheet.status != TimesheetStatus.REJECTED)
+            .group_by(Resource.user_id)
+        ).all():
+            owner = db.get(User, owner_id)
+            row = workload.setdefault(
+                owner_id, {"user_id": owner_id, "name": owner.name if owner else "-", "open_tickets": 0, "hours_logged": Decimal("0")}
+            )
+            row["hours_logged"] += Decimal(total or 0)
+
+    return {
+        "total_tickets": len(tickets),
+        "open_tickets": len(open_tickets),
+        "closed_tickets": len(tickets) - len(open_tickets),
+        "average_age_days": average_age,
+        "hours_logged": sum((value[0] for value in hours.values()), Decimal("0")),
+        "hours_approved": sum((value[1] for value in hours.values()), Decimal("0")),
+        "open_by_criticality": by_criticality,
+        "by_status": by_status,
+        "aging_buckets": buckets,
+        "oldest_open": [
+            {
+                "id": ticket.id,
+                "code": ticket.code,
+                "title": ticket.title,
+                "project_code": ticket.project.code,
+                "criticality": ticket.criticality,
+                "status": ticket.status,
+                "assignee_name": ticket.assignee.name if ticket.assignee else None,
+                "age_days": ages[ticket.id],
+            }
+            for ticket in oldest
+        ],
+        "hours_by_project": sorted(projects.values(), key=lambda row: row["hours_logged"], reverse=True),
+        "workload": sorted(workload.values(), key=lambda row: (row["open_tickets"], row["hours_logged"]), reverse=True),
+    }

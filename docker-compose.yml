@@ -39,6 +39,10 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-0}
       RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
+      # Pasta dos anexos dos tickets (montada no volume uploads_data).
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - uploads_data:/app/uploads
     ports:
       - "${API_PORT:-3035}:8000"
     depends_on:
@@ -75,3 +79,4 @@ services:
 
 volumes:
   postgres_data:
+  uploads_data:

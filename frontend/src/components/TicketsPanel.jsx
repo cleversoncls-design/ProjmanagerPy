@@ -3,6 +3,7 @@ import * as ticketsApi from '../api/tickets'
 import * as projectsApi from '../api/projects'
 import * as tasksApi from '../api/tasks'
 import * as clientsApi from '../api/clients'
+import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import Card from './Card'
 import Button from './Button'
@@ -12,9 +13,11 @@ import ErrorBanner from './ErrorBanner'
 import StatusPill from './StatusPill'
 import Table from './Table'
 import { FormField, TextInput, Select, TextArea } from './FormField'
+import TicketIndicators from './TicketIndicators'
+import { AttachmentList, AttachmentPicker } from './TicketAttachments'
 import { PlusIcon } from './icons'
 import { formatDateTime, formatHoursDuration, hmToMinutes } from '../utils/format'
-import { TICKET_CRITICALITY_TONE, TICKET_STATUS_TONE } from '../utils/labels'
+import { MANAGEMENT_ROLES, TICKET_CRITICALITY_TONE, TICKET_STATUS_TONE } from '../utils/labels'
 
 const CLOSED_PROJECT_STATUSES = ['COMPLETED', 'CANCELLED', 'MODELO']
 
@@ -28,6 +31,11 @@ function todayIso() {
  * projeto (`projectId` fixo). Ver app/routers/tickets.py. */
 export default function TicketsPanel({ projectId = null }) {
   const { t, labels } = useLanguage()
+  const { user } = useAuth()
+  // Indicadores só para perfis de gestão (a API também restringe).
+  const isManager = MANAGEMENT_ROLES.includes(user?.role)
+  const [showIndicators, setShowIndicators] = useState(true)
+  const [indicatorsKey, setIndicatorsKey] = useState(0)
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -38,6 +46,8 @@ export default function TicketsPanel({ projectId = null }) {
   const [projectOptions, setProjectOptions] = useState([])
   const [showNew, setShowNew] = useState(false)
   const [openTicketId, setOpenTicketId] = useState(null)
+  // Aviso mostrado ao abrir o ticket recém-criado (ex.: falha no envio dos anexos).
+  const [openNotice, setOpenNotice] = useState('')
 
   useEffect(() => {
     if (projectId) return
@@ -127,6 +137,16 @@ export default function TicketsPanel({ projectId = null }) {
 
   return (
     <div className="space-y-4">
+      {isManager && (
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <button type="button" onClick={() => setShowIndicators((prev) => !prev)} className="text-xs text-[var(--text-muted)] hover:underline">
+              {showIndicators ? t('Ocultar indicadores') : t('Mostrar indicadores')}
+            </button>
+          </div>
+          {showIndicators && <TicketIndicators projectId={projectId || filters.project_id || null} clientId={projectId ? '' : filters.client_id} reloadKey={indicatorsKey} />}
+        </div>
+      )}
       <Card
         title={t('Tickets (pendentes)')}
         action={
@@ -202,14 +222,29 @@ export default function TicketsPanel({ projectId = null }) {
         <NewTicketModal
           projectId={projectId}
           onClose={() => setShowNew(false)}
-          onCreated={(ticket) => {
+          onCreated={(ticket, notice) => {
             setShowNew(false)
             load()
+            setIndicatorsKey((prev) => prev + 1)
+            setOpenNotice(notice || '')
             setOpenTicketId(ticket.id)
           }}
         />
       )}
-      {openTicketId && <TicketDetailModal ticketId={openTicketId} onClose={() => setOpenTicketId(null)} onChanged={load} />}
+      {openTicketId && (
+        <TicketDetailModal
+          ticketId={openTicketId}
+          initialError={openNotice}
+          onClose={() => {
+            setOpenTicketId(null)
+            setOpenNotice('')
+          }}
+          onChanged={() => {
+            load()
+            setIndicatorsKey((prev) => prev + 1)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -225,6 +260,7 @@ function NewTicketModal({ projectId, onClose, onCreated }) {
     title: '',
     description: '',
   })
+  const [files, setFiles] = useState([])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -278,7 +314,18 @@ function NewTicketModal({ projectId, onClose, onCreated }) {
         title: form.title,
         description: form.description,
       })
-      onCreated(created)
+      // Anexos vão na interação de abertura. Se o envio falhar, o ticket já
+      // existe: abre o detalhe com o aviso para anexar de novo por lá.
+      let notice = ''
+      let ticket = created
+      if (files.length > 0) {
+        try {
+          ticket = await ticketsApi.uploadTicketAttachments(created.id, files, { interactionId: created.interactions[0].id })
+        } catch (err) {
+          notice = `${t('O ticket foi registrado, mas os anexos não foram enviados')}: ${err.message}`
+        }
+      }
+      onCreated(ticket, notice)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -330,6 +377,9 @@ function NewTicketModal({ projectId, onClose, onCreated }) {
         >
           <TextArea required rows={7} value={form.description} onChange={updateField('description')} />
         </FormField>
+        <FormField label={t('Anexos (opcional)')} hint={t('Print da tela, log de erro ou arquivo que ajude a reproduzir o problema.')}>
+          <AttachmentPicker files={files} onChange={setFiles} disabled={saving} />
+        </FormField>
         <ErrorBanner message={error} />
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="secondary" onClick={onClose}>
@@ -369,13 +419,14 @@ function statusActionLabel(ticket, target, t) {
   return t('Encerrar / cancelar ticket')
 }
 
-function TicketDetailModal({ ticketId, onClose, onChanged }) {
+function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) {
   const { t, labels } = useLanguage()
   const [ticket, setTicket] = useState(null)
   const [assignees, setAssignees] = useState([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(initialError)
   const [busy, setBusy] = useState(false)
+  const [commentFiles, setCommentFiles] = useState([])
   // null | 'assign' | 'criticality' | 'time' | { status }
   const [action, setAction] = useState(null)
   const [comment, setComment] = useState('')
@@ -624,6 +675,7 @@ function TicketDetailModal({ ticketId, onClose, onChanged }) {
                 </div>
                 <p className="mt-0.5 font-medium text-[var(--text-primary)]">{interactionTitle(item, labels, t)}</p>
                 {item.message && <p className="mt-1 whitespace-pre-wrap text-[var(--text-primary)]">{item.message}</p>}
+                <AttachmentList ticketId={ticket.id} attachments={item.attachments} onError={setError} />
               </li>
             ))}
           </ol>
@@ -634,13 +686,24 @@ function TicketDetailModal({ ticketId, onClose, onChanged }) {
             <FormField label={t('Nova interação')}>
               <TextArea rows={3} value={comment} onChange={(event) => setComment(event.target.value)} />
             </FormField>
+            <AttachmentPicker
+              files={commentFiles}
+              onChange={setCommentFiles}
+              alreadyAttached={ticket.interactions.reduce((total, item) => total + (item.attachments?.length || 0), 0)}
+              disabled={busy}
+            />
             <div className="flex justify-end">
               <Button
-                disabled={busy || !comment.trim()}
+                disabled={busy || (!comment.trim() && commentFiles.length === 0)}
                 onClick={() =>
                   run(async () => {
-                    const updated = await ticketsApi.commentTicket(ticket.id, comment)
+                    // Com arquivos, texto e anexos seguem juntos numa só interação.
+                    const updated =
+                      commentFiles.length > 0
+                        ? await ticketsApi.uploadTicketAttachments(ticket.id, commentFiles, { message: comment.trim() || undefined })
+                        : await ticketsApi.commentTicket(ticket.id, comment)
                     setComment('')
+                    setCommentFiles([])
                     return updated
                   })
                 }

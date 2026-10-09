@@ -1599,6 +1599,13 @@ class TicketTimeEntry(BaseModel):
     task_progress_percentage: Decimal | None = Field(default=None, ge=0, le=100)
 
 
+class TicketAttachmentRead(BaseModel):
+    id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+
+
 class TicketInteractionRead(BaseModel):
     id: str
     author_id: str | None
@@ -1608,6 +1615,7 @@ class TicketInteractionRead(BaseModel):
     from_value: str | None
     to_value: str | None
     created_at: datetime
+    attachments: list[TicketAttachmentRead] = []
 
 
 class TicketRead(BaseModel):
@@ -1654,3 +1662,53 @@ class TicketAssignee(ORMModel):
     id: str
     name: str
     email: str
+
+
+class TicketAgingBucket(BaseModel):
+    label: str
+    count: int
+
+
+class TicketOldest(BaseModel):
+    id: str
+    code: str
+    title: str
+    project_code: str
+    criticality: TicketCriticality
+    status: TicketStatus
+    assignee_name: str | None
+    age_days: int
+
+
+class TicketProjectHours(BaseModel):
+    project_id: str
+    project_code: str
+    project_name: str
+    tickets_total: int
+    tickets_open: int
+    hours_logged: Decimal
+    hours_approved: Decimal
+
+
+class TicketWorkload(BaseModel):
+    user_id: str
+    name: str
+    open_tickets: int
+    hours_logged: Decimal
+
+
+class TicketIndicators(BaseModel):
+    """Indicadores para gerentes (ver GET /tickets/indicators)."""
+
+    total_tickets: int
+    open_tickets: int
+    closed_tickets: int
+    average_age_days: Decimal | None
+    hours_logged: Decimal
+    hours_approved: Decimal
+    open_by_criticality: dict[str, int]
+    by_status: dict[str, int]
+    aging_buckets: list[TicketAgingBucket]
+    oldest_open: list[TicketOldest]
+    hours_by_project: list[TicketProjectHours]
+    workload: list[TicketWorkload]

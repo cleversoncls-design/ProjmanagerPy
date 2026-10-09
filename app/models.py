@@ -994,6 +994,25 @@ class TicketInteraction(Base):
     author: Mapped[User | None] = relationship()
 
 
+class TicketAttachment(Base):
+    """Arquivo anexado a um ticket (print, log, planilha...) — ligado a uma
+    interação do histórico (a abertura ou um comentário). O arquivo fica em
+    disco (volume do Docker, ver app/routers/tickets.py `_upload_dir`) com
+    nome gerado (`stored_name`); `filename` é o nome original, só para
+    exibição/download. Nunca é apagado nem editado (histórico imutável)."""
+
+    __tablename__ = "ticket_attachments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    ticket_id: Mapped[str] = mapped_column(ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    interaction_id: Mapped[str | None] = mapped_column(ForeignKey("ticket_interactions.id", ondelete="SET NULL"), index=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    uploaded_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.utcnow())
+
+
 class ProjectLegacyConsumption(Base):
     """Consumo já apropriado no SISTEMA ANTERIOR (pedido do usuário: projetos
     migrados chegam com horas já consumidas, a um custo médio por hora). Cada

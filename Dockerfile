@@ -17,7 +17,11 @@ COPY README.md .
 
 # A imagem de produção não roda como root: cria um usuário dedicado e
 # entrega a ele a posse do diretório de trabalho.
+# /app/uploads recebe os anexos dos tickets (volume Docker nomeado, ver
+# docker-compose.yml) e precisa existir com dono "app" para o volume herdar
+# a permissão na primeira criação.
 RUN addgroup --system app && adduser --system --ingroup app app \
+    && mkdir -p /app/uploads \
     && chown -R app:app /app
 USER app
 
