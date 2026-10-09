@@ -94,6 +94,18 @@ def _recalculate_actual_hours(db: Session, task_id: str | None) -> None:
     task.actual_hours = sum((Decimal(h) for h in hours), Decimal("0"))
 
 
+def _ticket_authorizes_time(data: TimesheetCreate, task: Task, user: User, db: Session) -> bool:
+    """O apontamento cita um ticket DESTA tarefa em que o usuário é o
+    responsável (ou é perfil de gestão)? Só decide a dispensa da alocação;
+    as demais regras (ticket fechado etc.) continuam em `_validate_ticket`."""
+    if not data.ticket_id:
+        return False
+    ticket = db.get(Ticket, data.ticket_id)
+    if not ticket or ticket.task_id != task.id:
+        return False
+    return ticket.assignee_id == user.id or user.role in _MANAGEMENT_ROLES
+
+
 def _resolve_task_and_project(
     data: TimesheetCreate, resource: Resource, user: User, db: Session
 ) -> tuple[Task | None, Project | None]:
@@ -166,7 +178,14 @@ def _resolve_task_and_project(
         assignment = db.scalar(
             select(TaskAssignment).where(TaskAssignment.task_id == task.id, TaskAssignment.resource_id == resource.id)
         )
-        if not assignment and not is_project_manager:
+        # Exceção dos tickets: o responsável do ticket (ou um perfil de
+        # gestão) pode apontar na tarefa do ticket mesmo sem estar alocado
+        # nela nem no projeto — quem é acionado para resolver um incidente
+        # nem sempre faz parte do projeto. O apontamento segue o fluxo normal
+        # (Pendente de aprovação; sem agenda no dia, exige aprovação de
+        # Administrador, ver _resolve_schedule).
+        ticket_authorizes = _ticket_authorizes_time(data, task, user, db)
+        if not assignment and not is_project_manager and not ticket_authorizes:
             # Busca em cascata (pedido do usuário): "sempre busca primeiro
             # na tarefa e depois no projeto". Este recurso não está alocado
             # NESTA tarefa — mas se a tarefa não tem NENHUM recurso alocado

@@ -39,6 +39,20 @@ export function logTicketTime(ticketId, payload) {
   return api.post(`/tickets/${ticketId}/time`, payload)
 }
 
+/** Cronômetro de atendimento (servidor): iniciar / finalizar (gera o
+ * apontamento com a hora final do momento) / descartar. */
+export function startTicketWork(ticketId) {
+  return api.post(`/tickets/${ticketId}/work/start`, {})
+}
+
+export function finishTicketWork(ticketId, payload) {
+  return api.post(`/tickets/${ticketId}/work/finish`, payload)
+}
+
+export function cancelTicketWork(ticketId) {
+  return api.post(`/tickets/${ticketId}/work/cancel`, {})
+}
+
 /** Indicadores para gerentes (abertos por criticidade/status, idade, horas por
  * projeto, carga por responsável). Só perfis de gestão. */
 export function getTicketIndicators(params) {

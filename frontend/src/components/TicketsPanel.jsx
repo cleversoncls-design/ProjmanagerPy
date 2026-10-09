@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as ticketsApi from '../api/tickets'
 import * as projectsApi from '../api/projects'
 import * as tasksApi from '../api/tasks'
 import * as clientsApi from '../api/clients'
+import { useAuth } from '../context/AuthContext'
 import { useLanguage } from '../context/LanguageContext'
 import Card from './Card'
 import Button from './Button'
@@ -385,14 +386,20 @@ const CRITICALITY_HINTS = {
 }
 
 // Mensagem obrigatória nestas mudanças de status (espelha tickets.py).
-function statusNeedsMessage(ticket, target) {
+function statusNeedsMessage(ticket, target, userId) {
   if (target === 'WAITING_REQUESTER' || target === 'RESOLVED') return true
   if (target === 'IN_PROGRESS' && (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')) return true
-  if (target === 'CLOSED' && ticket.status !== 'RESOLVED') return true
+  if (target === 'CLOSED' && ticket.status !== 'RESOLVED' && !requesterConfirms(ticket, target, userId)) return true
   return false
 }
 
-function statusActionLabel(ticket, target, t) {
+// O solicitante confirmando a solução com o ticket ainda em atendimento.
+function requesterConfirms(ticket, target, userId) {
+  return target === 'CLOSED' && ticket.requester_id === userId && (ticket.status === 'IN_PROGRESS' || ticket.status === 'WAITING_REQUESTER')
+}
+
+function statusActionLabel(ticket, target, t, userId) {
+  if (requesterConfirms(ticket, target, userId)) return t('Confirmar como resolvido e fechar')
   if (target === 'IN_PROGRESS' && ticket.status === 'ASSIGNED') return t('Iniciar atendimento')
   if (target === 'IN_PROGRESS' && ticket.status === 'WAITING_REQUESTER') return t('Voltar ao atendimento')
   if (target === 'IN_PROGRESS') return t('Reabrir (não resolvido)')
@@ -404,12 +411,19 @@ function statusActionLabel(ticket, target, t) {
 
 function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) {
   const { t, labels } = useLanguage()
+  const { user } = useAuth()
   const [ticket, setTicket] = useState(null)
   const [assignees, setAssignees] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(initialError)
   const [busy, setBusy] = useState(false)
   const [commentFiles, setCommentFiles] = useState([])
+  // Cronômetro de atendimento: o servidor guarda o início; aqui só se soma o
+  // tempo decorrido desde que a resposta chegou.
+  const [workMessage, setWorkMessage] = useState('')
+  const [workBreak, setWorkBreak] = useState('00:00')
+  const [now, setNow] = useState(Date.now())
+  const receivedAt = useRef(Date.now())
   // null | 'assign' | 'criticality' | 'time' | { status }
   const [action, setAction] = useState(null)
   const [comment, setComment] = useState('')
@@ -425,6 +439,18 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }, [ticketId])
+
+  useEffect(() => {
+    receivedAt.current = Date.now()
+    setNow(Date.now())
+  }, [ticket])
+
+  const hasWorkSession = Boolean(ticket?.my_work_session)
+  useEffect(() => {
+    if (!hasWorkSession) return undefined
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [hasWorkSession])
 
   useEffect(() => {
     if (ticket?.can_assign && assignees.length === 0) {
@@ -475,6 +501,11 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
 
   const closed = ticket.status === 'CLOSED'
   const statusAction = action && typeof action === 'object' ? action.status : null
+  const workSession = ticket.my_work_session
+  const elapsedSeconds = workSession ? workSession.elapsed_seconds + Math.max(0, Math.floor((now - receivedAt.current) / 1000)) : 0
+  // "Iniciar atendimento" (cronômetro) substitui o botão de status de mesmo nome
+  // para quem pode apontar tempo.
+  const statusTargets = ticket.allowed_statuses.filter((target) => !(target === 'IN_PROGRESS' && ticket.status === 'ASSIGNED' && ticket.can_log_time))
 
   return (
     <Modal title={`${ticket.code} — ${ticket.title}`} onClose={onClose} wide>
@@ -511,9 +542,14 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
                 {ticket.assignee_id ? t('Redirecionar') : t('Direcionar')}
               </Button>
             )}
+            {ticket.can_log_time && !workSession && (
+              <Button disabled={busy || Boolean(ticket.my_other_work_ticket)} onClick={() => run(() => ticketsApi.startTicketWork(ticket.id))}>
+                {t('Iniciar atendimento')}
+              </Button>
+            )}
             {ticket.can_log_time && (
               <Button variant="secondary" onClick={() => openAction('time')}>
-                {t('Apontar tempo')}
+                {t('Apontar tempo manualmente')}
               </Button>
             )}
             {ticket.can_change_criticality && (
@@ -529,13 +565,65 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
             )}
           </div>
         )}
-        {(ticket.allowed_statuses.length > 0 || closed) && (
+        {ticket.can_log_time && !workSession && ticket.my_other_work_ticket && !closed && (
+          <p className="text-xs text-[var(--text-muted)]">
+            {t('Você já tem um atendimento em andamento no ticket')} {ticket.my_other_work_ticket}. {t('Finalize-o para iniciar outro.')}
+          </p>
+        )}
+        {(statusTargets.length > 0 || closed) && (
           <div className="flex flex-wrap gap-2">
-            {ticket.allowed_statuses.map((target) => (
-              <Button key={target} variant={target === 'CLOSED' && ticket.status === 'RESOLVED' ? 'primary' : 'secondary'} onClick={() => openAction({ status: target })}>
-                {statusActionLabel(ticket, target, t)}
+            {statusTargets.map((target) => (
+              <Button
+                key={target}
+                variant={target === 'CLOSED' && (ticket.status === 'RESOLVED' || requesterConfirms(ticket, target, user?.id)) ? 'primary' : 'secondary'}
+                onClick={() => openAction({ status: target })}
+              >
+                {statusActionLabel(ticket, target, t, user?.id)}
               </Button>
             ))}
+          </div>
+        )}
+
+        {workSession && !closed && (
+          <div className="space-y-3 rounded-lg border-2 border-[var(--series-1)] bg-[var(--page)] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-[var(--text-primary)]">{t('Atendimento em andamento')}</p>
+                <p className="text-xs text-[var(--text-muted)]">{t('Ao finalizar, a hora final é a do momento e o apontamento é gerado na tarefa do ticket.')}</p>
+              </div>
+              <p className="text-2xl font-bold tabular-nums text-[var(--series-1)]">{formatClock(elapsedSeconds)}</p>
+            </div>
+            <FormField label={t('Detalhes do atendimento')} hint={t('O que foi feito — vai para o histórico do ticket e para o apontamento.')}>
+              <TextArea rows={3} value={workMessage} onChange={(event) => setWorkMessage(event.target.value)} />
+            </FormField>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div className="w-32">
+                <FormField label={t('Intervalo')}>
+                  <TextInput type="time" value={workBreak} onChange={(event) => setWorkBreak(event.target.value)} />
+                </FormField>
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" disabled={busy} onClick={() => run(() => ticketsApi.cancelTicketWork(ticket.id))}>
+                  {t('Descartar')}
+                </Button>
+                <Button
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      const updated = await ticketsApi.finishTicketWork(ticket.id, {
+                        message: workMessage.trim() || null,
+                        break_minutes: hmToMinutes(workBreak),
+                      })
+                      setWorkMessage('')
+                      setWorkBreak('00:00')
+                      return updated
+                    })
+                  }
+                >
+                  {t('Finalizar atendimento')}
+                </Button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -586,15 +674,15 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
         )}
 
         {statusAction && (
-          <ActionBox title={statusActionLabel(ticket, statusAction, t)} onCancel={() => setAction(null)}>
+          <ActionBox title={statusActionLabel(ticket, statusAction, t, user?.id)} onCancel={() => setAction(null)}>
             <FormField
-              label={statusNeedsMessage(ticket, statusAction) ? t('Mensagem') : t('Mensagem (opcional)')}
-              required={statusNeedsMessage(ticket, statusAction)}
+              label={statusNeedsMessage(ticket, statusAction, user?.id) ? t('Mensagem') : t('Mensagem (opcional)')}
+              required={statusNeedsMessage(ticket, statusAction, user?.id)}
             >
               <TextArea rows={3} value={message} onChange={(event) => setMessage(event.target.value)} />
             </FormField>
             <Button
-              disabled={busy || (statusNeedsMessage(ticket, statusAction) && !message.trim())}
+              disabled={busy || (statusNeedsMessage(ticket, statusAction, user?.id) && !message.trim())}
               onClick={() => run(() => ticketsApi.changeTicketStatus(ticket.id, { status: statusAction, message }))}
             >
               {t('Confirmar')}
@@ -649,19 +737,7 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
 
         <div>
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">{t('Histórico')}</p>
-          <ol className="space-y-2">
-            {ticket.interactions.map((item) => (
-              <li key={item.id} className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm">
-                <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-[var(--text-muted)]">
-                  <span className="font-medium text-[var(--text-secondary)]">{item.author_name || '—'}</span>
-                  <span>{formatDateTime(item.created_at)}</span>
-                </div>
-                <p className="mt-0.5 font-medium text-[var(--text-primary)]">{interactionTitle(item, labels, t)}</p>
-                {item.message && <p className="mt-1 whitespace-pre-wrap text-[var(--text-primary)]">{item.message}</p>}
-                <AttachmentList ticketId={ticket.id} attachments={item.attachments} onError={setError} />
-              </li>
-            ))}
-          </ol>
+          <TicketChat ticket={ticket} onError={setError} />
         </div>
 
         {ticket.can_comment && (
@@ -698,6 +774,67 @@ function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) 
         )}
       </div>
     </Modal>
+  )
+}
+
+function formatClock(totalSeconds) {
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':')
+}
+
+// Interações sem texto e sem arquivo (direcionou, mudou status/criticidade)
+// aparecem como um aviso centralizado; as demais viram "balões" de conversa.
+function isEvent(item) {
+  return ['ASSIGNMENT', 'STATUS', 'CRITICALITY'].includes(item.kind) && !item.message
+}
+
+/** Histórico em formato de conversa: o solicitante de um lado (balão azul
+ * clarinho) e quem respondeu — responsável, gerente — do outro (balão cinza
+ * claro), cada balão com nome e horário. */
+function TicketChat({ ticket, onError }) {
+  const { t, labels } = useLanguage()
+  return (
+    <ol className="flex flex-col gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--page)] p-3">
+      {ticket.interactions.map((item) => {
+        if (isEvent(item)) {
+          return (
+            <li key={item.id} className="self-center text-center text-[11px] text-[var(--text-muted)]">
+              <span className="rounded-full bg-[var(--grid)] px-3 py-1">
+                {interactionTitle(item, labels, t)} · {item.author_name || '—'} · {formatDateTime(item.created_at)}
+              </span>
+            </li>
+          )
+        }
+        const fromRequester = item.author_id === ticket.requester_id
+        return (
+          <li key={item.id} className={`flex ${fromRequester ? 'justify-start' : 'justify-end'}`}>
+            <div
+              className="max-w-[88%] rounded-2xl px-3 py-2 text-sm"
+              style={{
+                backgroundColor: fromRequester ? 'color-mix(in srgb, var(--series-1) 12%, var(--surface))' : 'var(--grid)',
+                borderTopLeftRadius: fromRequester ? 4 : undefined,
+                borderTopRightRadius: fromRequester ? undefined : 4,
+              }}
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-[11px]">
+                <span className="font-semibold text-[var(--text-secondary)]">
+                  {item.author_name || '—'}
+                  {fromRequester && <span className="ml-1 font-normal text-[var(--text-muted)]">({t('solicitante')})</span>}
+                </span>
+                <span className="text-[var(--text-muted)]">{formatDateTime(item.created_at)}</span>
+              </div>
+              {(item.kind !== 'COMMENT' || item.from_value) && (
+                <p className="mt-0.5 text-xs font-medium text-[var(--text-primary)]">{interactionTitle(item, labels, t)}</p>
+              )}
+              {item.message && <p className="mt-1 whitespace-pre-wrap text-[var(--text-primary)]">{item.message}</p>}
+              <AttachmentList ticketId={ticket.id} attachments={item.attachments} onError={onError} />
+            </div>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 

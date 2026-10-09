@@ -1013,6 +1013,23 @@ class TicketAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.utcnow())
 
 
+class TicketWorkSession(Base):
+    """Cronômetro de atendimento do ticket: o responsável aperta "Iniciar
+    atendimento" (cria a sessão, `ended_at` vazio) e "Finalizar atendimento"
+    (fecha a sessão e gera o apontamento de horas na tarefa do ticket, com a
+    hora final do momento). Fica no servidor — não se perde se a tela
+    fechar. Um usuário só tem UMA sessão aberta por vez (em qualquer
+    ticket)."""
+
+    __tablename__ = "ticket_work_sessions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    ticket_id: Mapped[str] = mapped_column(ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.utcnow())
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime)
+    timesheet_id: Mapped[str | None] = mapped_column(ForeignKey("timesheets.id", ondelete="SET NULL"))
+
+
 class ProjectLegacyConsumption(Base):
     """Consumo já apropriado no SISTEMA ANTERIOR (pedido do usuário: projetos
     migrados chegam com horas já consumidas, a um custo médio por hora). Cada

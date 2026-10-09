@@ -1599,6 +1599,23 @@ class TicketTimeEntry(BaseModel):
     task_progress_percentage: Decimal | None = Field(default=None, ge=0, le=100)
 
 
+class TicketWorkFinish(BaseModel):
+    """Finalizar atendimento: a hora final é a do momento do clique; o texto
+    é o que foi feito (vai para o histórico e para o apontamento)."""
+
+    message: str | None = None
+    break_minutes: int = Field(default=0, ge=0)
+    task_progress_percentage: Decimal | None = Field(default=None, ge=0, le=100)
+
+
+class TicketWorkSessionRead(BaseModel):
+    id: str
+    started_at: datetime
+    # Segundos corridos no momento da resposta (a tela só soma o tempo
+    # decorrido desde que a recebeu — não depende do relógio/fuso dela).
+    elapsed_seconds: int
+
+
 class TicketAttachmentRead(BaseModel):
     id: str
     filename: str
@@ -1656,6 +1673,10 @@ class TicketDetail(TicketRead):
     can_comment: bool
     can_log_time: bool
     can_change_criticality: bool
+    # Atendimento (cronômetro) em andamento do PRÓPRIO usuário neste ticket.
+    my_work_session: TicketWorkSessionRead | None = None
+    # Há atendimento em andamento do usuário em OUTRO ticket (código).
+    my_other_work_ticket: str | None = None
 
 
 class TicketAssignee(ORMModel):

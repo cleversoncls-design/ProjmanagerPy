@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, time, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from ..audit import record_audit
 from ..database import get_db
+from ..ics import app_timezone
 from ..deps import ADMIN_LIKE_ROLES, INTERNAL_ROLES, MANAGEMENT_ROLES, get_current_user, require_roles
 from ..i18n import t as translate
 from ..models import (
@@ -47,6 +48,7 @@ from ..models import (
     TicketInteraction,
     TicketInteractionKind,
     TicketStatus,
+    TicketWorkSession,
     Timesheet,
     TimesheetStatus,
     User,
@@ -65,6 +67,7 @@ from ..schemas import (
     TicketRead,
     TicketStatusChange,
     TicketTimeEntry,
+    TicketWorkFinish,
     TimesheetCreate,
 )
 from .timesheets import create_timesheet_entry
@@ -169,6 +172,10 @@ def _allowed_statuses(ticket: Ticket, user: User) -> list[TicketStatus]:
     if requester or manager:
         if current == _S.RESOLVED:
             allowed |= {_S.CLOSED, _S.IN_PROGRESS}
+    if requester and current in (_S.IN_PROGRESS, _S.WAITING_REQUESTER):
+        # O solicitante recebeu o retorno e confirma que resolveu: fecha o
+        # ticket direto, sem esperar o responsável marcar "Resolvido".
+        allowed.add(_S.CLOSED)
     if manager:
         if current != _S.CLOSED:
             allowed.add(_S.CLOSED)  # cancelamento / encerramento pelo gerente
@@ -235,6 +242,12 @@ def _ticket_dict(ticket: Ticket, hours: tuple[Decimal, Decimal]) -> dict:
     }
 
 
+def _active_session(db: Session, user: User) -> TicketWorkSession | None:
+    return db.scalar(
+        select(TicketWorkSession).where(TicketWorkSession.user_id == user.id, TicketWorkSession.ended_at.is_(None))
+    )
+
+
 def _detail(db: Session, ticket: Ticket, user: User) -> dict:
     payload = _ticket_dict(ticket, _hours_by_ticket(db, [ticket.id]).get(ticket.id, (Decimal("0"), Decimal("0"))))
     attachments_by_interaction: dict[str | None, list[dict]] = defaultdict(list)
@@ -265,6 +278,16 @@ def _detail(db: Session, ticket: Ticket, user: User) -> dict:
     payload["can_comment"] = open_ticket and _can_view(ticket, user)
     payload["can_log_time"] = open_ticket and (ticket.assignee_id == user.id or user.role in MANAGEMENT_ROLES)
     payload["can_change_criticality"] = manager and open_ticket
+    active = _active_session(db, user)
+    payload["my_work_session"] = None
+    payload["my_other_work_ticket"] = None
+    if active is not None:
+        if active.ticket_id == ticket.id:
+            elapsed = max(0, int((datetime.utcnow() - active.started_at).total_seconds()))
+            payload["my_work_session"] = {"id": active.id, "started_at": active.started_at, "elapsed_seconds": elapsed}
+        else:
+            other = db.get(Ticket, active.ticket_id)
+            payload["my_other_work_ticket"] = other.code if other else None
     return payload
 
 
@@ -505,12 +528,21 @@ def change_ticket_status(
         raise HTTPException(status_code=422, detail=translate("Mudança de status não permitida para este ticket", user.language))
     message = (data.message or "").strip()
     # Pedir informação, concluir, reabrir e cancelar exigem explicação.
+    # Exceção: o solicitante confirmando a solução (ticket ainda em
+    # atendimento) fecha sem precisar de texto.
+    requester_confirms = (
+        data.status == _S.CLOSED
+        and ticket.requester_id == user.id
+        and ticket.status in (_S.IN_PROGRESS.value, _S.WAITING_REQUESTER.value)
+    )
     needs_message = data.status in (_S.WAITING_REQUESTER, _S.RESOLVED) or (
         data.status == _S.IN_PROGRESS and ticket.status in (_S.RESOLVED.value, _S.CLOSED.value)
-    ) or (data.status == _S.CLOSED and ticket.status != _S.RESOLVED.value)
+    ) or (data.status == _S.CLOSED and ticket.status != _S.RESOLVED.value and not requester_confirms)
     if needs_message and not message:
         raise HTTPException(status_code=422, detail=translate("Informe uma mensagem para esta mudança de status", user.language))
     interaction = _set_status(db, ticket, user, data.status, message)
+    if requester_confirms:
+        ticket.resolved_at = ticket.closed_at
     record_audit(db, entity_type="ticket", entity_id=ticket.id, action=AuditAction.UPDATE, user_id=user.id, details={"status": data.status.value})
     db.commit()
     db.refresh(ticket)
@@ -588,6 +620,65 @@ def log_time(
     registra a linha "tempo apontado" no histórico."""
     _require_internal(user)
     ticket = _get_ticket(db, ticket_id, user)
+    _require_time_permission(ticket, user)
+
+    _register_ticket_time(
+        db,
+        ticket,
+        user,
+        day=data.date,
+        start=data.start_time,
+        end=data.end_time,
+        break_minutes=data.break_minutes,
+        description=data.description,
+        progress=data.task_progress_percentage,
+    )
+    db.commit()
+    db.refresh(ticket)
+    return _detail(db, ticket, user)
+
+
+def _register_ticket_time(
+    db: Session,
+    ticket: Ticket,
+    user: User,
+    *,
+    day,
+    start: time,
+    end: time,
+    break_minutes: int,
+    description: str | None,
+    progress: Decimal | None,
+):
+    """Cria o apontamento na TAREFA do ticket (Pendente de aprovação, mesmas
+    regras do apontamento normal) e a linha "tempo apontado" no histórico;
+    ASSIGNED vira IN_PROGRESS. Não dá commit. Compartilhada pelo apontamento
+    manual e por "Finalizar atendimento"."""
+    entry = create_timesheet_entry(
+        TimesheetCreate(
+            task_id=ticket.task_id,
+            ticket_id=ticket.id,
+            date=day,
+            start_time=start,
+            end_time=end,
+            break_minutes=break_minutes,
+            description=description,
+            task_progress_percentage=progress,
+        ),
+        user,
+        db,
+    )
+    period = f"{day.strftime('%d/%m/%Y')} {start.strftime('%H:%M')}-{end.strftime('%H:%M')}"
+    interaction = _add_interaction(
+        db, ticket, user, TicketInteractionKind.TIME, message=description, from_value=period, to_value=str(entry.hours_spent)
+    )
+    # Começou a trabalhar: ASSIGNED vira IN_PROGRESS sozinho.
+    if ticket.status == _S.ASSIGNED.value:
+        _set_status(db, ticket, user, _S.IN_PROGRESS)
+    return entry, interaction
+
+
+def _require_time_permission(ticket: Ticket, user: User) -> None:
     if ticket.status == _S.CLOSED.value:
         raise HTTPException(status_code=422, detail=translate("Não é possível apontar horas em um ticket fechado", user.language))
     if ticket.assignee_id != user.id and user.role not in MANAGEMENT_ROLES:
@@ -595,27 +686,93 @@ def log_time(
     if not ticket.task_id:
         raise HTTPException(status_code=422, detail=translate("O ticket não tem tarefa vinculada para receber o apontamento", user.language))
 
-    entry = create_timesheet_entry(
-        TimesheetCreate(
-            task_id=ticket.task_id,
-            ticket_id=ticket.id,
-            date=data.date,
-            start_time=data.start_time,
-            end_time=data.end_time,
-            break_minutes=data.break_minutes,
-            description=data.description,
-            task_progress_percentage=data.task_progress_percentage,
-        ),
-        user,
-        db,
-    )
-    period = f"{data.date.strftime('%d/%m/%Y')} {data.start_time.strftime('%H:%M')}-{data.end_time.strftime('%H:%M')}"
-    _add_interaction(
-        db, ticket, user, TicketInteractionKind.TIME, message=data.description, from_value=period, to_value=str(entry.hours_spent)
-    )
-    # Começou a trabalhar: ASSIGNED vira IN_PROGRESS sozinho.
+
+@router.post("/tickets/{ticket_id}/work/start", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
+def start_work(ticket_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """"Iniciar atendimento": começa o cronômetro do responsável. Um usuário
+    só tem um atendimento aberto por vez. ASSIGNED vira IN_PROGRESS."""
+    _require_internal(user)
+    ticket = _get_ticket(db, ticket_id, user)
+    _require_time_permission(ticket, user)
+    if not db.scalar(select(Resource.id).where(Resource.user_id == user.id)):
+        raise HTTPException(status_code=422, detail=translate("Usuário não possui recurso habilitado", user.language))
+    active = _active_session(db, user)
+    if active is not None:
+        other = db.get(Ticket, active.ticket_id)
+        raise HTTPException(
+            status_code=422,
+            detail=translate("Você já tem um atendimento em andamento no ticket {code}", user.language).format(code=other.code if other else "-"),
+        )
+    db.add(TicketWorkSession(ticket_id=ticket.id, user_id=user.id, started_at=datetime.utcnow()))
     if ticket.status == _S.ASSIGNED.value:
         _set_status(db, ticket, user, _S.IN_PROGRESS)
+    db.commit()
+    db.refresh(ticket)
+    return _detail(db, ticket, user)
+
+
+@router.post("/tickets/{ticket_id}/work/finish", response_model=TicketDetail)
+def finish_work(
+    ticket_id: str,
+    data: TicketWorkFinish,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """"Finalizar atendimento" (não finaliza o ticket): pega a hora do
+    momento como hora final e gera o apontamento de horas na tarefa do
+    ticket. Horários no fuso da aplicação (APP_TIMEZONE); se o atendimento
+    atravessou a meia-noite, o apontamento é cortado em 23:59 do dia em que
+    começou (um apontamento nunca cruza a virada do dia)."""
+    _require_internal(user)
+    ticket = _get_ticket(db, ticket_id, user)
+    session = _active_session(db, user)
+    if session is None or session.ticket_id != ticket.id:
+        raise HTTPException(status_code=422, detail=translate("Nenhum atendimento em andamento neste ticket", user.language))
+    if ticket.status == _S.CLOSED.value:
+        raise HTTPException(status_code=422, detail=translate("Não é possível apontar horas em um ticket fechado", user.language))
+
+    zone = app_timezone()
+    ended_at = datetime.utcnow()
+    start_local = session.started_at.replace(tzinfo=timezone.utc).astimezone(zone)
+    end_local = ended_at.replace(tzinfo=timezone.utc).astimezone(zone)
+    day = start_local.date()
+    start = time(start_local.hour, start_local.minute)
+    end = time(end_local.hour, end_local.minute) if end_local.date() == day else time(23, 59)
+    if end <= start:
+        raise HTTPException(
+            status_code=422,
+            detail=translate("O atendimento tem menos de 1 minuto — continue trabalhando ou descarte", user.language),
+        )
+    entry, interaction = _register_ticket_time(
+        db,
+        ticket,
+        user,
+        day=day,
+        start=start,
+        end=end,
+        break_minutes=data.break_minutes,
+        description=data.message,
+        progress=data.task_progress_percentage,
+    )
+    session.ended_at = ended_at
+    session.timesheet_id = entry.id
+    db.commit()
+    db.refresh(ticket)
+    if interaction.message:
+        background_tasks.add_task(notify_ticket_interaction, interaction.id)
+    return _detail(db, ticket, user)
+
+
+@router.post("/tickets/{ticket_id}/work/cancel", response_model=TicketDetail)
+def cancel_work(ticket_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    """Descarta o atendimento em andamento (nenhum apontamento é gerado)."""
+    _require_internal(user)
+    ticket = _get_ticket(db, ticket_id, user)
+    session = _active_session(db, user)
+    if session is None or session.ticket_id != ticket.id:
+        raise HTTPException(status_code=422, detail=translate("Nenhum atendimento em andamento neste ticket", user.language))
+    db.delete(session)
     db.commit()
     db.refresh(ticket)
     return _detail(db, ticket, user)

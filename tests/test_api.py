@@ -4829,3 +4829,103 @@ def test_ticket_list_by_project_shows_only_that_project(client, setup, db_sessio
         assert [row["id"] for row in only_a] == [ticket_a["id"]]
         only_b = client.get("/tickets", params={"project_id": setup["project_b"].id}, headers=headers).json()
         assert [row["id"] for row in only_b] == [ticket_b["id"]]
+
+
+def test_requester_confirms_resolution_while_in_progress(client, setup, db_session):
+    env = _ticket_env(client, setup, db_session)
+    tid = _open_ticket(client, env, setup)["id"]
+    close = {"status": "CLOSED"}
+    # Ainda não atendido: o solicitante não fecha (só o gerente cancela, com mensagem).
+    assert client.post(f"/tickets/{tid}/status", json=close, headers=env["requester_headers"]).status_code == 422
+    client.post(f"/tickets/{tid}/assign", json={"assignee_id": env["dev"].id}, headers=env["pm_headers"])
+    assert client.post(f"/tickets/{tid}/status", json=close, headers=env["requester_headers"]).status_code == 422
+    client.post(f"/tickets/{tid}/status", json={"status": "IN_PROGRESS"}, headers=env["dev_headers"])
+
+    view = client.get(f"/tickets/{tid}", headers=env["requester_headers"]).json()
+    assert "CLOSED" in view["allowed_statuses"]
+    # Quem não é o solicitante nem gerente não fecha.
+    assert client.post(f"/tickets/{tid}/status", json=close, headers=env["dev_headers"]).status_code == 422
+    # O gerente continua precisando de mensagem para cancelar.
+    assert client.post(f"/tickets/{tid}/status", json=close, headers=env["pm_headers"]).status_code == 422
+
+    confirmed = client.post(f"/tickets/{tid}/status", json=close, headers=env["requester_headers"])
+    assert confirmed.status_code == 200, confirmed.text
+    body = confirmed.json()
+    assert body["status"] == "CLOSED" and body["closed_at"] is not None and body["resolved_at"] is not None
+
+
+def test_ticket_assignee_not_allocated_can_log_time_as_exception(client, setup, db_session):
+    env = _ticket_env(client, setup, db_session)
+    tid = _open_ticket(client, env, setup)["id"]
+    outsider = make_user(db_session, role=UserRole.CONSULTANT, email="acionado@example.com")
+    created = client.post(
+        "/resources",
+        json={"user_id": outsider.id, "internal_cost_per_hour": "40", "billing_rate_per_hour": "80"},
+        headers=setup["admin_headers"],
+    )
+    assert created.status_code == 201, created.text
+    headers = auth_headers(client, outsider.email)
+    payload = {"date": "2026-10-06", "start_time": "09:00", "end_time": "10:00", "break_minutes": 0, "description": "Apoio"}
+
+    # Fora do projeto e sem ser o responsável: não aponta (nem pelo ticket, nem direto na tarefa).
+    sheet = {"date": "2026-10-06", "start_time": "09:00", "end_time": "10:00", "task_id": env["task"]["id"]}
+    assert client.post("/timesheets", json=sheet, headers=headers).status_code == 403
+    client.post(f"/tickets/{tid}/assign", json={"assignee_id": outsider.id}, headers=env["pm_headers"])
+    # Direto na tarefa (sem ticket) continua exigindo alocação.
+    assert client.post("/timesheets", json=sheet, headers=headers).status_code == 403
+
+    # Acionado como responsável do ticket: o apontamento pelo ticket é permitido.
+    logged = client.post(f"/tickets/{tid}/time", json=payload, headers=headers)
+    assert logged.status_code == 201, logged.text
+    assert float(logged.json()["hours_logged"]) == 1.0
+    with_ticket = client.post("/timesheets", json={**sheet, "ticket_id": tid, "start_time": "10:00", "end_time": "11:00"}, headers=headers)
+    assert with_ticket.status_code == 201, with_ticket.text
+    assert with_ticket.json()["status"] == "PENDING"
+
+
+def test_ticket_work_session_start_finish_and_cancel(client, setup, db_session):
+    from datetime import datetime, timedelta
+
+    from app.models import TicketWorkSession
+
+    env = _ticket_env(client, setup, db_session)
+    tid = _open_ticket(client, env, setup)["id"]
+    other = _open_ticket(client, env, setup, title="Outro")["id"]
+    for ticket_id in (tid, other):
+        client.post(f"/tickets/{ticket_id}/assign", json={"assignee_id": env["dev"].id}, headers=env["pm_headers"])
+
+    # Só responsável/gestão iniciam.
+    assert client.post(f"/tickets/{tid}/work/start", headers=env["requester_headers"]).status_code == 403
+    assert client.post(f"/tickets/{tid}/work/finish", json={}, headers=env["dev_headers"]).status_code == 422  # nada em andamento
+
+    started = client.post(f"/tickets/{tid}/work/start", headers=env["dev_headers"])
+    assert started.status_code == 201, started.text
+    body = started.json()
+    assert body["status"] == "IN_PROGRESS"  # ASSIGNED -> IN_PROGRESS
+    assert body["my_work_session"]["elapsed_seconds"] >= 0
+    # Um atendimento por vez, em qualquer ticket.
+    again = client.post(f"/tickets/{other}/work/start", headers=env["dev_headers"])
+    assert again.status_code == 422
+    other_view = client.get(f"/tickets/{other}", headers=env["dev_headers"]).json()
+    assert other_view["my_work_session"] is None and other_view["my_other_work_ticket"] is not None
+
+    # Recua o início em 3 minutos e finaliza: gera o apontamento Pendente na tarefa.
+    session = db_session.query(TicketWorkSession).filter_by(ticket_id=tid, ended_at=None).one()
+    session.started_at = datetime.utcnow() - timedelta(minutes=3)
+    db_session.commit()
+    finished = client.post(f"/tickets/{tid}/work/finish", json={"message": "Ajustei o layout do banco"}, headers=env["dev_headers"])
+    assert finished.status_code == 200, finished.text
+    done = finished.json()
+    assert done["status"] == "IN_PROGRESS"  # finalizar o atendimento não fecha o ticket
+    assert done["my_work_session"] is None
+    assert 0 < float(done["hours_logged"]) <= 0.1
+    last = [i for i in done["interactions"] if i["kind"] == "TIME"][-1]
+    assert last["message"] == "Ajustei o layout do banco"
+    sheets = client.get("/timesheets", params={"task_id": env["task"]["id"]}, headers=env["dev_headers"]).json()
+    assert len(sheets) == 1 and sheets[0]["ticket_id"] == tid and sheets[0]["status"] == "PENDING"
+
+    # Descartar: nada é gerado e libera iniciar outro.
+    assert client.post(f"/tickets/{other}/work/start", headers=env["dev_headers"]).status_code == 201
+    cancelled = client.post(f"/tickets/{other}/work/cancel", headers=env["dev_headers"])
+    assert cancelled.status_code == 200 and cancelled.json()["my_work_session"] is None
+    assert len(client.get("/timesheets", params={"task_id": env["task"]["id"]}, headers=env["dev_headers"]).json()) == 1
