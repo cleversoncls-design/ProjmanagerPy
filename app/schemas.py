@@ -1255,6 +1255,53 @@ class HoursBreakdownReport(BaseModel):
     by_project: list[HoursBreakdownByProjectRow]
 
 
+class ReworkTotals(BaseModel):
+    normal_hours: Decimal
+    rework_hours: Decimal
+    total_hours: Decimal
+    rework_percentage: Decimal | None
+    # Referência (fora da análise): horas de ausência no período — só quando
+    # não há filtro de cliente/projeto.
+    absence_hours: Decimal
+
+
+class ReworkByReasonRow(BaseModel):
+    reason: str
+    hours: Decimal
+    entries: int
+    percentage: Decimal | None
+
+
+class ReworkByResourceRow(BaseModel):
+    resource_id: str
+    resource_name: str
+    normal_hours: Decimal
+    rework_hours: Decimal
+    rework_percentage: Decimal | None
+
+
+class ReworkByProjectRow(BaseModel):
+    project_id: str
+    project_code: str
+    project_name: str
+    client_name: str
+    normal_hours: Decimal
+    rework_hours: Decimal
+    rework_percentage: Decimal | None
+
+
+class ReworkReport(BaseModel):
+    """Horas normais × retrabalho e retrabalho por motivo (ver
+    rework_hours_report em services.py)."""
+
+    period_start: date
+    period_end: date
+    totals: ReworkTotals
+    by_reason: list[ReworkByReasonRow]
+    by_resource: list[ReworkByResourceRow]
+    by_project: list[ReworkByProjectRow]
+
+
 class GanttResponse(BaseModel):
     tasks: list[TaskRead]
     dependencies: list[TaskDependencyRead]

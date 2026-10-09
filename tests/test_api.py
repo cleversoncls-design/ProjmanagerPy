@@ -2998,6 +2998,129 @@ def test_hours_breakdown_report_allowed_for_internal_pm_but_not_consultant(clien
     assert denied.status_code == 403
 
 
+def test_rework_hours_report_splits_normal_and_rework_by_reason(client, setup):
+    """Pedido do usuário: analisar horas normais × retrabalho e, no
+    retrabalho, a soma por motivo. Pendentes + aprovadas contam; rejeitadas,
+    traslado, hora interna e ausências ficam fora (ausência só como
+    referência). Ver rework_hours_report e GET /reports/rework-hours."""
+    project_id = setup["project_a"].id
+    admin_headers = setup["admin_headers"]
+    resource = client.post(
+        "/resources",
+        json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
+        headers=admin_headers,
+    ).json()
+    task = client.post(f"/projects/{project_id}/tasks", json={"name": "Entrega", "wbs_code": "41"}, headers=admin_headers).json()
+    consultant_headers = auth_headers(client, setup["consultant"].email)
+
+    def post(day, start, end, **extra):
+        response = client.post(
+            "/timesheets",
+            json={"date": day, "start_time": start, "end_time": end, **extra},
+            headers=consultant_headers,
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    # 4h normais (uma delas aprovada, a outra pendente).
+    approved = post("2026-08-20", "08:00", "10:00", task_id=task["id"], work_classification="NORMAL")
+    post("2026-08-20", "10:00", "12:00", task_id=task["id"])  # sem classificador = normal
+    assert (
+        client.patch(f"/timesheets/{approved['id']}/status", json={"status": "APPROVED"}, headers=admin_headers).status_code
+        == 200
+    )
+    # Retrabalho: 3h produto + 1h falta de energia.
+    post("2026-08-21", "08:00", "11:00", task_id=task["id"], work_classification="REWORK", rework_reasons=["PRODUCT_ERROR"])
+    post("2026-08-21", "11:00", "12:00", task_id=task["id"], work_classification="REWORK", rework_reasons=["POWER_OUTAGE"])
+    # Retrabalho rejeitado — não entra.
+    rejected = post("2026-08-22", "08:00", "10:00", task_id=task["id"], work_classification="REWORK", rework_reasons=["PRODUCT_ERROR"])
+    assert (
+        client.patch(f"/timesheets/{rejected['id']}/status", json={"status": "REJECTED"}, headers=admin_headers).status_code
+        == 200
+    )
+    # Traslado, hora interna e ausência — fora da análise.
+    post("2026-08-23", "08:00", "10:00", project_id=project_id, is_transit=True)
+    post("2026-08-24", "08:00", "09:00")
+    post("2026-08-25", "08:00", "16:00", absence_type="VACATION")
+    # Fora do período.
+    post("2026-09-05", "08:00", "10:00", task_id=task["id"], work_classification="REWORK", rework_reasons=["PRODUCT_ERROR"])
+
+    report = client.get(
+        "/reports/rework-hours", params={"start": "2026-08-01", "end": "2026-08-31"}, headers=admin_headers
+    )
+    assert report.status_code == 200, report.text
+    body = report.json()
+    totals = body["totals"]
+    assert float(totals["normal_hours"]) == 4.0
+    assert float(totals["rework_hours"]) == 4.0
+    assert float(totals["total_hours"]) == 8.0
+    assert float(totals["rework_percentage"]) == 50.0
+    assert float(totals["absence_hours"]) == 8.0
+
+    reasons = {row["reason"]: row for row in body["by_reason"]}
+    assert len(reasons) == 8  # todos os motivos aparecem, mesmo zerados
+    assert float(reasons["PRODUCT_ERROR"]["hours"]) == 3.0
+    assert reasons["PRODUCT_ERROR"]["entries"] == 1
+    assert float(reasons["PRODUCT_ERROR"]["percentage"]) == 75.0
+    assert float(reasons["POWER_OUTAGE"]["hours"]) == 1.0
+    assert float(reasons["DATA_LOAD_ERROR"]["hours"]) == 0.0
+    assert sum(float(row["hours"]) for row in body["by_reason"]) == 4.0
+
+    assert len(body["by_resource"]) == 1
+    assert body["by_resource"][0]["resource_id"] == resource["id"]
+    assert float(body["by_resource"][0]["rework_hours"]) == 4.0
+    assert float(body["by_resource"][0]["normal_hours"]) == 4.0
+    assert len(body["by_project"]) == 1
+    assert body["by_project"][0]["project_id"] == project_id
+    assert float(body["by_project"][0]["rework_percentage"]) == 50.0
+
+    # Filtro por projeto: ausência deixa de ser exibida (não tem projeto).
+    by_project = client.get(
+        "/reports/rework-hours",
+        params={"start": "2026-08-01", "end": "2026-08-31", "project_id": project_id},
+        headers=admin_headers,
+    ).json()
+    assert float(by_project["totals"]["rework_hours"]) == 4.0
+    assert float(by_project["totals"]["absence_hours"]) == 0.0
+
+    # Filtro por cliente (o cliente do projeto): mesmos totais.
+    other = client.get(
+        "/reports/rework-hours",
+        params={"start": "2026-08-01", "end": "2026-08-31", "client_id": setup["client_a"].id},
+        headers=admin_headers,
+    ).json()
+    assert float(other["totals"]["total_hours"]) == 8.0
+
+    unknown = client.get(
+        "/reports/rework-hours",
+        params={"start": "2026-08-01", "end": "2026-08-31", "project_id": "nao-existe"},
+        headers=admin_headers,
+    )
+    assert unknown.status_code == 404
+    inverted = client.get(
+        "/reports/rework-hours", params={"start": "2026-09-01", "end": "2026-08-01"}, headers=admin_headers
+    )
+    assert inverted.status_code == 422
+
+
+def test_rework_hours_report_empty_period_and_access(client, setup):
+    admin_headers = setup["admin_headers"]
+    empty = client.get(
+        "/reports/rework-hours", params={"start": "2020-01-01", "end": "2020-01-31"}, headers=admin_headers
+    )
+    assert empty.status_code == 200
+    body = empty.json()
+    assert float(body["totals"]["total_hours"]) == 0.0
+    assert body["totals"]["rework_percentage"] is None
+    assert all(row["percentage"] is None for row in body["by_reason"])
+    assert body["by_resource"] == [] and body["by_project"] == []
+
+    pm = client.get("/reports/rework-hours", headers=auth_headers(client, setup["pm"].email))
+    assert pm.status_code == 200
+    denied = client.get("/reports/rework-hours", headers=auth_headers(client, setup["consultant"].email))
+    assert denied.status_code == 403
+
+
 def test_cannot_timesheet_parent_task_only_child(client, setup):
     """Pedido do usuário: não permitir apontamento em tarefa "pai" (que tem
     tarefas-filhas) — só nas tarefas-filha."""

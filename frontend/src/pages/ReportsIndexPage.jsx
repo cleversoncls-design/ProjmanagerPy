@@ -20,6 +20,12 @@ const REPORTS = [
     roles: MANAGEMENT_ROLES,
   },
   {
+    to: '/reports/rework-hours',
+    title: 'Horas normais × retrabalho',
+    description: 'Horas de projeto separadas entre normais e retrabalho, com a soma de cada tipo de retrabalho (pendentes e aprovadas).',
+    roles: MANAGEMENT_ROLES,
+  },
+  {
     to: '/reports/status-report',
     title: 'Status Report',
     description: 'Fechamento do período por projeto — indicadores, cronograma, riscos e próximos passos.',

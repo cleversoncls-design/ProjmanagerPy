@@ -20,6 +20,7 @@ from ..schemas import (
     ProjectPortfolioRow,
     ProjectReportResponse,
     ProjectScheduleResponse,
+    ReworkReport,
     ProjectStatisticsResponse,
     RiskMatrixResponse,
     RoiRow,
@@ -36,6 +37,7 @@ from ..services import (
     project_progress,
     project_statistics,
     project_roi,
+    rework_hours_report,
     risk_matrix,
     service_orders,
     task_schedule_rows,
@@ -292,6 +294,37 @@ def hours_breakdown(
     if project_id and not db.get(Project, project_id):
         raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
     return hours_breakdown_report(db, start=period_start, end=period_end, resource_id=resource_id, client_id=client_id, project_id=project_id)
+
+
+@router.get("/reports/rework-hours", response_model=ReworkReport)
+def rework_hours(
+    start: date | None = None,
+    end: date | None = None,
+    resource_id: str | None = None,
+    client_id: str | None = None,
+    project_id: str | None = None,
+    user: User = Depends(require_roles(*MANAGEMENT_ROLES)),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Relatório "Horas normais × retrabalho": separa as horas de projeto
+    entre normais e retrabalho e, no retrabalho, soma por motivo (pedido do
+    usuário). Conta pendentes + aprovadas (tudo que não foi rejeitado);
+    ausências e traslado ficam fora da análise (ausência aparece só como
+    referência). Sem `start`/`end`, usa o mês corrente."""
+    today = date.today()
+    period_start = start or today.replace(day=1)
+    if end:
+        period_end = end
+    else:
+        next_month = (period_start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        period_end = next_month - timedelta(days=1)
+    if period_start > period_end:
+        raise HTTPException(status_code=422, detail=translate("start precisa ser anterior ou igual a end", user.language))
+    if client_id and not db.get(Client, client_id):
+        raise HTTPException(status_code=404, detail=translate("Cliente não encontrado", user.language))
+    if project_id and not db.get(Project, project_id):
+        raise HTTPException(status_code=404, detail=translate("Projeto não encontrado", user.language))
+    return rework_hours_report(db, start=period_start, end=period_end, resource_id=resource_id, client_id=client_id, project_id=project_id)
 
 
 def _resolve_service_orders_scope(

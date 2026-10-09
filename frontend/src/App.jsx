@@ -22,6 +22,7 @@ import TimesheetApprovalsPage from './pages/TimesheetApprovalsPage'
 import ServiceOrdersPage from './pages/ServiceOrdersPage'
 import ReportsIndexPage from './pages/ReportsIndexPage'
 import HoursBreakdownReportPage from './pages/HoursBreakdownReportPage'
+import ReworkReportPage from './pages/ReworkReportPage'
 import StatusReportsPage from './pages/StatusReportsPage'
 import KnowledgeCatalogPage from './pages/KnowledgeCatalogPage'
 import KnowledgeSelfAssessmentPage from './pages/KnowledgeSelfAssessmentPage'
@@ -89,6 +90,7 @@ export default function App() {
                     <Route path="/task-groups" element={<TaskGroupsPage />} />
                     <Route path="/task-groups/:groupId" element={<TaskGroupDetailPage />} />
                     <Route path="/reports/hours-breakdown" element={<HoursBreakdownReportPage />} />
+                    <Route path="/reports/rework-hours" element={<ReworkReportPage />} />
                     <Route path="/tickets/dashboard" element={<TicketsDashboardPage />} />
                   </Route>
 

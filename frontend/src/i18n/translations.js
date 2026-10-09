@@ -1210,6 +1210,19 @@ export const es = {
   'Internos': 'Internos',
   'Comercial': 'Comercial',
   'Investimento': 'Inversión',
+  // Relatório: horas normais × retrabalho.
+  Motivo: 'Motivo',
+  '% de retrabalho': '% de retrabajo',
+  '% do retrabalho': '% del retrabajo',
+  'Horas de projeto separadas entre normais e retrabalho, com a soma de cada tipo de retrabalho (pendentes e aprovadas).':
+    'Horas de proyecto separadas entre normales y retrabajo, con la suma de cada tipo de retrabajo (pendientes y aprobadas).',
+  'Horas de retrabalho': 'Horas de retrabajo',
+  'Horas normais': 'Horas normales',
+  'Horas normais × retrabalho': 'Horas normales × retrabajo',
+  'Nenhum retrabalho no período.': 'Ningún retrabajo en el período.',
+  'Referência (fora da análise): horas de ausência no período': 'Referencia (fuera del análisis): horas de ausencia en el período',
+  'Retrabalho por motivo': 'Retrabajo por motivo',
+  'Total de horas de projeto': 'Total de horas de proyecto',
   // Tickets: anexos e indicadores.
   'Obrigatório — selecione o motivo do retrabalho (apenas um).': 'Obligatorio — seleccione el motivo del retrabajo (solo uno).',
   'Vem ligado por padrão: desmarque para parar de receber convites.': 'Viene activado por defecto: desmarque para dejar de recibir invitaciones.',

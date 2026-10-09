@@ -25,6 +25,7 @@ from .models import (
     ProjectExpense,
     ProjectLegacyConsumption,
     RagStatus,
+    ReworkReason,
     Risk,
     RiskLevel,
     RiskStatus,
@@ -40,6 +41,7 @@ from .models import (
     Timesheet,
     TimesheetStatus,
     User,
+    WorkClassification,
 )
 
 # "Trabalho" (estimated_hours) sem nenhum recurso alocado ainda assume uma
@@ -1576,6 +1578,157 @@ def hours_breakdown_report(
         "totals": totals,
         "by_resource": by_resource_rows,
         "by_project": by_project_rows,
+    }
+
+
+def _rework_pct(normal: Decimal, rework: Decimal) -> Decimal | None:
+    total = normal + rework
+    if total <= 0:
+        return None
+    return (rework * Decimal(100) / total).quantize(Decimal("0.01"))
+
+
+def rework_hours_report(
+    session: Session,
+    *,
+    start: date,
+    end: date,
+    resource_id: str | None = None,
+    client_id: str | None = None,
+    project_id: str | None = None,
+) -> dict:
+    """Análise de horas NORMAIS × RETRABALHO (pedido do usuário, menu
+    "Relatórios") e, dentro do retrabalho, a soma por motivo.
+
+    Só entram apontamentos de TAREFA de projeto (é onde existe o classificador
+    Normal/Retrabalho); sem classificador (apontamentos antigos) conta como
+    Normal. Traslado, hora interna e ausências ficam de fora — as ausências
+    aparecem só como referência (`absence_hours`), e só quando não há filtro
+    de cliente/projeto (ausência nunca tem projeto). REJECTED não conta
+    (mesmo critério dos demais relatórios de horas); Pendente e Aprovado sim.
+
+    Cada apontamento de retrabalho tem um único motivo; os antigos com vários
+    motivos têm as horas divididas igualmente entre eles, para a soma por
+    motivo sempre bater com o total de retrabalho."""
+    project_col = func.coalesce(Task.project_id, Timesheet.project_id)
+    stmt = (
+        select(
+            Timesheet.resource_id,
+            Timesheet.hours_spent,
+            Timesheet.work_classification,
+            Timesheet.rework_reasons,
+            project_col.label("project_id"),
+        )
+        .join(Task, Task.id == Timesheet.task_id)
+        .where(
+            Timesheet.date >= start,
+            Timesheet.date <= end,
+            Timesheet.status != TimesheetStatus.REJECTED,
+            Timesheet.absence_type.is_(None),
+            Timesheet.is_transit.is_(False),
+        )
+    )
+    if resource_id:
+        stmt = stmt.where(Timesheet.resource_id == resource_id)
+    if project_id:
+        stmt = stmt.where(project_col == project_id)
+    if client_id:
+        stmt = stmt.where(project_col.in_(select(Project.id).where(Project.client_id == client_id)))
+    rows = session.execute(stmt).all()
+
+    zero = Decimal("0")
+    totals = {"normal": zero, "rework": zero}
+    by_reason: dict[str, dict] = {reason.value: {"hours": zero, "entries": 0} for reason in ReworkReason}
+    by_resource: dict[str, dict] = {}
+    by_project: dict[str, dict] = {}
+    for row in rows:
+        hours = Decimal(row.hours_spent)
+        is_rework = row.work_classification == WorkClassification.REWORK
+        key = "rework" if is_rework else "normal"
+        totals[key] += hours
+        for container, ident in ((by_resource, row.resource_id), (by_project, row.project_id)):
+            entry = container.setdefault(ident, {"normal": zero, "rework": zero})
+            entry[key] += hours
+        if is_rework:
+            reasons = [reason for reason in (row.rework_reasons or []) if reason in by_reason]
+            for reason in reasons:
+                by_reason[reason]["hours"] += hours / len(reasons)
+                by_reason[reason]["entries"] += 1
+
+    reason_rows = [
+        {"reason": reason, "hours": _q(values["hours"]), "entries": values["entries"], "percentage": None}
+        for reason, values in by_reason.items()
+    ]
+    for item in reason_rows:
+        item["percentage"] = (item["hours"] * Decimal(100) / totals["rework"]).quantize(Decimal("0.01")) if totals["rework"] > 0 else None
+
+    resources = (
+        {r.id: r for r in session.scalars(select(Resource).where(Resource.id.in_(by_resource.keys()))).all()} if by_resource else {}
+    )
+    user_ids = {r.user_id for r in resources.values()}
+    users = {u.id: u for u in session.scalars(select(User).where(User.id.in_(user_ids))).all()} if user_ids else {}
+    resource_rows = []
+    for rid, values in by_resource.items():
+        resource = resources.get(rid)
+        user = users.get(resource.user_id) if resource else None
+        resource_rows.append(
+            {
+                "resource_id": rid,
+                "resource_name": user.name if user else rid,
+                "normal_hours": _q(values["normal"]),
+                "rework_hours": _q(values["rework"]),
+                "rework_percentage": _rework_pct(values["normal"], values["rework"]),
+            }
+        )
+    resource_rows.sort(key=lambda row: row["resource_name"])
+
+    projects = (
+        {p.id: p for p in session.scalars(select(Project).where(Project.id.in_(by_project.keys()))).all()} if by_project else {}
+    )
+    client_ids = {p.client_id for p in projects.values()}
+    clients = {c.id: c for c in session.scalars(select(Client).where(Client.id.in_(client_ids))).all()} if client_ids else {}
+    project_rows = []
+    for pid, values in by_project.items():
+        project = projects.get(pid)
+        client = clients.get(project.client_id) if project else None
+        project_rows.append(
+            {
+                "project_id": pid,
+                "project_code": project.code if project else pid,
+                "project_name": project.name if project else "",
+                "client_name": client.legal_name if client else "",
+                "normal_hours": _q(values["normal"]),
+                "rework_hours": _q(values["rework"]),
+                "rework_percentage": _rework_pct(values["normal"], values["rework"]),
+            }
+        )
+    project_rows.sort(key=lambda row: (row["client_name"], row["project_code"]))
+
+    absence_hours = zero
+    if not client_id and not project_id:
+        absence_stmt = select(func.coalesce(func.sum(Timesheet.hours_spent), 0)).where(
+            Timesheet.date >= start,
+            Timesheet.date <= end,
+            Timesheet.status != TimesheetStatus.REJECTED,
+            Timesheet.absence_type.is_not(None),
+        )
+        if resource_id:
+            absence_stmt = absence_stmt.where(Timesheet.resource_id == resource_id)
+        absence_hours = Decimal(session.scalar(absence_stmt) or 0)
+
+    return {
+        "period_start": start,
+        "period_end": end,
+        "totals": {
+            "normal_hours": _q(totals["normal"]),
+            "rework_hours": _q(totals["rework"]),
+            "total_hours": _q(totals["normal"] + totals["rework"]),
+            "rework_percentage": _rework_pct(totals["normal"], totals["rework"]),
+            "absence_hours": _q(absence_hours),
+        },
+        "by_reason": reason_rows,
+        "by_resource": resource_rows,
+        "by_project": project_rows,
     }
 
 

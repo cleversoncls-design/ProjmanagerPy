@@ -41,6 +41,12 @@ export function getHoursBreakdown(params) {
   return api.get('/reports/hours-breakdown', params)
 }
 
+// Relatório "Horas normais × retrabalho" (pedido do usuário) — ver
+// app/routers/reports.py (GET /reports/rework-hours).
+export function getReworkReport(params) {
+  return api.get('/reports/rework-hours', params)
+}
+
 /** Baixa a planilha de tarefas (.xlsx) direto do navegador — não passa
  * pelo `api.get` normal porque a resposta é binária, não JSON, e precisa
  * virar um download (link temporário) em vez de ser parseada. */
