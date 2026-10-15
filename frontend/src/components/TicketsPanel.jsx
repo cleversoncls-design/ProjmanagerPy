@@ -1,0 +1,823 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import * as ticketsApi from '../api/tickets'
+import * as projectsApi from '../api/projects'
+import * as tasksApi from '../api/tasks'
+import * as clientsApi from '../api/clients'
+import { useLanguage } from '../context/LanguageContext'
+import Card from './Card'
+import Button from './Button'
+import Modal from './Modal'
+import Spinner from './Spinner'
+import ErrorBanner from './ErrorBanner'
+import StatusPill from './StatusPill'
+import Table from './Table'
+import { FormField, TextInput, Select, TextArea } from './FormField'
+import { AttachmentList, AttachmentPicker } from './TicketAttachments'
+import { PlusIcon } from './icons'
+import { formatDateTime, formatHoursDuration, hmToMinutes } from '../utils/format'
+import { TICKET_CRITICALITY_TONE, TICKET_STATUS_TONE } from '../utils/labels'
+
+const CLOSED_PROJECT_STATUSES = ['COMPLETED', 'CANCELLED', 'MODELO']
+
+/** Lista de tickets internos (pendentes) + abertura + detalhe com histórico.
+ * Usada na página "Tickets" (todos os projetos) e na aba "Tickets" de um
+ * projeto (`projectId` fixo). Ver app/routers/tickets.py. */
+export default function TicketsPanel({ projectId = null, canCreate = true }) {
+  const { t, labels } = useLanguage()
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [filters, setFilters] = useState({ scope: 'all', client_id: '', project_id: '', status_filter: '', criticality: '', open_only: true })
+  // Filtros por cliente e projeto (só na página geral; na aba do projeto o
+  // projeto já é fixo). As opções vêm da lista de projetos/clientes do perfil.
+  const [clients, setClients] = useState([])
+  const [projectOptions, setProjectOptions] = useState([])
+  const [showNew, setShowNew] = useState(false)
+  const [openTicketId, setOpenTicketId] = useState(null)
+  // Aviso mostrado ao abrir o ticket recém-criado (ex.: falha no envio dos anexos).
+  const [openNotice, setOpenNotice] = useState('')
+
+  useEffect(() => {
+    if (projectId) return
+    clientsApi.listClients().then(setClients).catch(() => {})
+    projectsApi.listProjects().then(setProjectOptions).catch(() => {})
+  }, [projectId])
+
+  // Projetos do cliente escolhido (todos, se nenhum cliente foi escolhido).
+  const filteredProjects = useMemo(
+    () => (filters.client_id ? projectOptions.filter((project) => project.client_id === filters.client_id) : projectOptions),
+    [projectOptions, filters.client_id],
+  )
+
+  function load() {
+    setLoading(true)
+    setError('')
+    ticketsApi
+      .listTickets({
+        project_id: projectId || filters.project_id || undefined,
+        client_id: projectId ? undefined : filters.client_id || undefined,
+        scope: filters.scope,
+        status_filter: filters.status_filter || undefined,
+        criticality: filters.criticality || undefined,
+        open_only: filters.open_only || undefined,
+      })
+      .then(setRows)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(load, [projectId, filters.client_id, filters.project_id, filters.scope, filters.status_filter, filters.criticality, filters.open_only])
+
+  function updateFilter(field) {
+    return (event) => {
+      const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value
+      setFilters((prev) => ({ ...prev, [field]: value }))
+    }
+  }
+
+  // Trocar o cliente limpa o projeto escolhido se ele não for desse cliente.
+  function updateClientFilter(event) {
+    const clientId = event.target.value
+    setFilters((prev) => {
+      const keepProject = prev.project_id && (!clientId || projectOptions.find((project) => project.id === prev.project_id)?.client_id === clientId)
+      return { ...prev, client_id: clientId, project_id: keepProject ? prev.project_id : '' }
+    })
+  }
+
+  const columns = [
+    {
+      key: 'code',
+      header: t('Ticket'),
+      nowrap: true,
+      render: (row) => (
+        <button type="button" onClick={() => setOpenTicketId(row.id)} className="font-medium text-[var(--series-1)] hover:underline">
+          {row.code}
+        </button>
+      ),
+    },
+    { key: 'title', header: t('Título'), render: (row) => row.title },
+    ...(projectId
+      ? []
+      : [
+          { key: 'client', header: t('Cliente'), render: (row) => row.client_name || '—' },
+          { key: 'project', header: t('Projeto'), nowrap: true, render: (row) => `${row.project_code}` },
+        ]),
+    {
+      key: 'task',
+      header: t('Tarefa'),
+      render: (row) => (row.task_name ? `${row.task_wbs} — ${row.task_name}` : '—'),
+    },
+    {
+      key: 'criticality',
+      header: t('Criticidade'),
+      render: (row) => <StatusPill label={labels.TICKET_CRITICALITY_LABELS[row.criticality]} tone={TICKET_CRITICALITY_TONE[row.criticality]} />,
+    },
+    {
+      key: 'status',
+      header: t('Status'),
+      render: (row) => <StatusPill label={labels.TICKET_STATUS_LABELS[row.status]} tone={TICKET_STATUS_TONE[row.status]} />,
+    },
+    { key: 'requester', header: t('Solicitante'), render: (row) => row.requester_name || '—' },
+    { key: 'assignee', header: t('Responsável'), render: (row) => row.assignee_name || '—' },
+    { key: 'hours', header: t('Horas'), align: 'right', render: (row) => formatHoursDuration(row.hours_logged) },
+    { key: 'created_at', header: t('Aberto em'), nowrap: true, render: (row) => formatDateTime(row.created_at) },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <Card
+        title={t('Tickets (pendentes)')}
+        action={
+          canCreate ? (
+            <Button onClick={() => setShowNew(true)}>
+              <PlusIcon size={15} /> {t('Novo ticket')}
+            </Button>
+          ) : (
+            <span className="text-xs text-[var(--text-muted)]">{t('Projeto concluído, cancelado ou modelo: não aceita novos tickets.')}</span>
+          )
+        }
+      >
+        <div className={`mb-4 grid grid-cols-2 gap-3 ${projectId ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
+          {!projectId && (
+            <FormField label={t('Cliente')}>
+              <Select value={filters.client_id} onChange={updateClientFilter}>
+                <option value="">{t('Todos')}</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.legal_name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          )}
+          {!projectId && (
+            <FormField label={t('Projeto')}>
+              <Select value={filters.project_id} onChange={updateFilter('project_id')}>
+                <option value="">{t('Todos')}</option>
+                {filteredProjects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.code} — {project.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          )}
+          <FormField label={t('Exibir')}>
+            <Select value={filters.scope} onChange={updateFilter('scope')}>
+              <option value="all">{t('Tudo que posso ver')}</option>
+              <option value="requested">{t('Abertos por mim')}</option>
+              <option value="assigned">{t('Direcionados a mim')}</option>
+            </Select>
+          </FormField>
+          <FormField label={t('Status')}>
+            <Select value={filters.status_filter} onChange={updateFilter('status_filter')}>
+              <option value="">{t('Todos')}</option>
+              {Object.entries(labels.TICKET_STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField label={t('Criticidade')}>
+            <Select value={filters.criticality} onChange={updateFilter('criticality')}>
+              <option value="">{t('Todas')}</option>
+              {Object.entries(labels.TICKET_CRITICALITY_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField label={t('Fechados')}>
+            <label className="flex h-[38px] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text-secondary)]">
+              <input type="checkbox" checked={!filters.open_only} onChange={(event) => setFilters((prev) => ({ ...prev, open_only: !event.target.checked }))} />
+              {t('Mostrar fechados')}
+            </label>
+          </FormField>
+        </div>
+        <ErrorBanner message={error} />
+        {loading ? <Spinner /> : <Table columns={columns} rows={rows} getRowKey={(row) => row.id} emptyMessage={t('Nenhum ticket encontrado.')} />}
+      </Card>
+
+      {showNew && (
+        <NewTicketModal
+          projectId={projectId}
+          onClose={() => setShowNew(false)}
+          onCreated={(ticket, notice) => {
+            setShowNew(false)
+            load()
+            setOpenNotice(notice || '')
+            setOpenTicketId(ticket.id)
+          }}
+        />
+      )}
+      {openTicketId && (
+        <TicketDetailModal
+          ticketId={openTicketId}
+          initialError={openNotice}
+          onClose={() => {
+            setOpenTicketId(null)
+            setOpenNotice('')
+          }}
+          onChanged={load}
+        />
+      )}
+    </div>
+  )
+}
+
+function NewTicketModal({ projectId, onClose, onCreated }) {
+  const { t, labels } = useLanguage()
+  const [projects, setProjects] = useState([])
+  const [tasks, setTasks] = useState([])
+  const [form, setForm] = useState({
+    project_id: projectId || '',
+    task_id: '',
+    criticality: 'MEDIUM',
+    title: '',
+    description: '',
+  })
+  const [files, setFiles] = useState([])
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    projectsApi
+      .listProjects()
+      .then((rows) => setProjects(rows.filter((project) => !CLOSED_PROJECT_STATUSES.includes(project.status))))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!form.project_id) {
+      setTasks([])
+      return
+    }
+    tasksApi
+      .listTasks(form.project_id)
+      .then(setTasks)
+      .catch(() => setTasks([]))
+  }, [form.project_id])
+
+  const tasksById = useMemo(() => Object.fromEntries(tasks.map((task) => [task.id, task])), [tasks])
+  // Só tarefas-folha (o tempo do ticket é apontado na tarefa); mostra a
+  // tarefa-pai ("Tarefa Principal") antes do nome, pra identificar a etapa.
+  const leafTasks = useMemo(() => {
+    const parentIds = new Set(tasks.map((task) => task.parent_task_id).filter(Boolean))
+    return tasks.filter((task) => !parentIds.has(task.id) && task.status !== 'CLOSED')
+  }, [tasks])
+
+  function updateField(field) {
+    return (event) => {
+      const value = event.target.value
+      setForm((prev) => (field === 'project_id' ? { ...prev, project_id: value, task_id: '' } : { ...prev, [field]: value }))
+    }
+  }
+
+  function taskLabel(task) {
+    const parent = task.parent_task_id ? tasksById[task.parent_task_id] : null
+    return `${parent ? `${parent.name} › ` : ''}${task.wbs_code} — ${task.name}`
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    setError('')
+    setSaving(true)
+    try {
+      const created = await ticketsApi.createTicket({
+        project_id: form.project_id,
+        task_id: form.task_id,
+        criticality: form.criticality,
+        title: form.title,
+        description: form.description,
+      })
+      // Anexos vão na interação de abertura. Se o envio falhar, o ticket já
+      // existe: abre o detalhe com o aviso para anexar de novo por lá.
+      let notice = ''
+      let ticket = created
+      if (files.length > 0) {
+        try {
+          ticket = await ticketsApi.uploadTicketAttachments(created.id, files, { interactionId: created.interactions[0].id })
+        } catch (err) {
+          notice = `${t('O ticket foi registrado, mas os anexos não foram enviados')}: ${err.message}`
+        }
+      }
+      onCreated(ticket, notice)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={t('Novo ticket')} onClose={onClose} wide>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label={t('Projeto')} required>
+            <Select required value={form.project_id} onChange={updateField('project_id')} disabled={Boolean(projectId)}>
+              <option value="">{t('Selecione…')}</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.code} — {project.name}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField label={t('Tarefa do projeto')} required hint={t('Tarefa à qual o incidente está relacionado — o tempo gasto será apontado nela.')}>
+            <Select required value={form.task_id} onChange={updateField('task_id')} disabled={!form.project_id}>
+              <option value="">{t('Selecione uma tarefa…')}</option>
+              {leafTasks.map((task) => (
+                <option key={task.id} value={task.id}>
+                  {taskLabel(task)}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+        </div>
+        <FormField label={t('Criticidade')} required>
+          <Select required value={form.criticality} onChange={updateField('criticality')}>
+            {Object.entries(labels.TICKET_CRITICALITY_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label} — {t(CRITICALITY_HINTS[value])}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+        <FormField label={t('Título breve')} required>
+          <TextInput required maxLength={200} value={form.title} onChange={updateField('title')} placeholder={t('Resumo claro do problema')} />
+        </FormField>
+        <FormField
+          label={t('Descrição detalhada')}
+          required
+          hint={t('Passo a passo para reproduzir o erro e comportamento esperado × comportamento observado.')}
+        >
+          <TextArea required rows={7} value={form.description} onChange={updateField('description')} />
+        </FormField>
+        <FormField label={t('Anexos (opcional)')} hint={t('Print da tela, log de erro ou arquivo que ajude a reproduzir o problema.')}>
+          <AttachmentPicker files={files} onChange={setFiles} disabled={saving} />
+        </FormField>
+        <ErrorBanner message={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('Cancelar')}
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? t('Salvando…') : t('Registrar ticket')}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+const CRITICALITY_HINTS = {
+  LOW: 'não impede a operação',
+  MEDIUM: 'dificulta o processo, mas existem alternativas',
+  HIGH: 'impede o funcionamento de um processo-chave',
+  CRITICAL: 'interrupção total do serviço / bloqueio geral',
+}
+
+// Confirmar a solução: o solicitante ou o gerente fecha um ticket que já está
+// em atendimento (ou resolvido, nos tickets antigos). Não exige mensagem.
+function confirmsResolution(ticket, target) {
+  return target === 'CLOSED' && ['IN_PROGRESS', 'WAITING_REQUESTER', 'RESOLVED'].includes(ticket.status)
+}
+
+// Mensagem obrigatória nestas mudanças de status (espelha tickets.py).
+function statusNeedsMessage(ticket, target) {
+  if (target === 'IN_PROGRESS' && (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')) return true
+  if (target === 'CLOSED' && !confirmsResolution(ticket, target)) return true
+  return false
+}
+
+function statusActionLabel(ticket, target, t) {
+  if (confirmsResolution(ticket, target)) return t('Confirmar como resolvido e fechar')
+  if (target === 'IN_PROGRESS' && ticket.status === 'WAITING_REQUESTER') return t('Voltar ao atendimento')
+  if (target === 'IN_PROGRESS') return t('Reabrir (não resolvido)')
+  return t('Encerrar / cancelar ticket')
+}
+
+function TicketDetailModal({ ticketId, onClose, onChanged, initialError = '' }) {
+  const { t, labels } = useLanguage()
+  const [ticket, setTicket] = useState(null)
+  const [assignees, setAssignees] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(initialError)
+  const [busy, setBusy] = useState(false)
+  const [commentFiles, setCommentFiles] = useState([])
+  // Cronômetro de atendimento: o servidor guarda o início; aqui só se soma o
+  // tempo decorrido desde que a resposta chegou.
+  const [workMessage, setWorkMessage] = useState('')
+  const [workBreak, setWorkBreak] = useState('00:00')
+  const [now, setNow] = useState(Date.now())
+  const receivedAt = useRef(Date.now())
+  // null | 'assign' | 'criticality' | 'time' | { status }
+  const [action, setAction] = useState(null)
+  const [comment, setComment] = useState('')
+  const [assigneeId, setAssigneeId] = useState('')
+  const [newCriticality, setNewCriticality] = useState('')
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    ticketsApi
+      .getTicket(ticketId)
+      .then(setTicket)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false))
+  }, [ticketId])
+
+  useEffect(() => {
+    receivedAt.current = Date.now()
+    setNow(Date.now())
+  }, [ticket])
+
+  const hasWorkSession = Boolean(ticket?.my_work_session)
+  useEffect(() => {
+    if (!hasWorkSession) return undefined
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [hasWorkSession])
+
+  useEffect(() => {
+    if (ticket?.can_assign && assignees.length === 0) {
+      ticketsApi
+        .listTicketAssignees()
+        .then(setAssignees)
+        .catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticket?.can_assign])
+
+  async function run(fn) {
+    setBusy(true)
+    setError('')
+    try {
+      const updated = await fn()
+      setTicket(updated)
+      setAction(null)
+      setMessage('')
+      onChanged()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function openAction(next) {
+    setAction(next)
+    setMessage('')
+    setError('')
+  }
+
+  if (loading) {
+    return (
+      <Modal title={t('Ticket')} onClose={onClose} wide>
+        <Spinner />
+      </Modal>
+    )
+  }
+  if (!ticket) {
+    return (
+      <Modal title={t('Ticket')} onClose={onClose} wide>
+        <ErrorBanner message={error} />
+      </Modal>
+    )
+  }
+
+  const closed = ticket.status === 'CLOSED'
+  const statusAction = action && typeof action === 'object' ? action.status : null
+  const workSession = ticket.my_work_session
+  const elapsedSeconds = workSession ? workSession.elapsed_seconds + Math.max(0, Math.floor((now - receivedAt.current) / 1000)) : 0
+  // "Iniciar atendimento" (cronômetro) já move o ticket para Em atendimento.
+  const statusTargets = ticket.allowed_statuses.filter((target) => !(target === 'IN_PROGRESS' && ticket.status === 'ASSIGNED'))
+
+  return (
+    <Modal title={`${ticket.code} — ${ticket.title}`} onClose={onClose} wide>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusPill label={labels.TICKET_STATUS_LABELS[ticket.status]} tone={TICKET_STATUS_TONE[ticket.status]} />
+          <StatusPill label={`${t('Criticidade')}: ${labels.TICKET_CRITICALITY_LABELS[ticket.criticality]}`} tone={TICKET_CRITICALITY_TONE[ticket.criticality]} />
+        </div>
+
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+          <Info label={t('Projeto')} value={`${ticket.project_code} — ${ticket.project_name}`} />
+          <Info
+            label={t('Tarefa')}
+            value={ticket.task_name ? `${ticket.parent_task_name ? `${ticket.parent_task_name} › ` : ''}${ticket.task_wbs} — ${ticket.task_name}` : '—'}
+          />
+          <Info label={t('Solicitante')} value={ticket.requester_name ? `${ticket.requester_name} (${ticket.requester_email})` : '—'} />
+          <Info label={t('Responsável')} value={ticket.assignee_name || t('Ainda não direcionado')} />
+          <Info label={t('Aberto em')} value={formatDateTime(ticket.created_at)} />
+          <Info
+            label={t('Horas apontadas')}
+            value={`${formatHoursDuration(ticket.hours_logged)} (${t('aprovadas')}: ${formatHoursDuration(ticket.hours_approved)})`}
+          />
+        </dl>
+
+        <div>
+          <p className="mb-1 text-xs font-medium text-[var(--text-secondary)]">{t('Descrição detalhada')}</p>
+          <p className="whitespace-pre-wrap rounded-lg border border-[var(--border)] bg-[var(--page)] px-3 py-2 text-sm">{ticket.description}</p>
+        </div>
+
+        {!closed && (
+          <div className="flex flex-wrap gap-2">
+            {ticket.can_assign && (
+              <Button variant="secondary" onClick={() => openAction('assign')}>
+                {ticket.assignee_id ? t('Redirecionar') : t('Direcionar')}
+              </Button>
+            )}
+            {ticket.can_log_time && !workSession && (
+              <Button disabled={busy || Boolean(ticket.my_other_work_ticket)} onClick={() => run(() => ticketsApi.startTicketWork(ticket.id))}>
+                {t('Iniciar atendimento')}
+              </Button>
+            )}
+            {ticket.can_change_criticality && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setNewCriticality(ticket.criticality)
+                  openAction('criticality')
+                }}
+              >
+                {t('Alterar criticidade')}
+              </Button>
+            )}
+          </div>
+        )}
+        {ticket.can_log_time && !workSession && ticket.my_other_work_ticket && !closed && (
+          <p className="text-xs text-[var(--text-muted)]">
+            {t('Você já tem um atendimento em andamento no ticket')} {ticket.my_other_work_ticket}. {t('Finalize-o para iniciar outro.')}
+          </p>
+        )}
+        {(statusTargets.length > 0 || closed) && (
+          <div className="flex flex-wrap gap-2">
+            {statusTargets.map((target) => (
+              <Button
+                key={target}
+                variant={confirmsResolution(ticket, target) ? 'primary' : 'secondary'}
+                onClick={() => openAction({ status: target })}
+              >
+                {statusActionLabel(ticket, target, t)}
+              </Button>
+            ))}
+          </div>
+        )}
+
+        {workSession && !closed && (
+          <div className="space-y-3 rounded-lg border-2 border-[var(--series-1)] bg-[var(--page)] p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-[var(--text-primary)]">{t('Atendimento em andamento')}</p>
+                <p className="text-xs text-[var(--text-muted)]">{t('Ao finalizar, a hora final é a do momento e o apontamento é gerado na tarefa do ticket.')}</p>
+              </div>
+              <p className="text-2xl font-bold tabular-nums text-[var(--series-1)]">{formatClock(elapsedSeconds)}</p>
+            </div>
+            <FormField label={t('Detalhes do atendimento')} hint={t('O que foi feito — vai para o histórico do ticket e para o apontamento.')}>
+              <TextArea rows={3} value={workMessage} onChange={(event) => setWorkMessage(event.target.value)} />
+            </FormField>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div className="w-32">
+                <FormField label={t('Intervalo')}>
+                  <TextInput type="time" value={workBreak} onChange={(event) => setWorkBreak(event.target.value)} />
+                </FormField>
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" disabled={busy} onClick={() => run(() => ticketsApi.cancelTicketWork(ticket.id))}>
+                  {t('Descartar')}
+                </Button>
+                <Button
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      const updated = await ticketsApi.finishTicketWork(ticket.id, {
+                        message: workMessage.trim() || null,
+                        break_minutes: hmToMinutes(workBreak),
+                      })
+                      setWorkMessage('')
+                      setWorkBreak('00:00')
+                      return updated
+                    })
+                  }
+                >
+                  {t('Finalizar atendimento')}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {action === 'assign' && (
+          <ActionBox title={t('Direcionar ticket')} onCancel={() => setAction(null)}>
+            <FormField label={t('Responsável')} required hint={t('Consultores e desenvolvedores internos com Recurso.')}>
+              <Select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}>
+                <option value="">{t('Selecione…')}</option>
+                {assignees
+                  .filter((person) => person.id !== ticket.assignee_id)
+                  .map((person) => (
+                    <option key={person.id} value={person.id}>
+                      {person.name}
+                    </option>
+                  ))}
+              </Select>
+            </FormField>
+            <FormField label={t('Mensagem (opcional)')}>
+              <TextArea rows={2} value={message} onChange={(event) => setMessage(event.target.value)} />
+            </FormField>
+            <Button disabled={busy || !assigneeId} onClick={() => run(() => ticketsApi.assignTicket(ticket.id, { assignee_id: assigneeId, message }))}>
+              {t('Confirmar')}
+            </Button>
+          </ActionBox>
+        )}
+
+        {action === 'criticality' && (
+          <ActionBox title={t('Alterar criticidade')} onCancel={() => setAction(null)}>
+            <FormField label={t('Criticidade')}>
+              <Select value={newCriticality} onChange={(event) => setNewCriticality(event.target.value)}>
+                {Object.entries(labels.TICKET_CRITICALITY_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField label={t('Motivo (opcional)')}>
+              <TextArea rows={2} value={message} onChange={(event) => setMessage(event.target.value)} />
+            </FormField>
+            <Button
+              disabled={busy || newCriticality === ticket.criticality}
+              onClick={() => run(() => ticketsApi.changeTicketCriticality(ticket.id, { criticality: newCriticality, message }))}
+            >
+              {t('Confirmar')}
+            </Button>
+          </ActionBox>
+        )}
+
+        {statusAction && (
+          <ActionBox title={statusActionLabel(ticket, statusAction, t)} onCancel={() => setAction(null)}>
+            <FormField
+              label={statusNeedsMessage(ticket, statusAction) ? t('Mensagem') : t('Mensagem (opcional)')}
+              required={statusNeedsMessage(ticket, statusAction)}
+            >
+              <TextArea rows={3} value={message} onChange={(event) => setMessage(event.target.value)} />
+            </FormField>
+            <Button
+              disabled={busy || (statusNeedsMessage(ticket, statusAction) && !message.trim())}
+              onClick={() => run(() => ticketsApi.changeTicketStatus(ticket.id, { status: statusAction, message }))}
+            >
+              {t('Confirmar')}
+            </Button>
+          </ActionBox>
+        )}
+
+        <ErrorBanner message={error} />
+
+        <div>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">{t('Histórico')}</p>
+          <TicketChat ticket={ticket} onError={setError} />
+        </div>
+
+        {ticket.can_comment && (
+          <div className="space-y-2">
+            <FormField label={t('Nova interação')}>
+              <TextArea rows={3} value={comment} onChange={(event) => setComment(event.target.value)} />
+            </FormField>
+            <AttachmentPicker
+              files={commentFiles}
+              onChange={setCommentFiles}
+              alreadyAttached={ticket.interactions.reduce((total, item) => total + (item.attachments?.length || 0), 0)}
+              disabled={busy}
+            />
+            <div className="flex justify-end">
+              <Button
+                disabled={busy || (!comment.trim() && commentFiles.length === 0)}
+                onClick={() =>
+                  run(async () => {
+                    // Com arquivos, texto e anexos seguem juntos numa só interação.
+                    const updated =
+                      commentFiles.length > 0
+                        ? await ticketsApi.uploadTicketAttachments(ticket.id, commentFiles, { message: comment.trim() || undefined })
+                        : await ticketsApi.commentTicket(ticket.id, comment)
+                    setComment('')
+                    setCommentFiles([])
+                    return updated
+                  })
+                }
+              >
+                {t('Enviar')}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+function formatClock(totalSeconds) {
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':')
+}
+
+// Interações sem texto e sem arquivo (direcionou, mudou status/criticidade)
+// aparecem como um aviso centralizado; as demais viram "balões" de conversa.
+function isEvent(item) {
+  return item.kind === 'WORK_STARTED' || (['ASSIGNMENT', 'STATUS', 'CRITICALITY'].includes(item.kind) && !item.message)
+}
+
+/** Histórico em formato de conversa: o solicitante de um lado (balão azul
+ * clarinho) e quem respondeu — responsável, gerente — do outro (balão cinza
+ * claro), cada balão com nome e horário. */
+function TicketChat({ ticket, onError }) {
+  const { t, labels } = useLanguage()
+  return (
+    <ol className="flex flex-col gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--page)] p-3">
+      {ticket.interactions.map((item) => {
+        if (isEvent(item)) {
+          return (
+            <li key={item.id} className="self-center text-center text-[11px] text-[var(--text-muted)]">
+              <span className="rounded-full bg-[var(--grid)] px-3 py-1">
+                {interactionTitle(item, labels, t)} · {item.author_name || '—'} · {formatDateTime(item.created_at)}
+              </span>
+            </li>
+          )
+        }
+        const fromRequester = item.author_id === ticket.requester_id
+        return (
+          <li key={item.id} className={`flex ${fromRequester ? 'justify-start' : 'justify-end'}`}>
+            <div
+              className="max-w-[88%] rounded-2xl px-3 py-2 text-sm"
+              style={{
+                backgroundColor: fromRequester ? 'color-mix(in srgb, var(--series-1) 12%, var(--surface))' : 'var(--grid)',
+                borderTopLeftRadius: fromRequester ? 4 : undefined,
+                borderTopRightRadius: fromRequester ? undefined : 4,
+              }}
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-[11px]">
+                <span className="font-semibold text-[var(--text-secondary)]">
+                  {item.author_name || '—'}
+                  {fromRequester && <span className="ml-1 font-normal text-[var(--text-muted)]">({t('solicitante')})</span>}
+                </span>
+                <span className="text-[var(--text-muted)]">{formatDateTime(item.created_at)}</span>
+              </div>
+              {(item.kind !== 'COMMENT' || item.from_value) && (
+                <p className="mt-0.5 text-xs font-medium text-[var(--text-primary)]">{interactionTitle(item, labels, t)}</p>
+              )}
+              {item.message && <p className="mt-1 whitespace-pre-wrap text-[var(--text-primary)]">{item.message}</p>}
+              <AttachmentList ticketId={ticket.id} attachments={item.attachments} onError={onError} />
+            </div>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+function interactionTitle(item, labels, t) {
+  switch (item.kind) {
+    case 'CREATED':
+      return `${t('Ticket aberto')} (${labels.TICKET_CRITICALITY_LABELS[item.to_value] || item.to_value})`
+    case 'ASSIGNMENT':
+      return item.from_value
+        ? `${t('Redirecionado')}: ${item.from_value} → ${item.to_value}`
+        : `${t('Direcionado para')} ${item.to_value}`
+    case 'STATUS':
+      return `${t('Status')}: ${labels.TICKET_STATUS_LABELS[item.from_value] || item.from_value} → ${labels.TICKET_STATUS_LABELS[item.to_value] || item.to_value}`
+    case 'CRITICALITY':
+      return `${t('Criticidade')}: ${labels.TICKET_CRITICALITY_LABELS[item.from_value] || item.from_value} → ${labels.TICKET_CRITICALITY_LABELS[item.to_value] || item.to_value}`
+    case 'WORK_STARTED':
+      return t('Atendimento iniciado')
+    case 'TIME':
+      return `${t('Atendimento finalizado')} — ${t('apontado')}: ${formatHoursDuration(item.to_value)} (${item.from_value})`
+    default:
+      return t('Comentário')
+  }
+}
+
+function Info({ label, value }) {
+  return (
+    <div>
+      <dt className="text-xs text-[var(--text-muted)]">{label}</dt>
+      <dd className="text-[var(--text-primary)]">{value}</dd>
+    </div>
+  )
+}
+
+function ActionBox({ title, onCancel, children }) {
+  const { t } = useLanguage()
+  return (
+    <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--page)] p-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">{title}</p>
+        <button type="button" onClick={onCancel} className="text-xs text-[var(--text-muted)] hover:underline">
+          {t('Cancelar')}
+        </button>
+      </div>
+      {children}
+    </div>
+  )
+}

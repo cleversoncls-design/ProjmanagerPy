@@ -6,3 +6,5 @@ __pycache__/
 *.db
 backups/
 postgres_data/
+backups_migracao/
+*.bak_*
