@@ -846,6 +846,9 @@ def test_sync_task_statuses_updates_only_leaf_tasks():
     db.commit()
 
     assert sync_task_statuses(db, project, date(2026, 9, 1)) == 1
+    # sync_task_statuses nao faz commit (o router faz) — sem isto o refresh
+    # descarta a mudanca pendente (SQLAlchemy 2.1 nao autoflusha no refresh).
+    db.commit()
     db.refresh(leaf)
     db.refresh(parent)
     assert leaf.status == TaskStatus.DELAYED

@@ -35,7 +35,7 @@ def wall_clock_to_utc(day: date, at: time) -> datetime:
 def _escape(text: str) -> str:
     return (
         text.replace("\\", "\\\\")
-        .replace(";", "\;")
+        .replace(";", "\\;")
         .replace(",", "\\,")
         .replace("\r\n", "\\n")
         .replace("\n", "\\n")

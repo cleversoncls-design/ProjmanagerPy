@@ -44,6 +44,10 @@ def setup(client, db_session):
 
     project_a = make_project(db_session, client_id=client_a.id, manager_id=pm.id, code="PRJ-A")
     project_b = make_project(db_session, client_id=client_b.id, manager_id=pm.id, code="PRJ-B")
+    # Cor exclusiva entre projetos ativos (ver _ensure_color_available): os dois
+    # nasceriam com a cor padrao e um bloquearia o outro nos testes de cor.
+    project_b.color = "#AFD7FF"
+    db_session.commit()
 
     patch = client.patch(f"/projects/{project_a.id}", json={"status": ProjectStatus.ACTIVE.value}, headers=admin_headers)
     assert patch.status_code == 200
@@ -619,6 +623,9 @@ def test_timesheets_filter_by_client(client, setup):
         headers=admin_headers,
     ).json()
     consultant_headers = auth_headers(client, setup["consultant"].email)
+    # O setup só ativa o project_a — apontar horas exige projeto ATIVO.
+    activate_b = client.patch(f"/projects/{setup['project_b'].id}", json={"status": ProjectStatus.ACTIVE.value}, headers=admin_headers)
+    assert activate_b.status_code == 200
     client.post(f"/projects/{setup['project_a'].id}/resources", json={"resource_id": resource["id"]}, headers=admin_headers)
     client.post(f"/projects/{setup['project_b'].id}/resources", json={"resource_id": resource["id"]}, headers=admin_headers)
     task_a = client.post(f"/projects/{setup['project_a'].id}/tasks", json={"name": "A", "wbs_code": "4"}, headers=admin_headers).json()
@@ -1042,7 +1049,7 @@ def test_adhoc_timesheet_without_task_or_project(client, setup):
     admin_headers = setup["admin_headers"]
     project_id = setup["project_a"].id
 
-    client.post(
+    resource = client.post(
         "/resources",
         json={
             "user_id": setup["consultant"].id,
@@ -1050,7 +1057,9 @@ def test_adhoc_timesheet_without_task_or_project(client, setup):
             "billing_rate_per_hour": "100",
         },
         headers=admin_headers,
-    )
+    ).json()
+    # Apontar numa tarefa exige o recurso alocado na tarefa ou no projeto.
+    client.post(f"/projects/{project_id}/resources", json={"resource_id": resource["id"]}, headers=admin_headers)
     consultant_headers = auth_headers(client, setup["consultant"].email)
 
     admin_hours = client.post(
@@ -1080,11 +1089,13 @@ def test_timesheet_requires_task_or_transit_when_project_is_set(client, setup):
     routers/timesheets.py)."""
     project_id = setup["project_a"].id
     admin_headers = setup["admin_headers"]
-    client.post(
+    resource = client.post(
         "/resources",
         json={"user_id": setup["consultant"].id, "internal_cost_per_hour": "50", "billing_rate_per_hour": "100"},
         headers=admin_headers,
-    )
+    ).json()
+    # Apontar numa tarefa exige o recurso alocado na tarefa ou no projeto.
+    client.post(f"/projects/{project_id}/resources", json={"resource_id": resource["id"]}, headers=admin_headers)
     consultant_headers = auth_headers(client, setup["consultant"].email)
 
     rejected = client.post(
@@ -2386,8 +2397,9 @@ def test_timesheet_transit_has_its_own_bucket_in_financials_by_task_type(client,
     )
     assert created.status_code == 201
 
-    report = client.get(f"/reports/project/{project_id}", headers=admin_headers).json()
-    by_type = report["financials_by_task_type"]
+    report_response = client.get(f"/projects/{project_id}/report", headers=admin_headers)
+    assert report_response.status_code == 200
+    by_type = report_response.json()["financials_by_task_type"]
     assert "TRASLADO" in by_type
     assert float(by_type["TRASLADO"]["hours"]) == 2.0
 
@@ -2880,6 +2892,10 @@ def test_schedule_blocks_when_resource_level_below_task_min_level(client, setup)
     )
     assert patched.status_code == 422
     assert "60" in patched.json()["detail"]
+
+    # Lista vazia sempre passa (nada pra validar) e limpa as tarefas do bloco.
+    cleared = client.patch(f"/resource-schedules/{allowed.json()['id']}", json={"task_ids": []}, headers=admin_headers)
+    assert cleared.status_code == 200
     assert cleared.json()["tasks"] == []
 
     # Trocar o projeto do agendamento sem informar task_ids limpa as tarefas
@@ -2911,6 +2927,8 @@ def test_hours_breakdown_report_aggregates_project_transit_and_absence_hours(cli
     # apontamento válido — precisa de uma tarefa de verdade pra gerar
     # project_hours (ver _resolve_task_and_project, routers/timesheets.py).
     task = client.post(f"/projects/{project_id}/tasks", json={"name": "Entrega", "wbs_code": "40"}, headers=admin_headers).json()
+    # Apontar numa tarefa exige o recurso alocado na tarefa ou no projeto.
+    client.post(f"/projects/{project_id}/resources", json={"resource_id": resource["id"]}, headers=admin_headers)
     consultant_headers = auth_headers(client, setup["consultant"].email)
 
     # 2h de projeto (na tarefa).
@@ -3011,6 +3029,8 @@ def test_rework_hours_report_splits_normal_and_rework_by_reason(client, setup):
         headers=admin_headers,
     ).json()
     task = client.post(f"/projects/{project_id}/tasks", json={"name": "Entrega", "wbs_code": "41"}, headers=admin_headers).json()
+    # Apontar numa tarefa exige o recurso alocado na tarefa ou no projeto.
+    client.post(f"/projects/{project_id}/resources", json={"resource_id": resource["id"]}, headers=admin_headers)
     consultant_headers = auth_headers(client, setup["consultant"].email)
 
     def post(day, start, end, **extra):
@@ -3171,6 +3191,8 @@ def test_project_margin_percentage_is_declared_and_hidden_from_external_roles(cl
             "management_hours": "10",
             "management_rate": "100",
             "margin_percentage": "35.5",
+            # A cor padrao ja e do project_a (ativo) — cor exclusiva.
+            "color": "#FF8700",
         },
         headers=admin_headers,
     )

@@ -116,6 +116,17 @@ def _resolve_schedule_tasks(db: Session, project_id: str, task_ids: list[str], u
     return tasks
 
 
+def _set_schedule_tasks(schedule: ResourceSchedule, tasks: list[Task]) -> None:
+    """Substitui a lista de tarefas do bloco sem recriar vinculos que ja
+    existem. Trocar a colecao por objetos novos faz o SQLAlchemy dar INSERT
+    do vinculo novo ANTES do DELETE do antigo; se a mesma tarefa continua na
+    lista, isso viola uq_schedule_task (schedule_id, task_id) e vira 409
+    ("registro duplicado"). Reaproveitar o vinculo existente evita o conflito:
+    so entram os realmente novos e so saem os removidos."""
+    existing = {link.task_id: link for link in schedule.schedule_tasks}
+    schedule.schedule_tasks = [existing.get(task.id) or ResourceScheduleTask(task_id=task.id) for task in tasks]
+
+
 @router.post("", response_model=ResourceScheduleRead, status_code=status.HTTP_201_CREATED)
 def create_schedule(
     data: ResourceScheduleCreate,
@@ -136,7 +147,7 @@ def create_schedule(
         raise HTTPException(status_code=409, detail=translate("Recurso já tem agendamento nesse horário", user.language))
     tasks = _resolve_schedule_tasks(db, data.project_id, data.task_ids, user, resource)
     schedule = ResourceSchedule(**data.model_dump(exclude={"task_ids"}))
-    schedule.schedule_tasks = [ResourceScheduleTask(task_id=task.id) for task in tasks]
+    _set_schedule_tasks(schedule, tasks)
     db.add(schedule)
     db.commit()
     db.refresh(schedule)
@@ -218,7 +229,7 @@ def update_schedule(
         # resource_id não é editável em ResourceScheduleUpdate — o recurso
         # pra checagem de nível é sempre o já vinculado ao agendamento.
         tasks = _resolve_schedule_tasks(db, project_id_for_tasks, task_ids, user, schedule.resource)
-        schedule.schedule_tasks = [ResourceScheduleTask(task_id=task.id) for task in tasks]
+        _set_schedule_tasks(schedule, tasks)
     elif "project_id" in changes and changes["project_id"] != schedule.project_id:
         # Projeto trocado sem informar task_ids explicitamente — as tarefas
         # vinculadas eram do projeto antigo e não fazem mais sentido aqui.
