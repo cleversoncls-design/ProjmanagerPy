@@ -2807,6 +2807,19 @@ def test_schedule_tasks_checklist(client, setup):
 
     cleared = client.patch(f"/resource-schedules/{created_body['id']}", json={"task_ids": []}, headers=admin_headers)
     assert cleared.status_code == 200
+    assert cleared.json()["tasks"] == []
+
+    # Trocar o projeto do agendamento sem informar task_ids limpa as tarefas
+    # vinculadas — elas eram do projeto antigo e não fazem mais sentido.
+    with_task = client.patch(
+        f"/resource-schedules/{created_body['id']}", json={"task_ids": [other_task["id"]]}, headers=admin_headers
+    )
+    assert with_task.status_code == 200
+    project_changed = client.patch(
+        f"/resource-schedules/{created_body['id']}", json={"project_id": project_b_id}, headers=admin_headers
+    )
+    assert project_changed.status_code == 200
+    assert project_changed.json()["tasks"] == []
 
 
 def test_schedule_blocks_when_resource_level_below_task_min_level(client, setup):
@@ -2892,23 +2905,6 @@ def test_schedule_blocks_when_resource_level_below_task_min_level(client, setup)
     )
     assert patched.status_code == 422
     assert "60" in patched.json()["detail"]
-
-    # Lista vazia sempre passa (nada pra validar) e limpa as tarefas do bloco.
-    cleared = client.patch(f"/resource-schedules/{allowed.json()['id']}", json={"task_ids": []}, headers=admin_headers)
-    assert cleared.status_code == 200
-    assert cleared.json()["tasks"] == []
-
-    # Trocar o projeto do agendamento sem informar task_ids limpa as tarefas
-    # vinculadas — elas eram do projeto antigo e não fazem mais sentido.
-    with_task = client.patch(
-        f"/resource-schedules/{created_body['id']}", json={"task_ids": [other_task["id"]]}, headers=admin_headers
-    )
-    assert with_task.status_code == 200
-    project_changed = client.patch(
-        f"/resource-schedules/{created_body['id']}", json={"project_id": project_b_id}, headers=admin_headers
-    )
-    assert project_changed.status_code == 200
-    assert project_changed.json()["tasks"] == []
 
 
 def test_hours_breakdown_report_aggregates_project_transit_and_absence_hours(client, setup):
