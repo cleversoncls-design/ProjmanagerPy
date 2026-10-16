@@ -836,13 +836,16 @@ function ProjectEditModal({ project, onClose, onSaved }) {
           <p className="mb-3 text-xs font-medium text-[var(--text-secondary)]">{t('Pacote vendido (horas × valor/hora)')}</p>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <FormField label={t('Horas de gestão')}>
-              <TextInput type="number" min="0" step="0.5" value={form.management_hours} onChange={updateField('management_hours')} />
+              {/* step="0.5" só aceitava múltiplos de meia hora (ex.: 141,9 era recusado com
+                  "valores válidos mais próximos: 141,5 e 142"). O backend guarda 2 casas
+                  (Numeric(10,2)), então step="0.01" — mesmo critério de Valor/h e Margem. */}
+              <TextInput type="number" min="0" step="0.01" value={form.management_hours} onChange={updateField('management_hours')} />
             </FormField>
             <FormField label={t('Valor/h gestão')}>
               <TextInput type="number" min="0" step="0.01" value={form.management_rate} onChange={updateField('management_rate')} />
             </FormField>
             <FormField label={t('Horas de consultoria')}>
-              <TextInput type="number" min="0" step="0.5" value={form.consulting_hours} onChange={updateField('consulting_hours')} />
+              <TextInput type="number" min="0" step="0.01" value={form.consulting_hours} onChange={updateField('consulting_hours')} />
             </FormField>
             <FormField label={t('Valor/h consultoria')}>
               <TextInput type="number" min="0" step="0.01" value={form.consulting_rate} onChange={updateField('consulting_rate')} />
@@ -2685,8 +2688,8 @@ function TaskFormModal({ projectId, task, allTasks, resources, resourceLabel, in
               <FormField label={t('Horas alocadas')}>
                 <TextInput
                   type="number"
-                  min="0.5"
-                  step="0.5"
+                  min="0.01"
+                  step="0.01"
                   value={assignForm.allocated_hours}
                   onChange={(event) => setAssignForm((prev) => ({ ...prev, allocated_hours: event.target.value }))}
                   className="w-28"
